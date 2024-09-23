@@ -33,4 +33,5 @@ To install OptiVest, follow these steps:
 
 To start using OptiVest, run the following command:
 ```sh
-python main.py
+go!
+```
