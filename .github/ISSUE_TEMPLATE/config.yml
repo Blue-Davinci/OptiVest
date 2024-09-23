@@ -1,0 +1,33 @@
+blank_issues_enabled: false
+contact_links:
+  - name: "ZenHub"
+    url: "https://zenhub.com"
+    about: "Track and manage your project in ZenHub."
+templates:
+  - title: "Bug Report"
+    about: "Report a bug or issue with the application."
+    labels: ["bug"]
+    body:
+      - type: markdown
+        attributes:
+          value: "### Description\nPlease provide a brief description of the bug.\n\n### Steps to Reproduce\n1. \n2. \n3. \n\n### Expected Behavior\nWhat should happen?\n\n### Actual Behavior\nWhat actually happens?\n\n### Screenshots\nIf applicable, add screenshots to help explain your problem."
+      - type: input
+        attributes:
+          label: "Environment"
+          description: "What environment are you experiencing this issue in? (e.g., development, production)"
+      - type: textarea
+        attributes:
+          label: "Additional Information"
+          description: "Add any other context about the problem here."
+
+  - title: "Feature Request"
+    about: "Suggest a new feature or enhancement for the application."
+    labels: ["feature request"]
+    body:
+      - type: markdown
+        attributes:
+          value: "### Overview\nProvide a brief description of the feature or enhancement.\n\n### Benefits\nHow would this feature improve the application?\n\n### Proposed Solution\nWhat is your proposed solution for this feature?"
+      - type: textarea
+        attributes:
+          label: "Additional Comments"
+          description: "Add any other details or context that would be helpful."
