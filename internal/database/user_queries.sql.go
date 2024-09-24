@@ -84,3 +84,117 @@ func (q *Queries) CreateNewUser(ctx context.Context, arg CreateNewUserParams) (C
 	)
 	return i, err
 }
+
+const getUserByEmail = `-- name: GetUserByEmail :one
+SELECT 
+    id,
+    first_name,
+    last_name,
+    email,
+    profile_avatar_url,
+    password_hash,
+    phone_number,
+    activated,
+    version,
+    created_at,
+    updated_at,
+    last_login,
+    profile_completed,
+    dob,
+    address,
+    country_code,
+    currency_code
+FROM users
+WHERE email = $1
+`
+
+func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
+	row := q.db.QueryRowContext(ctx, getUserByEmail, email)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.FirstName,
+		&i.LastName,
+		&i.Email,
+		&i.ProfileAvatarUrl,
+		&i.PasswordHash,
+		&i.PhoneNumber,
+		&i.Activated,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.LastLogin,
+		&i.ProfileCompleted,
+		&i.Dob,
+		&i.Address,
+		&i.CountryCode,
+		&i.CurrencyCode,
+	)
+	return i, err
+}
+
+const updateUser = `-- name: UpdateUser :one
+UPDATE users
+SET
+    first_name = $1,
+    last_name = $2,
+    email = $3,
+    profile_avatar_url = $4,
+    password_hash = $5,
+    phone_number = $6,
+    activated = $7,
+    version = version + 1,
+    updated_at = NOW(),
+    last_login = $8,
+    profile_completed = $9,
+    dob = $10,
+    address = $11,
+    country_code = $12,
+    currency_code = $13
+WHERE id = $14
+RETURNING updated_at, version
+`
+
+type UpdateUserParams struct {
+	FirstName        string
+	LastName         string
+	Email            string
+	ProfileAvatarUrl string
+	PasswordHash     []byte
+	PhoneNumber      string
+	Activated        sql.NullBool
+	LastLogin        time.Time
+	ProfileCompleted sql.NullBool
+	Dob              time.Time
+	Address          sql.NullString
+	CountryCode      sql.NullString
+	CurrencyCode     sql.NullString
+	ID               int64
+}
+
+type UpdateUserRow struct {
+	UpdatedAt time.Time
+	Version   sql.NullInt32
+}
+
+func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (UpdateUserRow, error) {
+	row := q.db.QueryRowContext(ctx, updateUser,
+		arg.FirstName,
+		arg.LastName,
+		arg.Email,
+		arg.ProfileAvatarUrl,
+		arg.PasswordHash,
+		arg.PhoneNumber,
+		arg.Activated,
+		arg.LastLogin,
+		arg.ProfileCompleted,
+		arg.Dob,
+		arg.Address,
+		arg.CountryCode,
+		arg.CurrencyCode,
+		arg.ID,
+	)
+	var i UpdateUserRow
+	err := row.Scan(&i.UpdatedAt, &i.Version)
+	return i, err
+}

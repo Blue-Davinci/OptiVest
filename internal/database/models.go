@@ -9,11 +9,19 @@ import (
 	"time"
 )
 
+type Token struct {
+	Hash   []byte
+	UserID int64
+	Expiry time.Time
+	Scope  string
+}
+
 type User struct {
 	ID               int64
 	FirstName        string
 	LastName         string
 	Email            string
+	ProfileAvatarUrl string
 	PasswordHash     []byte
 	PhoneNumber      string
 	Activated        sql.NullBool
