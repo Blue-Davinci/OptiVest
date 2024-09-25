@@ -6,8 +6,53 @@ package database
 
 import (
 	"database/sql"
+	"database/sql/driver"
+	"fmt"
 	"time"
 )
+
+type MfaStatusType string
+
+const (
+	MfaStatusTypePending  MfaStatusType = "pending"
+	MfaStatusTypeAccepted MfaStatusType = "accepted"
+	MfaStatusTypeRejected MfaStatusType = "rejected"
+)
+
+func (e *MfaStatusType) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = MfaStatusType(s)
+	case string:
+		*e = MfaStatusType(s)
+	default:
+		return fmt.Errorf("unsupported scan type for MfaStatusType: %T", src)
+	}
+	return nil
+}
+
+type NullMfaStatusType struct {
+	MfaStatusType MfaStatusType
+	Valid         bool // Valid is true if MfaStatusType is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullMfaStatusType) Scan(value interface{}) error {
+	if value == nil {
+		ns.MfaStatusType, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.MfaStatusType.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullMfaStatusType) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.MfaStatusType), nil
+}
 
 type Token struct {
 	Hash   []byte
@@ -22,16 +67,21 @@ type User struct {
 	LastName         string
 	Email            string
 	ProfileAvatarUrl string
-	PasswordHash     []byte
+	Password         []byte
+	UserRole         string
 	PhoneNumber      string
-	Activated        sql.NullBool
-	Version          sql.NullInt32
+	Activated        bool
+	Version          int32
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
 	LastLogin        time.Time
-	ProfileCompleted sql.NullBool
+	ProfileCompleted bool
 	Dob              time.Time
 	Address          sql.NullString
 	CountryCode      sql.NullString
 	CurrencyCode     sql.NullString
+	MfaEnabled       bool
+	MfaSecret        sql.NullString
+	MfaStatus        NullMfaStatusType
+	MfaLastChecked   sql.NullTime
 }

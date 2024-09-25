@@ -1,30 +1,20 @@
 -- name: CreateNewUser :one
 INSERT INTO users (
-    first_name, 
-    last_name, 
-    email, 
-    password_hash, 
-    phone_number, 
-    activated, 
-    profile_completed, 
-    dob, 
-    address, 
-    country_code, 
+    first_name,
+    last_name,
+    email,
+    profile_avatar_url,
+    password,
+    phone_number,
+    profile_completed,
+    dob,
+    address,
+    country_code,
     currency_code
 ) VALUES (
-    $1,  -- First name
-    $2,  -- Last name
-    $3,  -- Email
-    $4,  -- Password hash
-    $5,  -- Phone number
-    $6,  -- Activated
-    $7,  -- Profile completed
-    $8,  -- Date of birth (dob)
-    $9, -- Address
-    $10, -- Country code
-    $11  -- Currency code
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
 )
-RETURNING id, created_at, updated_at, last_login version;
+RETURNING id, created_at, updated_at, last_login, version, mfa_enabled, mfa_secret, mfa_status, mfa_last_checked;
 
 -- name: UpdateUser :one
 UPDATE users
@@ -33,18 +23,23 @@ SET
     last_name = $2,
     email = $3,
     profile_avatar_url = $4,
-    password_hash = $5,
-    phone_number = $6,
-    activated = $7,
+    password = $5,
+    user_role = $6,
+    phone_number = $7,
+    activated = $8,
     version = version + 1,
     updated_at = NOW(),
-    last_login = $8,
-    profile_completed = $9,
-    dob = $10,
-    address = $11,
-    country_code = $12,
-    currency_code = $13
-WHERE id = $14
+    last_login = $9,
+    profile_completed = $10,
+    dob = $11,
+    address = $12,
+    country_code = $13,
+    currency_code = $14,
+    mfa_enabled = $15,
+    mfa_secret = $16,
+    mfa_status = $17,
+    mfa_last_checked = $18
+WHERE id = $19 AND version = $20
 RETURNING updated_at, version;
 
 -- name: GetUserByEmail :one
@@ -54,7 +49,8 @@ SELECT
     last_name,
     email,
     profile_avatar_url,
-    password_hash,
+    password,
+    user_role,
     phone_number,
     activated,
     version,
@@ -65,6 +61,10 @@ SELECT
     dob,
     address,
     country_code,
-    currency_code
+    currency_code,
+    mfa_enabled,
+    mfa_secret,
+    mfa_status,
+    mfa_last_checked
 FROM users
 WHERE email = $1;

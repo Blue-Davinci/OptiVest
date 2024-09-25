@@ -14,6 +14,8 @@ SELECT
     users.last_name,
     users.email,
     users.profile_avatar_url,
+    users.password,
+    users.user_role,
     users.phone_number,
     users.activated,
     users.version,
@@ -24,7 +26,11 @@ SELECT
     users.dob,
     users.address,
     users.country_code,
-    users.currency_code
+    users.currency_code,
+    users.mfa_enabled,
+    users.mfa_secret,
+    users.mfa_status,
+    users.mfa_last_checked
 FROM users
 INNER JOIN tokens
 ON users.id = tokens.user_id

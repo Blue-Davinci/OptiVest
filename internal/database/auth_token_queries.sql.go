@@ -58,6 +58,7 @@ SELECT
     users.last_name,
     users.email,
     users.profile_avatar_url,
+    users.password,
     users.phone_number,
     users.activated,
     users.version,
@@ -68,7 +69,11 @@ SELECT
     users.dob,
     users.address,
     users.country_code,
-    users.currency_code
+    users.currency_code,
+    users.mfa_enabled,
+    users.mfa_secret,
+    users.mfa_status,
+    users.mfa_last_checked
 FROM users
 INNER JOIN tokens
 ON users.id = tokens.user_id
@@ -89,17 +94,22 @@ type GetForTokenRow struct {
 	LastName         string
 	Email            string
 	ProfileAvatarUrl string
+	Password         []byte
 	PhoneNumber      string
-	Activated        sql.NullBool
-	Version          sql.NullInt32
+	Activated        bool
+	Version          int32
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
 	LastLogin        time.Time
-	ProfileCompleted sql.NullBool
+	ProfileCompleted bool
 	Dob              time.Time
 	Address          sql.NullString
 	CountryCode      sql.NullString
 	CurrencyCode     sql.NullString
+	MfaEnabled       bool
+	MfaSecret        sql.NullString
+	MfaStatus        NullMfaStatusType
+	MfaLastChecked   sql.NullTime
 }
 
 func (q *Queries) GetForToken(ctx context.Context, arg GetForTokenParams) (GetForTokenRow, error) {
@@ -111,6 +121,7 @@ func (q *Queries) GetForToken(ctx context.Context, arg GetForTokenParams) (GetFo
 		&i.LastName,
 		&i.Email,
 		&i.ProfileAvatarUrl,
+		&i.Password,
 		&i.PhoneNumber,
 		&i.Activated,
 		&i.Version,
@@ -122,6 +133,10 @@ func (q *Queries) GetForToken(ctx context.Context, arg GetForTokenParams) (GetFo
 		&i.Address,
 		&i.CountryCode,
 		&i.CurrencyCode,
+		&i.MfaEnabled,
+		&i.MfaSecret,
+		&i.MfaStatus,
+		&i.MfaLastChecked,
 	)
 	return i, err
 }

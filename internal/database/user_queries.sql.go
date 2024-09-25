@@ -13,41 +13,31 @@ import (
 
 const createNewUser = `-- name: CreateNewUser :one
 INSERT INTO users (
-    first_name, 
-    last_name, 
-    email, 
-    password_hash, 
-    phone_number, 
-    activated, 
-    profile_completed, 
-    dob, 
-    address, 
-    country_code, 
+    first_name,
+    last_name,
+    email,
+    profile_avatar_url,
+    password,
+    phone_number,
+    profile_completed,
+    dob,
+    address,
+    country_code,
     currency_code
 ) VALUES (
-    $1,  -- First name
-    $2,  -- Last name
-    $3,  -- Email
-    $4,  -- Password hash
-    $5,  -- Phone number
-    $6,  -- Activated
-    $7,  -- Profile completed
-    $8,  -- Date of birth (dob)
-    $9, -- Address
-    $10, -- Country code
-    $11  -- Currency code
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
 )
-RETURNING id, created_at, updated_at, last_login version
+RETURNING id, created_at, updated_at, last_login, version, mfa_enabled, mfa_secret, mfa_status, mfa_last_checked
 `
 
 type CreateNewUserParams struct {
 	FirstName        string
 	LastName         string
 	Email            string
-	PasswordHash     []byte
+	ProfileAvatarUrl string
+	Password         []byte
 	PhoneNumber      string
-	Activated        sql.NullBool
-	ProfileCompleted sql.NullBool
+	ProfileCompleted bool
 	Dob              time.Time
 	Address          sql.NullString
 	CountryCode      sql.NullString
@@ -55,10 +45,15 @@ type CreateNewUserParams struct {
 }
 
 type CreateNewUserRow struct {
-	ID        int64
-	CreatedAt time.Time
-	UpdatedAt time.Time
-	Version   time.Time
+	ID             int64
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+	LastLogin      time.Time
+	Version        int32
+	MfaEnabled     bool
+	MfaSecret      sql.NullString
+	MfaStatus      NullMfaStatusType
+	MfaLastChecked sql.NullTime
 }
 
 func (q *Queries) CreateNewUser(ctx context.Context, arg CreateNewUserParams) (CreateNewUserRow, error) {
@@ -66,9 +61,9 @@ func (q *Queries) CreateNewUser(ctx context.Context, arg CreateNewUserParams) (C
 		arg.FirstName,
 		arg.LastName,
 		arg.Email,
-		arg.PasswordHash,
+		arg.ProfileAvatarUrl,
+		arg.Password,
 		arg.PhoneNumber,
-		arg.Activated,
 		arg.ProfileCompleted,
 		arg.Dob,
 		arg.Address,
@@ -80,7 +75,12 @@ func (q *Queries) CreateNewUser(ctx context.Context, arg CreateNewUserParams) (C
 		&i.ID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LastLogin,
 		&i.Version,
+		&i.MfaEnabled,
+		&i.MfaSecret,
+		&i.MfaStatus,
+		&i.MfaLastChecked,
 	)
 	return i, err
 }
@@ -92,7 +92,8 @@ SELECT
     last_name,
     email,
     profile_avatar_url,
-    password_hash,
+    password,
+    user_role,
     phone_number,
     activated,
     version,
@@ -103,7 +104,11 @@ SELECT
     dob,
     address,
     country_code,
-    currency_code
+    currency_code,
+    mfa_enabled,
+    mfa_secret,
+    mfa_status,
+    mfa_last_checked
 FROM users
 WHERE email = $1
 `
@@ -117,7 +122,8 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.LastName,
 		&i.Email,
 		&i.ProfileAvatarUrl,
-		&i.PasswordHash,
+		&i.Password,
+		&i.UserRole,
 		&i.PhoneNumber,
 		&i.Activated,
 		&i.Version,
@@ -129,6 +135,10 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.Address,
 		&i.CountryCode,
 		&i.CurrencyCode,
+		&i.MfaEnabled,
+		&i.MfaSecret,
+		&i.MfaStatus,
+		&i.MfaLastChecked,
 	)
 	return i, err
 }
@@ -140,18 +150,23 @@ SET
     last_name = $2,
     email = $3,
     profile_avatar_url = $4,
-    password_hash = $5,
-    phone_number = $6,
-    activated = $7,
+    password = $5,
+    user_role = $6,
+    phone_number = $7,
+    activated = $8,
     version = version + 1,
     updated_at = NOW(),
-    last_login = $8,
-    profile_completed = $9,
-    dob = $10,
-    address = $11,
-    country_code = $12,
-    currency_code = $13
-WHERE id = $14
+    last_login = $9,
+    profile_completed = $10,
+    dob = $11,
+    address = $12,
+    country_code = $13,
+    currency_code = $14,
+    mfa_enabled = $15,
+    mfa_secret = $16,
+    mfa_status = $17,
+    mfa_last_checked = $18
+WHERE id = $19 AND version = $20
 RETURNING updated_at, version
 `
 
@@ -160,21 +175,27 @@ type UpdateUserParams struct {
 	LastName         string
 	Email            string
 	ProfileAvatarUrl string
-	PasswordHash     []byte
+	Password         []byte
+	UserRole         string
 	PhoneNumber      string
-	Activated        sql.NullBool
+	Activated        bool
 	LastLogin        time.Time
-	ProfileCompleted sql.NullBool
+	ProfileCompleted bool
 	Dob              time.Time
 	Address          sql.NullString
 	CountryCode      sql.NullString
 	CurrencyCode     sql.NullString
+	MfaEnabled       bool
+	MfaSecret        sql.NullString
+	MfaStatus        NullMfaStatusType
+	MfaLastChecked   sql.NullTime
 	ID               int64
+	Version          int32
 }
 
 type UpdateUserRow struct {
 	UpdatedAt time.Time
-	Version   sql.NullInt32
+	Version   int32
 }
 
 func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (UpdateUserRow, error) {
@@ -183,7 +204,8 @@ func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (UpdateU
 		arg.LastName,
 		arg.Email,
 		arg.ProfileAvatarUrl,
-		arg.PasswordHash,
+		arg.Password,
+		arg.UserRole,
 		arg.PhoneNumber,
 		arg.Activated,
 		arg.LastLogin,
@@ -192,7 +214,12 @@ func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (UpdateU
 		arg.Address,
 		arg.CountryCode,
 		arg.CurrencyCode,
+		arg.MfaEnabled,
+		arg.MfaSecret,
+		arg.MfaStatus,
+		arg.MfaLastChecked,
 		arg.ID,
+		arg.Version,
 	)
 	var i UpdateUserRow
 	err := row.Scan(&i.UpdatedAt, &i.Version)

@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Welcome to OptiVest!</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f5f5f5;
+            margin: 0;
+            padding: 0;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background: #ffffff;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        .header {
+            background: #111211;
+            padding: 20px;
+            text-align: center;
+            color: #ffffff;
+        }
+        .header img {
+            max-width: 200px; /* Set a maximum width for the logo */
+            transition: transform 0.3s ease; /* Smooth transition for hover effect */
+        }
+        .header img:hover {
+            transform: scale(1.05); /* Subtle zoom effect on hover */
+        }
+        .content {
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .content h1 {
+            font-size: 22px;
+            margin-bottom: 10px;
+            color: #4CAF50;
+            font-weight: normal;
+            text-align: center;
+        }
+        .footer {
+            background: #f1f1f1;
+            text-align: center;
+            padding: 15px;
+            position: relative;
+        }
+        .footer a {
+            margin: 0 10px;
+        }
+        .footer img {
+            width: 24px;
+            height: 24px;
+        }
+        .btn {
+            display: inline-block;
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            color: white;
+            border-radius: 5px;
+            text-decoration: none;
+            margin-top: 15px;
+            transition: background-color 0.3s ease, transform 0.3s ease;
+        }
+        .btn:hover {
+            background-color: #45a049; /* Darker green on hover */
+            transform: translateY(-2px); /* Slight lift effect */
+        }
+        .btn:active {
+            background-color: #3e8e41; /* Even darker green when clicked */
+            transform: translateY(0); /* Reset lift effect */
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <img src="https://i.ibb.co/qMDqr7K/optivest-high-resolution-logo-transparent.png" alt="OptiVest Logo">
+        </div>
+        <div class="content">
+            <h1>Welcome to OptiVest, {{.firstName}} {{.lastName}}!</h1>
+            <p>Hello, {{.firstName}}!</p>
+            <p>We are thrilled to have you on board. Your account has been successfully created!</p>
+            <p>Your user ID: {{.userID}}</p>
+            <p>To activate your account, please click the button below:</p>
+            <a href="{{.activationURL}}" class="btn">Activate Account</a>
+            <p>
+                Please note that this is a <strong>one-time</strong> use token and it
+                will expire in <strong>3 days.</strong>
+            </p>
+            <p>If you have any questions, feel free to reach out to our support team.</p>
+            <p>Best regards,<br>The OptiVest Team</p>
+        </div>
+        <div class="footer">
+            <p>Follow us:</p>
+            <a href="https://twitter.com/OptiVest"><img src="https://img.icons8.com/ios-filled/50/000000/twitter.png" alt="Twitter"></a>
+            <a href="https://facebook.com/OptiVest"><img src="https://img.icons8.com/ios-filled/50/000000/facebook-new.png" alt="Facebook"></a>
+            <a href="https://instagram.com/OptiVest"><img src="https://img.icons8.com/ios-filled/50/000000/instagram-new.png" alt="Instagram"></a>
+        </div>
+    </div>
+</body>
+</html>
