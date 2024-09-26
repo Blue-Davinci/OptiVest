@@ -7,7 +7,6 @@ package database
 
 import (
 	"context"
-	"database/sql"
 	"time"
 )
 
@@ -59,6 +58,7 @@ SELECT
     users.email,
     users.profile_avatar_url,
     users.password,
+    users.role_level,
     users.phone_number,
     users.activated,
     users.version,
@@ -88,33 +88,9 @@ type GetForTokenParams struct {
 	Expiry time.Time
 }
 
-type GetForTokenRow struct {
-	ID               int64
-	FirstName        string
-	LastName         string
-	Email            string
-	ProfileAvatarUrl string
-	Password         []byte
-	PhoneNumber      string
-	Activated        bool
-	Version          int32
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
-	LastLogin        time.Time
-	ProfileCompleted bool
-	Dob              time.Time
-	Address          sql.NullString
-	CountryCode      sql.NullString
-	CurrencyCode     sql.NullString
-	MfaEnabled       bool
-	MfaSecret        sql.NullString
-	MfaStatus        NullMfaStatusType
-	MfaLastChecked   sql.NullTime
-}
-
-func (q *Queries) GetForToken(ctx context.Context, arg GetForTokenParams) (GetForTokenRow, error) {
+func (q *Queries) GetForToken(ctx context.Context, arg GetForTokenParams) (User, error) {
 	row := q.db.QueryRowContext(ctx, getForToken, arg.Hash, arg.Scope, arg.Expiry)
-	var i GetForTokenRow
+	var i User
 	err := row.Scan(
 		&i.ID,
 		&i.FirstName,
@@ -122,6 +98,7 @@ func (q *Queries) GetForToken(ctx context.Context, arg GetForTokenParams) (GetFo
 		&i.Email,
 		&i.ProfileAvatarUrl,
 		&i.Password,
+		&i.RoleLevel,
 		&i.PhoneNumber,
 		&i.Activated,
 		&i.Version,

@@ -14,6 +14,7 @@ import (
 	"github.com/Blue-Davinci/OptiVest/internal/validator"
 	"github.com/felixge/httpsnoop"
 	"github.com/tomasen/realip"
+	"go.uber.org/zap"
 	"golang.org/x/time/rate"
 )
 
@@ -80,6 +81,7 @@ func (app *application) authenticate(next http.Handler) http.Handler {
 			app.invalidAuthenticationTokenResponse(w, r)
 			return
 		}
+		app.logger.Info("Retrieved Token: ", zap.String("Token", token))
 		// Retrieve the details of the user associated with the authentication token,
 		// again calling the invalidAuthenticationTokenResponse() helper if no
 		// matching record was found. IMPORTANT: Notice that we are using
@@ -104,7 +106,7 @@ func (app *application) authenticate(next http.Handler) http.Handler {
 
 // Create a new requireAuthenticatedUser() middleware to check that a user is not
 // anonymous.
-func (app *application) requireAuthenticatedUser(next http.HandlerFunc) http.HandlerFunc {
+func (app *application) requireAuthenticatedUser(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Use the contextGetUser() helper to retrieve the user
 		// information from the request context.
@@ -120,9 +122,9 @@ func (app *application) requireAuthenticatedUser(next http.HandlerFunc) http.Han
 }
 
 // Checks that a user is both authenticated and activated.
-func (app *application) requireActivatedUser(next http.HandlerFunc) http.HandlerFunc {
+func (app *application) requireActivatedUser(next http.Handler) http.Handler {
 	// Rather than returning this http.HandlerFunc we assign it to the variable fn.
-	fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user := app.contextGetUser(r)
 		// If the user is not activated, use the inactiveAccountResponse() helper to
 		// inform them that they need to activate their account.
@@ -132,8 +134,6 @@ func (app *application) requireActivatedUser(next http.HandlerFunc) http.Handler
 		}
 		next.ServeHTTP(w, r)
 	})
-	// Wrap fn with the requireAuthenticatedUser() middleware before returning it.
-	return app.requireAuthenticatedUser(fn)
 }
 
 // The rateLimit() middleware will be used to rate limit the number of requests that a

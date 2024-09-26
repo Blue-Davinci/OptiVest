@@ -65,6 +65,10 @@ func (app *application) readJSON(w http.ResponseWriter, r *http.Request, dst any
 	return nil
 }
 
+func (app *application) returnFormattedRedisKeys(key string, userID int64) string {
+	return fmt.Sprintf("%s:%d", key, userID)
+}
+
 func (app *application) jsonReadAndHandleError(err error) error {
 	if err != nil {
 		// Vars to carry our errors

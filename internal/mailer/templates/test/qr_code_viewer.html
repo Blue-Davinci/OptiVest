@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MFA QR Code</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+        }
+        #qrcode {
+            margin-top: 20px;
+        }
+        #input-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        #otpAuthURL {
+            width: 300px;
+            padding: 10px;
+            margin-bottom: 10px;
+        }
+        #generate-btn {
+            padding: 10px 20px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <h1>Scan this QR code with your TOTP app</h1>
+    <div id="input-container">
+        <input type="text" id="otpAuthURL" placeholder="Enter OTP Auth URL" value="otpauth://totp/OptiVest:mrfbi@gmail.com?algorithm=SHA1&digits=6&issuer=OptiVest&period=30&secret=LPD5J7IXS2MTYW34ER4GZEGRNTJTQDKH">
+        <button id="generate-btn">Generate QR Code</button>
+    </div>
+    <div id="qrcode"></div>
+    <script>
+        // Function to generate QR code
+        function generateQRCode() {
+            var otpAuthURL = document.getElementById("otpAuthURL").value;
+            var qrcodeContainer = document.getElementById("qrcode");
+            qrcodeContainer.innerHTML = ""; // Clear previous QR code
+            new QRCode(qrcodeContainer, {
+                text: otpAuthURL,
+                width: 256,
+                height: 256
+            });
+        }
+
+        // Generate initial QR code
+        generateQRCode();
+
+        // Add event listener to the button
+        document.getElementById("generate-btn").addEventListener("click", generateQRCode);
+    </script>
+</body>
+</html>

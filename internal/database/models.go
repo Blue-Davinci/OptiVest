@@ -68,7 +68,7 @@ type User struct {
 	Email            string
 	ProfileAvatarUrl string
 	Password         []byte
-	UserRole         string
+	RoleLevel        string
 	PhoneNumber      string
 	Activated        bool
 	Version          int32

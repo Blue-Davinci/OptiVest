@@ -21,23 +21,39 @@ func (app *application) routes() http.Handler {
 	//Use alice to make a global middleware chain.
 	globalMiddleware := alice.New(app.metrics, app.recoverPanic, app.rateLimit, app.authenticate).Then
 
+	// dynamic protected middleware
+	dynamicMiddleware := alice.New(app.requireAuthenticatedUser, app.requireActivatedUser)
+
 	// Apply the global middleware to the router
 	router.Use(globalMiddleware)
 
 	// Make our categorized routes
 	v1Router := chi.NewRouter()
 
-	v1Router.Mount("/users", app.userRoutes())
+	v1Router.Mount("/users", app.userRoutes(&dynamicMiddleware))
+	v1Router.Mount("/api", app.apiKeyRoutes())
 
 	// Moount the v1Router to the main base router
 	router.Mount("/v1", v1Router)
 	return router
 }
 
-func (app *application) userRoutes() chi.Router {
+func (app *application) userRoutes(dynamicMiddleware *alice.Chain) chi.Router {
 	userRoutes := chi.NewRouter()
 	userRoutes.Post("/", app.registerUserHandler)
 	// /activation : for activating accounts
 	userRoutes.Put("/activated", app.activateUserHandler)
+	userRoutes.With(dynamicMiddleware.Then).Patch("/mfa", app.setupMFAHandler)
+	userRoutes.With(dynamicMiddleware.Then).Patch("/mfa/verify", app.verifiy2FASetupHandler)
 	return userRoutes
+}
+
+func (app *application) apiKeyRoutes() chi.Router {
+	apiKeyRoutes := chi.NewRouter()
+	// initial request for token
+	apiKeyRoutes.Post("/authentication", app.createAuthenticationApiKeyHandler)
+	apiKeyRoutes.Patch("/authentication/verify", app.validateMFALoginAttemptHandler)
+	// /password-reset : for sending keys for resetting passwords
+	apiKeyRoutes.Post("/password-reset", app.createPasswordResetTokenHandler)
+	return apiKeyRoutes
 }

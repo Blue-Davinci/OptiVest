@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/Blue-Davinci/OptiVest/internal/database"
@@ -14,13 +13,23 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+// constants for general module usage
 const (
 	DefaultUserDBContextTimeout = 5 * time.Second
+	DefaulRedistUserMFATTLS     = 5 * time.Minute
 )
+
+// constants for the MFA status enumeration
 const (
 	MFAEnumerationAccepted = database.MfaStatusTypeAccepted
 	MFAEnumerationPending  = database.MfaStatusTypePending
 	MFAEnumerationRejected = database.MfaStatusTypeRejected
+)
+
+// constants for tags to be used during REDIS operations
+const (
+	RedisMFASetupPendingPrefix = "mfa_setup_pending"
+	RedisMFALoginPendingPrefix = "mfa_login_pending"
 )
 
 type UserModel struct {
@@ -35,6 +44,7 @@ type User struct {
 	Email            string                 `json:"email"`              // Case-insensitive email, must be unique
 	ProfileAvatarURL string                 `json:"profile_avatar_url"` // URL to user's profile picture
 	Password         password               `json:"-"`                  // Securely stored password hash (bcrypt)
+	UserRole         string                 `json:"user_role"`          // User Role
 	PhoneNumber      string                 `json:"phone_number"`       // Phone number for multi-factor authentication (MFA)
 	Activated        bool                   `json:"activated"`          // Account activation status (email confirmation, etc.)
 	Version          int32                  `json:"version"`            // Record versioning for optimistic locking
@@ -59,7 +69,7 @@ var (
 )
 
 // Define Default Image:
-const DefaultImage = "https://res.cloudinary.com/djg9a13ka/image/upload/v1723392222/avatars/avatar_1723392218316.png"
+const DefaultProfileImage = "https://res.cloudinary.com/djg9a13ka/image/upload/v1721808901/avatars/avatar_1721808896310.png"
 
 // Declare a new AnonymousUser variable.
 var AnonymousUser = &User{}
@@ -157,6 +167,9 @@ func ValidateUser(v *validator.Validator, user *User) {
 	}
 }
 
+// CreateNewUser() creates a new user in the database. The function takes a pointer to a User struct
+// and an encryption key as input. We decrypt the key, use it to encrypt necessary items before we save
+// it back to the DB.
 func (m UserModel) CreateNewUser(user *User, encryption_key string) error {
 	ctx, cancel := contextGenerator(context.Background(), DefaultUserDBContextTimeout)
 	defer cancel()
@@ -175,9 +188,10 @@ func (m UserModel) CreateNewUser(user *User, encryption_key string) error {
 		FirstName:        user.FirstName,
 		LastName:         user.LastName,
 		Email:            user.Email,
+		ProfileAvatarUrl: user.ProfileAvatarURL,
 		Password:         user.Password.hash,
 		PhoneNumber:      encryptedPhoneNumber,
-		ProfileCompleted: user.Activated,
+		ProfileCompleted: user.ProfileCompleted,
 		Dob:              user.DOB,
 		Address:          sql.NullString{String: user.Address, Valid: user.Address != ""},
 		CountryCode:      sql.NullString{String: user.CountryCode, Valid: user.CountryCode != ""},
@@ -195,6 +209,7 @@ func (m UserModel) CreateNewUser(user *User, encryption_key string) error {
 	// fill in retruned data
 	user.ID = createdUser.ID
 	user.CreatedAt = createdUser.CreatedAt
+	user.UserRole = createdUser.RoleLevel
 	user.UpdatedAt = createdUser.UpdatedAt
 	user.Version = createdUser.Version
 	user.MFAEnabled = createdUser.MfaEnabled
@@ -299,6 +314,7 @@ func (m UserModel) UpdateUser(user *User, encryption_key string) error {
 		Email:            user.Email,
 		ProfileAvatarUrl: user.ProfileAvatarURL,
 		Password:         user.Password.hash,
+		RoleLevel:        user.UserRole,
 		PhoneNumber:      encryptedPhoneNumber,
 		Activated:        user.Activated,
 		LastLogin:        user.LastLogin,
@@ -343,37 +359,6 @@ func (m UserModel) UpdateUser(user *User, encryption_key string) error {
 func populateUser(userRow interface{}, decryptedNumber string) *User {
 	switch user := userRow.(type) {
 	// Case for database.GetForTokenRow: Populates a User object with fields specific to the GetForTokenRow
-	case database.GetForTokenRow:
-		// Create a new password struct instance for the user.
-		userPassword := password{
-			hash: user.Password,
-		}
-		fmt.Println("User ID and Activation: ", user.ID, user.Activated)
-		tokenUser := &User{
-			ID:               user.ID,
-			FirstName:        user.FirstName,
-			LastName:         user.LastName,
-			Email:            user.Email,
-			ProfileAvatarURL: user.ProfileAvatarUrl,
-			Password:         userPassword,
-			PhoneNumber:      decryptedNumber,
-			Activated:        user.Activated,
-			Version:          user.Version,
-			CreatedAt:        user.CreatedAt,
-			UpdatedAt:        user.UpdatedAt,
-			LastLogin:        user.LastLogin,
-			ProfileCompleted: user.ProfileCompleted,
-			DOB:              user.Dob,
-			Address:          user.Address.String,
-			CountryCode:      user.CountryCode.String,
-			CurrencyCode:     user.CurrencyCode.String,
-			MFAEnabled:       user.MfaEnabled,
-			MFASecret:        user.MfaSecret.String,
-			MFAStatus:        user.MfaStatus.MfaStatusType,
-			MFALastChecked:   &user.MfaLastChecked.Time,
-		}
-		return tokenUser
-
 	// Case for database.User: Populates a User object with fields specific to the User type.
 	case database.User:
 		// Create a new password struct instance for the user.
@@ -387,6 +372,7 @@ func populateUser(userRow interface{}, decryptedNumber string) *User {
 			Email:            user.Email,
 			ProfileAvatarURL: user.ProfileAvatarUrl,
 			Password:         userPassword,
+			UserRole:         user.RoleLevel,
 			PhoneNumber:      decryptedNumber,
 			Activated:        user.Activated,
 			Version:          user.Version,

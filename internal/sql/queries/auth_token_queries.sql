@@ -15,7 +15,7 @@ SELECT
     users.email,
     users.profile_avatar_url,
     users.password,
-    users.user_role,
+    users.role_level,
     users.phone_number,
     users.activated,
     users.version,

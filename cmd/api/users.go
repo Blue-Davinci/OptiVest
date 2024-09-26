@@ -39,10 +39,11 @@ func (app *application) registerUserHandler(w http.ResponseWriter, r *http.Reque
 		Address:          input.Address,
 		CountryCode:      input.CountryCode,
 		CurrencyCode:     input.CurrencyCode,
-		ProfileAvatarURL: data.DefaultImage, // Set the default image for the user
+		ProfileAvatarURL: data.DefaultProfileImage, // Set the default image for the user
 	}
 	// Fill in the profile completed field
 	user.ProfileCompleted = app.isProfileComplete(user)
+	app.logger.Info("Profile Completed: ", zap.Bool("ProfileCompleted", user.ProfileCompleted))
 	// lets set the password for the user by using the Set method from the password struct
 	err = user.Password.Set(input.Password)
 	if err != nil {
@@ -176,7 +177,12 @@ func (app *application) activateUserHandler(w http.ResponseWriter, r *http.Reque
 		}
 	})
 	// Send the updated user details to the client in a JSON response.
-	err = app.writeJSON(w, http.StatusOK, envelope{"user": user}, nil)
+	err = app.writeJSON(w, http.StatusOK, envelope{
+		"first_name": user.FirstName,
+		"last_name":  user.LastName,
+		"email":      user.Email,
+		"activated":  user.Activated,
+	}, nil)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 	}

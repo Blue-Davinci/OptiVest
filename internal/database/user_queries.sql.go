@@ -27,7 +27,7 @@ INSERT INTO users (
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
 )
-RETURNING id, created_at, updated_at, last_login, version, mfa_enabled, mfa_secret, mfa_status, mfa_last_checked
+RETURNING id, created_at, updated_at, role_level, last_login, version, mfa_enabled, mfa_secret, mfa_status, mfa_last_checked
 `
 
 type CreateNewUserParams struct {
@@ -48,6 +48,7 @@ type CreateNewUserRow struct {
 	ID             int64
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
+	RoleLevel      string
 	LastLogin      time.Time
 	Version        int32
 	MfaEnabled     bool
@@ -75,6 +76,7 @@ func (q *Queries) CreateNewUser(ctx context.Context, arg CreateNewUserParams) (C
 		&i.ID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.RoleLevel,
 		&i.LastLogin,
 		&i.Version,
 		&i.MfaEnabled,
@@ -93,7 +95,7 @@ SELECT
     email,
     profile_avatar_url,
     password,
-    user_role,
+    role_level,
     phone_number,
     activated,
     version,
@@ -123,7 +125,7 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.Email,
 		&i.ProfileAvatarUrl,
 		&i.Password,
-		&i.UserRole,
+		&i.RoleLevel,
 		&i.PhoneNumber,
 		&i.Activated,
 		&i.Version,
@@ -151,7 +153,7 @@ SET
     email = $3,
     profile_avatar_url = $4,
     password = $5,
-    user_role = $6,
+    role_level = $6,
     phone_number = $7,
     activated = $8,
     version = version + 1,
@@ -176,7 +178,7 @@ type UpdateUserParams struct {
 	Email            string
 	ProfileAvatarUrl string
 	Password         []byte
-	UserRole         string
+	RoleLevel        string
 	PhoneNumber      string
 	Activated        bool
 	LastLogin        time.Time
@@ -205,7 +207,7 @@ func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (UpdateU
 		arg.Email,
 		arg.ProfileAvatarUrl,
 		arg.Password,
-		arg.UserRole,
+		arg.RoleLevel,
 		arg.PhoneNumber,
 		arg.Activated,
 		arg.LastLogin,

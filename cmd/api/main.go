@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"expvar"
 	"flag"
@@ -17,6 +18,7 @@ import (
 	"github.com/Blue-Davinci/OptiVest/internal/logger"
 	"github.com/Blue-Davinci/OptiVest/internal/mailer"
 	"github.com/Blue-Davinci/OptiVest/internal/vcs"
+	"github.com/go-redis/redis/v8"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 	"go.uber.org/zap"
@@ -30,11 +32,20 @@ var (
 type config struct {
 	port int
 	env  string
-	db   struct {
+	api  struct {
+		name   string
+		author string
+	}
+	db struct {
 		dsn          string
 		maxOpenConns int
 		maxIdleConns int
 		maxIdleTime  string
+	}
+	redis struct {
+		addr     string
+		password string
+		db       int
 	}
 	smtp struct {
 		host     string
@@ -64,11 +75,12 @@ type config struct {
 }
 
 type application struct {
-	config config
-	logger *zap.Logger
-	models data.Models
-	mailer mailer.Mailer
-	wg     sync.WaitGroup
+	config  config
+	logger  *zap.Logger
+	models  data.Models
+	mailer  mailer.Mailer
+	wg      sync.WaitGroup
+	RedisDB *redis.Client
 }
 
 func main() {
@@ -86,6 +98,9 @@ func main() {
 	// Port & env
 	flag.IntVar(&cfg.port, "port", 4000, "API server port")
 	flag.StringVar(&cfg.env, "env", "development", "Environment (development|staging|production)")
+	// API configuration
+	flag.StringVar(&cfg.api.name, "api-name", "OptiVest", "API name")
+	flag.StringVar(&cfg.api.author, "api-author", "Blue_Davinci", "API author")
 	// Rate limiter flags
 	flag.Float64Var(&cfg.limiter.rps, "limiter-rps", 5, "Rate limiter maximum requests per second")
 	flag.IntVar(&cfg.limiter.burst, "limiter-burst", 10, "Rate limiter maximum burst")
@@ -95,6 +110,10 @@ func main() {
 	flag.IntVar(&cfg.db.maxOpenConns, "db-max-open-conns", 25, "PostgreSQL max open connections")
 	flag.IntVar(&cfg.db.maxIdleConns, "db-max-idle-conns", 25, "PostgreSQL max idle connections")
 	flag.StringVar(&cfg.db.maxIdleTime, "db-max-idle-time", "15m", "PostgreSQL max connection idle time")
+	// Redis configuration
+	flag.StringVar(&cfg.redis.addr, "redis-addr", "localhost:6379", "Redis address")
+	flag.StringVar(&cfg.redis.password, "redis-password", os.Getenv("OPTIVEST_REDIS_PASSWORD"), "Redis password")
+	flag.IntVar(&cfg.redis.db, "redis-db", 0, "Redis database")
 	// Encryption key
 	flag.StringVar(&cfg.encryption.key, "encryption-key", os.Getenv("OPTIVEST_DATA_ENCRYPTION_KEY"), "Encryption key")
 	// CORS configuration
@@ -128,6 +147,13 @@ func main() {
 		fmt.Printf("Version:\t%s\n", version)
 		os.Exit(0)
 	}
+
+	// Initialize Redis connection
+	rdb, err := openRedis(cfg)
+	if err != nil {
+		logger.Fatal("Error while connecting to Redis.", zap.String("error", err.Error()))
+	}
+	logger.Info("Redis connection established", zap.String("addr", cfg.redis.addr))
 	// create our connection pull
 	db, err := openDB(cfg)
 	if err != nil {
@@ -139,10 +165,11 @@ func main() {
 	publishMetrics()
 
 	app := &application{
-		config: cfg,
-		logger: logger,
-		models: data.NewModels(db),
-		mailer: mailer.New(cfg.smtp.host, cfg.smtp.port, cfg.smtp.username, cfg.smtp.password, cfg.smtp.sender),
+		config:  cfg,
+		logger:  logger,
+		models:  data.NewModels(db),
+		mailer:  mailer.New(cfg.smtp.host, cfg.smtp.port, cfg.smtp.username, cfg.smtp.password, cfg.smtp.sender),
+		RedisDB: rdb,
 	}
 	err = app.server()
 	if err != nil {
@@ -215,4 +242,23 @@ func openDB(cfg config) (*database.Queries, error) {
 	}
 	queries := database.New(db)
 	return queries, nil
+}
+
+// openRedis() opens a new Redis connection using the provided configuration.
+// It returns a pointer to the Redis client and an error value.
+func openRedis(cfg config) (*redis.Client, error) {
+	// Initialize the Redis client with the provided config
+	rdb := redis.NewClient(&redis.Options{
+		Addr: cfg.redis.addr, // Redis address
+		//Password: cfg.redis.password, // No password set if empty
+		DB: cfg.redis.db, // Use default DB if not set
+	})
+
+	// Ping the Redis server to check if the connection is successful
+	err := rdb.Ping(context.Background()).Err()
+	if err != nil {
+		return nil, err
+	}
+
+	return rdb, nil
 }

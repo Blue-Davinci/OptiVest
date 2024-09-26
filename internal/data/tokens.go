@@ -27,6 +27,7 @@ const (
 	ScopeActivation     = "activation"
 	ScopeAuthentication = "authentication"
 	ScopePasswordReset  = "password-reset"
+	ScopeMFALogin       = "mfa-login"
 )
 
 // Define a Token struct to hold the data for an individual token. This includes the
