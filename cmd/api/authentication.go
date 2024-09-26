@@ -119,7 +119,7 @@ func (app *application) performMFAOnLogin(w http.ResponseWriter, r *http.Request
 	}
 	// generate our TOTP token using the encrypted Token as the value
 	// for the key we will use the RedisMFALoginPendingPrefix
-	secret, redisKey, err := app.totpTokenGenerator(user.Email, data.RedisMFALoginPendingPrefix, mfaToken.Plaintext, user.ID)
+	_, redisKey, err := app.totpTokenGenerator(user.Email, data.RedisMFALoginPendingPrefix, mfaToken.Plaintext, user.ID)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
@@ -128,7 +128,6 @@ func (app *application) performMFAOnLogin(w http.ResponseWriter, r *http.Request
 	app.logger.Info(("MFA Login, we use the following user secret"), zap.String("secret", user.MFASecret), zap.String("redis key", redisKey))
 	// we will now send the user the encrypted token and the QR code
 	err = app.writeJSON(w, http.StatusOK, envelope{
-		"qr_code":    secret.URL(),
 		"totp_token": encryptedToken,
 		"email":      user.Email,
 	}, nil)

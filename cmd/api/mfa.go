@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/Blue-Davinci/OptiVest/internal/data"
 	"github.com/Blue-Davinci/OptiVest/internal/validator"
@@ -177,8 +178,17 @@ func (app *application) verifiy2FASetupHandler(w http.ResponseWriter, r *http.Re
 }
 
 func (app *application) validateAndDeleteTOTP(TOTPCode, MFASecret, redisKey string) error {
-	// validate our TOTP code
-	valid := totp.Validate(TOTPCode, MFASecret)
+	opts := totp.ValidateOpts{
+		Period:    30,                // Time step in seconds (default is 30)
+		Skew:      1,                 // Allowable time skew in steps (default is 1)
+		Digits:    otp.DigitsSix,     // Number of digits in the TOTP code (default is 6)
+		Algorithm: otp.AlgorithmSHA1, // Hashing algorithm (default is SHA1)
+	}
+	// Validate the TOTP code with custom options
+	valid, err := totp.ValidateCustom(TOTPCode, MFASecret, time.Now(), opts)
+	if err != nil {
+		return err
+	}
 	app.logger.Info("TOTP code validation", zap.String("code", TOTPCode), zap.String("secret", MFASecret), zap.Bool("valid", valid))
 	if !valid {
 		return data.ErrInvalidTOTPCode
