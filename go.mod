@@ -11,11 +11,14 @@ require (
 	github.com/go-chi/cors v1.2.1 // indirect
 	github.com/go-mail/mail/v2 v2.3.0 // indirect
 	github.com/go-redis/redis/v8 v8.11.5 // indirect
+	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
+	github.com/hashicorp/go-retryablehttp v0.7.7 // indirect
 	github.com/joho/godotenv v1.5.1 // indirect
 	github.com/justinas/alice v1.2.0 // indirect
 	github.com/lib/pq v1.10.9 // indirect
 	github.com/nyaruka/phonenumbers v1.4.0 // indirect
 	github.com/pquerna/otp v1.4.0 // indirect
+	github.com/shopspring/decimal v1.4.0 // indirect
 	github.com/tomasen/realip v0.0.0-20180522021738-f0c99a92ddce // indirect
 	go.uber.org/multierr v1.10.0 // indirect
 	go.uber.org/zap v1.27.0 // indirect

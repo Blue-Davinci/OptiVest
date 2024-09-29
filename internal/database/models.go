@@ -11,6 +11,49 @@ import (
 	"time"
 )
 
+type GoalStatus string
+
+const (
+	GoalStatusOngoing   GoalStatus = "ongoing"
+	GoalStatusCompleted GoalStatus = "completed"
+	GoalStatusCancelled GoalStatus = "cancelled"
+)
+
+func (e *GoalStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = GoalStatus(s)
+	case string:
+		*e = GoalStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for GoalStatus: %T", src)
+	}
+	return nil
+}
+
+type NullGoalStatus struct {
+	GoalStatus GoalStatus
+	Valid      bool // Valid is true if GoalStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullGoalStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.GoalStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.GoalStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullGoalStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.GoalStatus), nil
+}
+
 type MfaStatusType string
 
 const (
@@ -52,6 +95,35 @@ func (ns NullMfaStatusType) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.MfaStatusType), nil
+}
+
+type Budget struct {
+	ID             int64
+	UserID         int64
+	Name           string
+	IsStrict       bool
+	Category       string
+	TotalAmount    string
+	CurrencyCode   string
+	ConversionRate string
+	Description    sql.NullString
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
+type Goal struct {
+	ID                  int64
+	UserID              int64
+	BudgetID            sql.NullInt64
+	Name                string
+	CurrentAmount       sql.NullString
+	TargetAmount        string
+	MonthlyContribution string
+	StartDate           time.Time
+	EndDate             time.Time
+	Status              GoalStatus
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
 }
 
 type Token struct {

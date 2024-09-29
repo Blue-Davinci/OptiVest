@@ -7,18 +7,24 @@ import (
 )
 
 var (
-	ErrGeneralRecordNotFound = errors.New("feeds record not found")
-	ErrGeneralEditConflict   = errors.New("edit conflict")
+	ErrFailedToSaveRecordToRedis = errors.New("failed to save record to database")
+	ErrUnableToQueryDatabase     = errors.New("unable to query database")
+	ErrGeneralRecordNotFound     = errors.New("feeds record not found")
+	ErrGeneralEditConflict       = errors.New("edit conflict")
 )
 
 type Models struct {
-	Users  UserModel
-	Tokens TokenModel
+	Users            UserModel
+	Tokens           TokenModel
+	ApiManager       ApiManagerModel
+	FinancialManager FinancialManagerModel
 }
 
 func NewModels(db *database.Queries) Models {
 	return Models{
-		Users:  UserModel{DB: db},
-		Tokens: TokenModel{DB: db},
+		Users:            UserModel{DB: db},
+		Tokens:           TokenModel{DB: db},
+		ApiManager:       ApiManagerModel{DB: db},
+		FinancialManager: FinancialManagerModel{DB: db},
 	}
 }

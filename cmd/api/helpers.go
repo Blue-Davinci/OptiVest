@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Blue-Davinci/OptiVest/internal/data"
+	"go.uber.org/zap"
 )
 
 // Define an envelope type.
@@ -142,4 +144,46 @@ func (app *application) background(fn func()) {
 		// Execute the arbitrary function that we passed as the parameter.
 		fn()
 	}()
+}
+
+// saveCurrenciesToRedis() saves a currency list to REDIS  with the currency as the key
+// and the rate as the value. Will be used in tandem with the currency conversion API.
+func (app *application) saveCurrenciesToRedis(rates data.CurrencyRates) error {
+	for currency, rate := range rates.ConversionRates {
+		err := app.RedisDB.HSet(context.Background(), "currency_rates", currency, rate).Err()
+		if err != nil {
+			return data.ErrFailedToSaveRecordToRedis
+		}
+	}
+	return nil
+}
+
+// verifyCurrencyInRedis() checks if a currency exists in REDIS. Will be used
+// in tandem with the currency conversion API.
+func (app *application) verifyCurrencyInRedis(currency string) error {
+	exists, err := app.RedisDB.HExists(context.Background(), "currency_rates", currency).Result()
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return data.ErrFailedToGetCurrency
+	}
+	app.logger.Info("Currency exists in Redis", zap.String("currency", currency))
+	return nil
+}
+
+// getAndSaveAvailableCurrencies() gets the available currencies from the exchange rate API
+func (app *application) getAndSaveAvailableCurrencies() error {
+	url := fmt.Sprintf("%s/%s/latest/%s", app.config.api.apikeys.exchangerates.url,
+		app.config.api.apikeys.exchangerates.key, app.config.api.defaultcurrency)
+	currencies, err := GETRequest[data.CurrencyRates](app.http_client, url, nil)
+	if err != nil {
+		return err
+	}
+	// Save the currencies to Redis
+	err = app.saveCurrenciesToRedis(currencies)
+	if err != nil {
+		return err
+	}
+	return nil
 }

@@ -21,6 +21,7 @@ import (
 	"github.com/go-redis/redis/v8"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
+	"github.com/shopspring/decimal"
 	"go.uber.org/zap"
 )
 
@@ -29,12 +30,22 @@ var (
 	version = vcs.Version()
 )
 
+type apikey_details struct {
+	key string
+	url string
+}
+
 type config struct {
 	port int
 	env  string
 	api  struct {
-		name   string
-		author string
+		name            string
+		author          string
+		defaultcurrency string
+		apikeys         struct {
+			alphavantage  apikey_details
+			exchangerates apikey_details
+		}
 	}
 	db struct {
 		dsn          string
@@ -46,6 +57,10 @@ type config struct {
 		addr     string
 		password string
 		db       int
+	}
+	http_client struct {
+		timeout  time.Duration
+		retrymax int
 	}
 	smtp struct {
 		host     string
@@ -75,12 +90,13 @@ type config struct {
 }
 
 type application struct {
-	config  config
-	logger  *zap.Logger
-	models  data.Models
-	mailer  mailer.Mailer
-	wg      sync.WaitGroup
-	RedisDB *redis.Client
+	config      config
+	logger      *zap.Logger
+	models      data.Models
+	http_client *Optivet_Client
+	mailer      mailer.Mailer
+	wg          sync.WaitGroup
+	RedisDB     *redis.Client
 }
 
 func main() {
@@ -101,6 +117,14 @@ func main() {
 	// API configuration
 	flag.StringVar(&cfg.api.name, "api-name", "OptiVest", "API name")
 	flag.StringVar(&cfg.api.author, "api-author", "Blue_Davinci", "API author")
+	flag.StringVar(&cfg.api.defaultcurrency, "api-default-currency", "USD", "Default currency")
+	// API keys
+	// alpha vantage
+	flag.StringVar(&cfg.api.apikeys.alphavantage.key, "api-key-alphavantage", os.Getenv("OPTIVEST_ALPHAVANTAGE_API_KEY"), "Alpha Vantage API key")
+	flag.StringVar(&cfg.api.apikeys.alphavantage.url, "api-url-alphavantage", "https://www.alphavantage.co/query", "Alpha Vantage API URL")
+	// exchange rates
+	flag.StringVar(&cfg.api.apikeys.exchangerates.key, "api-key-exchangerates", os.Getenv("OPTIVEST_EXCHANGERATE_API_KEY"), "Exchange-Rate API Key")
+	flag.StringVar(&cfg.api.apikeys.exchangerates.url, "api-url-exchangerates", "https://v6.exchangerate-api.com/v6", "Exchange-Rate API URL")
 	// Rate limiter flags
 	flag.Float64Var(&cfg.limiter.rps, "limiter-rps", 5, "Rate limiter maximum requests per second")
 	flag.IntVar(&cfg.limiter.burst, "limiter-burst", 10, "Rate limiter maximum burst")
@@ -114,6 +138,9 @@ func main() {
 	flag.StringVar(&cfg.redis.addr, "redis-addr", "localhost:6379", "Redis address")
 	flag.StringVar(&cfg.redis.password, "redis-password", os.Getenv("OPTIVEST_REDIS_PASSWORD"), "Redis password")
 	flag.IntVar(&cfg.redis.db, "redis-db", 0, "Redis database")
+	// HTTP client configuration
+	flag.DurationVar(&cfg.http_client.timeout, "http-client-timeout", 10*time.Second, "HTTP client timeout")
+	flag.IntVar(&cfg.http_client.retrymax, "http-client-retrymax", 3, "HTTP client maximum retries")
 	// Encryption key
 	flag.StringVar(&cfg.encryption.key, "encryption-key", os.Getenv("OPTIVEST_DATA_ENCRYPTION_KEY"), "Encryption key")
 	// CORS configuration
@@ -159,22 +186,52 @@ func main() {
 	if err != nil {
 		logger.Fatal(err.Error(), zap.String("dsn", cfg.db.dsn))
 	}
+	// create out http client
+	httpClient := NewClient(cfg.http_client.timeout, cfg.http_client.retrymax)
+	// log our connection pool
 	logger.Info("database connection pool established", zap.String("dsn", cfg.db.dsn))
 	logger.Info("Encryption Key", zap.String("key", cfg.encryption.key))
 	// Init our exp metrics variables for server metrics.
 	publishMetrics()
 
 	app := &application{
-		config:  cfg,
-		logger:  logger,
-		models:  data.NewModels(db),
-		mailer:  mailer.New(cfg.smtp.host, cfg.smtp.port, cfg.smtp.username, cfg.smtp.password, cfg.smtp.sender),
-		RedisDB: rdb,
+		config:      cfg,
+		logger:      logger,
+		models:      data.NewModels(db),
+		http_client: httpClient,
+		mailer:      mailer.New(cfg.smtp.host, cfg.smtp.port, cfg.smtp.username, cfg.smtp.password, cfg.smtp.sender),
+		RedisDB:     rdb,
 	}
+	x, err := app.convertAndGetExchangeRate("usd", "eur")
+	if err != nil {
+		logger.Error("Error getting exchange rate", zap.String("error", err.Error()))
+	}
+	app.logger.Info("Exchange Rate", zap.Any("exchange", x.ConvertAmount(decimal.NewFromFloat(100.0)).ConvertedAmount))
+
+	err = app.startupFunction()
+	if err != nil {
+		logger.Fatal("Error while starting up application", zap.String("error", err.Error()))
+	}
+
 	err = app.server()
 	if err != nil {
 		logger.Fatal("Error while starting server.", zap.String("error", err.Error()))
 	}
+}
+
+func (app *application) startupFunction() error {
+	// read and load currencies
+	err := app.getAndSaveAvailableCurrencies()
+	if err != nil {
+		return err
+	}
+	// test with verify
+	err = app.verifyCurrencyInRedis("USD")
+	if err != nil {
+		app.logger.Error("Error verifying currency in Redis", zap.String("error", err.Error()))
+		return err
+	}
+	return nil
 }
 
 // publishMetrics sets up the expvar variables for the application
