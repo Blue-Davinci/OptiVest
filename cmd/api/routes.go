@@ -32,6 +32,7 @@ func (app *application) routes() http.Handler {
 
 	v1Router.Mount("/users", app.userRoutes(&dynamicMiddleware))
 	v1Router.Mount("/api", app.apiKeyRoutes())
+	v1Router.Mount("/budgets", app.budgetRoutes())
 
 	// Moount the v1Router to the main base router
 	router.Mount("/v1", v1Router)
@@ -56,4 +57,10 @@ func (app *application) apiKeyRoutes() chi.Router {
 	// /password-reset : for sending keys for resetting passwords
 	apiKeyRoutes.Post("/password-reset", app.createPasswordResetTokenHandler)
 	return apiKeyRoutes
+}
+
+func (app *application) budgetRoutes() chi.Router {
+	budgetRoutes := chi.NewRouter()
+	budgetRoutes.Post("/", app.createNewBudgetdHandler)
+	return budgetRoutes
 }
