@@ -18,7 +18,7 @@ To install OptiVest, follow these steps:
 
 1. Clone the repository:
     ```sh
-    git clone [https://github.com/yourusername/OptiVest](https://github.com/Blue-Davinci/OptiVest.git)
+    git clone https://github.com/Blue-Davinci/OptiVest.git
     ```
 2. Navigate to the project directory:
     ```sh
