@@ -31,7 +31,7 @@ FROM budgets
 WHERE id = $1;
 
 -- name: GetBudgetsForUser :many
-SELECT count(*) OVER(),
+SELECT count(*) OVER() AS total_budgets,
     id, 
     user_id, 
     name,
@@ -86,25 +86,37 @@ INSERT INTO goals (
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 RETURNING id, created_at, updated_at;
 
--- name: GetAllGoalsByBudgetID :many
-SELECT count(*) OVER(),
+-- name: GetAllGoalSummaryBuBudgetID :many
+SELECT count(*) OVER() AS total_goals,
     g.id AS goal_id,
-    g.user_id AS user_id,
-    g.budget_id AS budget_id,
     g.name AS goal_name,
-    g.current_amount AS current_amount,
+    g.monthly_contribution AS goal_monthly_contribution,
     g.target_amount AS goal_target_amount,
-    g.monthly_contribution AS monthly_amount,
-    g.start_date AS start_date,
-    g.end_date AS end_date,
-    g.status AS goal_status,
-    b.total_amount - COALESCE(SUM(g.monthly_contribution) OVER (), 0) AS total_surplus
-FROM 
-    goals g
-JOIN 
-    budgets b ON g.budget_id = b.id
-WHERE 
-    b.id = $1 and b.user_id = $2
+    b.total_amount AS budget_total_amount,
+    b.currency_code AS budget_currency,
+    b.is_strict AS is_strict,
+    COALESCE(SUM(g.monthly_contribution) OVER (), 0)::numeric AS total_monthly_contributions,
+   (b.total_amount - COALESCE(SUM(g.monthly_contribution) OVER (), 0))::numeric AS budget_surplus
+FROM budgets b
+LEFT JOIN goals g ON g.budget_id = b.id
+WHERE b.id = $1 AND b.user_id = $2
 GROUP BY 
-    g.id, g.name, g.target_amount, g.monthly_contribution, b.total_amount
-LIMIT $3 OFFSET $4;
+    b.id, g.id
+ORDER BY g.name;
+
+-- name: GetGoalByID :one
+SELECT 
+    id, 
+    user_id, 
+    budget_id, 
+    name, 
+    current_amount, 
+    target_amount, 
+    monthly_contribution, 
+    start_date, 
+    end_date, 
+    created_at, 
+    updated_at,
+    status
+FROM goals
+WHERE id = $1 AND user_id = $2;

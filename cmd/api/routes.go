@@ -32,7 +32,8 @@ func (app *application) routes() http.Handler {
 
 	v1Router.Mount("/users", app.userRoutes(&dynamicMiddleware))
 	v1Router.Mount("/api", app.apiKeyRoutes())
-	v1Router.Mount("/budgets", app.budgetRoutes())
+	v1Router.With(dynamicMiddleware.Then).Mount("/budgets", app.budgetRoutes())
+	v1Router.With(dynamicMiddleware.Then).Mount("/goals", app.goalRoutes())
 
 	// Moount the v1Router to the main base router
 	router.Mount("/v1", v1Router)
@@ -61,6 +62,15 @@ func (app *application) apiKeyRoutes() chi.Router {
 
 func (app *application) budgetRoutes() chi.Router {
 	budgetRoutes := chi.NewRouter()
+	budgetRoutes.Get("/", app.getBudgetsForUserHandler)
 	budgetRoutes.Post("/", app.createNewBudgetdHandler)
+	budgetRoutes.Patch("/{budgetID}", app.updateBudgetHandler)
+	budgetRoutes.Delete("/{budgetID}", app.deleteBudgetByIDHandler)
 	return budgetRoutes
+}
+
+func (app *application) goalRoutes() chi.Router {
+	goalRoutes := chi.NewRouter()
+	goalRoutes.Post("/", app.createNewGoalHandler)
+	return goalRoutes
 }

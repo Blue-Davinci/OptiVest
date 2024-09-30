@@ -202,12 +202,6 @@ func main() {
 		mailer:      mailer.New(cfg.smtp.host, cfg.smtp.port, cfg.smtp.username, cfg.smtp.password, cfg.smtp.sender),
 		RedisDB:     rdb,
 	}
-	x, err := app.convertAndGetExchangeRate("usd", "eur")
-	if err != nil {
-		logger.Error("Error getting exchange rate", zap.String("error", err.Error()))
-	}
-	app.logger.Info("Exchange Rate", zap.Any("exchange", x.ConvertAmount(decimal.NewFromFloat(100.0)).ConvertedAmount))
-
 	err = app.startupFunction()
 	if err != nil {
 		logger.Fatal("Error while starting up application", zap.String("error", err.Error()))
@@ -220,8 +214,13 @@ func main() {
 }
 
 func (app *application) startupFunction() error {
+	x, err := app.convertAndGetExchangeRate("usd", "eur")
+	if err != nil {
+		app.logger.Error("Error getting exchange rate", zap.String("error", err.Error()))
+	}
+	app.logger.Info("Exchange Rate", zap.Any("exchange", x.ConvertAmount(decimal.NewFromFloat(100.0)).ConvertedAmount))
 	// read and load currencies
-	err := app.getAndSaveAvailableCurrencies()
+	err = app.getAndSaveAvailableCurrencies()
 	if err != nil {
 		return err
 	}

@@ -35,13 +35,13 @@ CREATE INDEX idx_goals_user_id ON goals (user_id);
 CREATE INDEX idx_goals_status ON goals (status);
 -- Index to retrieve goals by budget quickly
 CREATE INDEX idx_goals_budget_id ON goals(budget_id);
-
-
 -- Composite index to retrieve goals by user and status quickly
 CREATE INDEX idx_goals_user_id_status ON goals (user_id, status);
-
 -- Index to retrieve goals by end date quickly
 CREATE INDEX idx_goals_end_date ON goals (end_date);
+-- Composite index to retrieve goals by budget and user quickly
+CREATE INDEX idx_goals_budget_id_user_id ON goals(budget_id, user_id);
+
 
 -- +goose Down
 -- +goose StatementBegin
@@ -51,5 +51,6 @@ DROP INDEX IF EXISTS idx_goals_end_date;
 DROP INDEX IF EXISTS idx_goals_user_id_status;
 DROP INDEX IF EXISTS idx_goals_status;
 DROP INDEX IF EXISTS idx_goals_user_id;
+DROP INDEX IF EXISTS idx_goals_budget_id;
 DROP TABLE IF EXISTS goals;
 DROP TYPE IF EXISTS goal_status;

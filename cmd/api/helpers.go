@@ -7,10 +7,16 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/Blue-Davinci/OptiVest/internal/data"
+	"github.com/Blue-Davinci/OptiVest/internal/validator"
+	"github.com/go-chi/chi/v5"
+	"github.com/go-redis/redis/v8"
+	"github.com/shopspring/decimal"
 	"go.uber.org/zap"
 )
 
@@ -65,6 +71,18 @@ func (app *application) readJSON(w http.ResponseWriter, r *http.Request, dst any
 		return errors.New("body must only contain a single JSON value")
 	}
 	return nil
+}
+
+// Retrieve the "id" URL parameter from the current request context, then convert it to
+// an integer and return it. If the operation isn't successful, return a nil UUID and an error.
+func (app *application) readIDParam(r *http.Request, parameterName string) (int64, error) {
+	// We use chi's URLParam method to get our ID parameter from the URL.
+	params := chi.URLParam(r, parameterName)
+	id, err := strconv.ParseInt(params, 10, 64)
+	if err != nil || id < 1 {
+		return 0, errors.New("invalid i-id parameter")
+	}
+	return id, nil
 }
 
 func (app *application) returnFormattedRedisKeys(key string, userID int64) string {
@@ -186,4 +204,95 @@ func (app *application) getAndSaveAvailableCurrencies() error {
 		return err
 	}
 	return nil
+}
+
+// saveAndUpdateSurplus() this method will be responsible for saving and updating the surplus
+// of a user's nudget. It will be called after a budget has been created or updated as well as
+// when a goal is added or updated.
+// When called we get the new total surplus amount from the caller.
+//
+//	we check if the the data.RedisFinManSurplusPrefix:userid:budgetid key exists in Redis.
+//
+// if it does, we update the surplus amount and return nil error.
+// Otherwise, we save the surplus amount to Redis and return nil as an error.
+func (app *application) saveAndUpdateSurplus(userID, budgetID int64, surplus decimal.Decimal) error {
+	// Generate Redis key for budget surplus
+	budgetSurpluskey := fmt.Sprintf("%s:%d", data.RedisFinManSurplusPrefix, userID)
+	key := app.returnFormattedRedisKeys(budgetSurpluskey, budgetID)
+
+	// Use HSet to update or insert the surplus value
+	err := app.RedisDB.HSet(context.Background(), key, "surplus", surplus.String()).Err()
+	if err != nil {
+		return err
+	}
+
+	// Set a TTL of 24 hours for the surplus key
+	err = app.RedisDB.Expire(context.Background(), key, 24*time.Hour).Err()
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// getSurplus() retrieves the surplus for a budget from Redis. If the surplus does not exist,
+// it returns a zero value and nil error. If there are any other issues, it returns an error.
+func (app *application) getSurplus(userID, budgetID int64) (decimal.Decimal, error) {
+	// Generate Redis key for budget surplus
+	budgetSurplusKey := fmt.Sprintf("%s:%d", data.RedisFinManSurplusPrefix, userID)
+	key := app.returnFormattedRedisKeys(budgetSurplusKey, budgetID)
+
+	// Retrieve the surplus from Redis
+	surplusStr, err := app.RedisDB.HGet(context.Background(), key, "surplus").Result()
+	if err != nil {
+		// Handle error: return 0 and error if key does not exist or other issues
+		if err == redis.Nil {
+			return decimal.Decimal{}, nil // Key does not exist, return zero value
+		}
+		return decimal.Decimal{}, err // Return any other errors
+	}
+
+	// Convert the surplus string to decimal.Decimal
+	surplus, err := decimal.NewFromString(surplusStr)
+	if err != nil {
+		return decimal.Decimal{}, err // Return error if conversion fails
+	}
+
+	return surplus, nil // Return the retrieved surplus
+}
+
+// The readString() helper returns a string value from the query string, or the provided
+// default value if no matching key could be found.
+func (app *application) readString(qs url.Values, key string, defaultValue string) string {
+	// Extract the value for a given key from the query string. If no key exists this
+	// will return the empty string "".
+	s := qs.Get(key)
+	// If no key exists (or the value is empty) then return the default value.
+	if s == "" {
+		return defaultValue
+	}
+	// Otherwise return the string.
+	return s
+}
+
+// The readInt() helper reads a string value from the query string and converts it to an
+// integer before returning. If no matching key could be found it returns the provided
+// default value. If the value couldn't be converted to an integer, then we record an
+// error message in the provided Validator instance.
+func (app *application) readInt(qs url.Values, key string, defaultValue int, v *validator.Validator) int {
+	// Extract the value from the query string.
+	s := qs.Get(key)
+	// If no key exists (or the value is empty) then return the default value.
+	if s == "" {
+		return defaultValue
+	}
+	// Try to convert the value to an int. If this fails, add an error message to the
+	// validator instance and return the default value.
+	i, err := strconv.Atoi(s)
+	if err != nil {
+		v.AddError(key, "must be an integer value")
+		return defaultValue
+	}
+	// Otherwise, return the converted integer value.
+	return i
 }

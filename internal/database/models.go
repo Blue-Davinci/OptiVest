@@ -97,6 +97,49 @@ func (ns NullMfaStatusType) Value() (driver.Value, error) {
 	return string(ns.MfaStatusType), nil
 }
 
+type TrackingTypeEnum string
+
+const (
+	TrackingTypeEnumMonthly TrackingTypeEnum = "monthly"
+	TrackingTypeEnumBonus   TrackingTypeEnum = "bonus"
+	TrackingTypeEnumOther   TrackingTypeEnum = "other"
+)
+
+func (e *TrackingTypeEnum) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = TrackingTypeEnum(s)
+	case string:
+		*e = TrackingTypeEnum(s)
+	default:
+		return fmt.Errorf("unsupported scan type for TrackingTypeEnum: %T", src)
+	}
+	return nil
+}
+
+type NullTrackingTypeEnum struct {
+	TrackingTypeEnum TrackingTypeEnum
+	Valid            bool // Valid is true if TrackingTypeEnum is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullTrackingTypeEnum) Scan(value interface{}) error {
+	if value == nil {
+		ns.TrackingTypeEnum, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.TrackingTypeEnum.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullTrackingTypeEnum) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.TrackingTypeEnum), nil
+}
+
 type Budget struct {
 	ID             int64
 	UserID         int64
@@ -124,6 +167,18 @@ type Goal struct {
 	Status              GoalStatus
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
+}
+
+type GoalTracking struct {
+	ID                    int64
+	UserID                sql.NullInt64
+	GoalID                sql.NullInt64
+	TrackingDate          time.Time
+	ContributedAmount     string
+	TrackingType          TrackingTypeEnum
+	CreatedAt             sql.NullTime
+	UpdatedAt             sql.NullTime
+	TruncatedTrackingDate sql.NullTime
 }
 
 type Token struct {

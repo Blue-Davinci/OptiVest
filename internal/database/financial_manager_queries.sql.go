@@ -132,79 +132,63 @@ func (q *Queries) DeleteBudgetById(ctx context.Context, arg DeleteBudgetByIdPara
 	return id, err
 }
 
-const getAllGoalsByBudgetID = `-- name: GetAllGoalsByBudgetID :many
-SELECT count(*) OVER(),
+const getAllGoalSummaryBuBudgetID = `-- name: GetAllGoalSummaryBuBudgetID :many
+SELECT count(*) OVER() AS total_goals,
     g.id AS goal_id,
-    g.user_id AS user_id,
-    g.budget_id AS budget_id,
     g.name AS goal_name,
-    g.current_amount AS current_amount,
+    g.monthly_contribution AS goal_monthly_contribution,
     g.target_amount AS goal_target_amount,
-    g.monthly_contribution AS monthly_amount,
-    g.start_date AS start_date,
-    g.end_date AS end_date,
-    g.status AS goal_status,
-    b.total_amount - COALESCE(SUM(g.monthly_contribution) OVER (), 0) AS total_surplus
-FROM 
-    goals g
-JOIN 
-    budgets b ON g.budget_id = b.id
-WHERE 
-    b.id = $1 and b.user_id = $2
+    b.total_amount AS budget_total_amount,
+    b.currency_code AS budget_currency,
+    b.is_strict AS is_strict,
+    COALESCE(SUM(g.monthly_contribution) OVER (), 0)::numeric AS total_monthly_contributions,
+   (b.total_amount - COALESCE(SUM(g.monthly_contribution) OVER (), 0))::numeric AS budget_surplus
+FROM budgets b
+LEFT JOIN goals g ON g.budget_id = b.id
+WHERE b.id = $1 AND b.user_id = $2
 GROUP BY 
-    g.id, g.name, g.target_amount, g.monthly_contribution, b.total_amount
-LIMIT $3 OFFSET $4
+    b.id, g.id
+ORDER BY g.name
 `
 
-type GetAllGoalsByBudgetIDParams struct {
+type GetAllGoalSummaryBuBudgetIDParams struct {
 	ID     int64
 	UserID int64
-	Limit  int32
-	Offset int32
 }
 
-type GetAllGoalsByBudgetIDRow struct {
-	Count            int64
-	GoalID           int64
-	UserID           int64
-	BudgetID         sql.NullInt64
-	GoalName         string
-	CurrentAmount    sql.NullString
-	GoalTargetAmount string
-	MonthlyAmount    string
-	StartDate        time.Time
-	EndDate          time.Time
-	GoalStatus       GoalStatus
-	TotalSurplus     int32
+type GetAllGoalSummaryBuBudgetIDRow struct {
+	TotalGoals                int64
+	GoalID                    sql.NullInt64
+	GoalName                  sql.NullString
+	GoalMonthlyContribution   sql.NullString
+	GoalTargetAmount          sql.NullString
+	BudgetTotalAmount         string
+	BudgetCurrency            string
+	IsStrict                  bool
+	TotalMonthlyContributions string
+	BudgetSurplus             string
 }
 
-func (q *Queries) GetAllGoalsByBudgetID(ctx context.Context, arg GetAllGoalsByBudgetIDParams) ([]GetAllGoalsByBudgetIDRow, error) {
-	rows, err := q.db.QueryContext(ctx, getAllGoalsByBudgetID,
-		arg.ID,
-		arg.UserID,
-		arg.Limit,
-		arg.Offset,
-	)
+func (q *Queries) GetAllGoalSummaryBuBudgetID(ctx context.Context, arg GetAllGoalSummaryBuBudgetIDParams) ([]GetAllGoalSummaryBuBudgetIDRow, error) {
+	rows, err := q.db.QueryContext(ctx, getAllGoalSummaryBuBudgetID, arg.ID, arg.UserID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []GetAllGoalsByBudgetIDRow
+	var items []GetAllGoalSummaryBuBudgetIDRow
 	for rows.Next() {
-		var i GetAllGoalsByBudgetIDRow
+		var i GetAllGoalSummaryBuBudgetIDRow
 		if err := rows.Scan(
-			&i.Count,
+			&i.TotalGoals,
 			&i.GoalID,
-			&i.UserID,
-			&i.BudgetID,
 			&i.GoalName,
-			&i.CurrentAmount,
+			&i.GoalMonthlyContribution,
 			&i.GoalTargetAmount,
-			&i.MonthlyAmount,
-			&i.StartDate,
-			&i.EndDate,
-			&i.GoalStatus,
-			&i.TotalSurplus,
+			&i.BudgetTotalAmount,
+			&i.BudgetCurrency,
+			&i.IsStrict,
+			&i.TotalMonthlyContributions,
+			&i.BudgetSurplus,
 		); err != nil {
 			return nil, err
 		}
@@ -256,7 +240,7 @@ func (q *Queries) GetBudgetByID(ctx context.Context, id int64) (Budget, error) {
 }
 
 const getBudgetsForUser = `-- name: GetBudgetsForUser :many
-SELECT count(*) OVER(),
+SELECT count(*) OVER() AS total_budgets,
     id, 
     user_id, 
     name,
@@ -283,7 +267,7 @@ type GetBudgetsForUserParams struct {
 }
 
 type GetBudgetsForUserRow struct {
-	Count          int64
+	TotalBudgets   int64
 	ID             int64
 	UserID         int64
 	Name           string
@@ -312,7 +296,7 @@ func (q *Queries) GetBudgetsForUser(ctx context.Context, arg GetBudgetsForUserPa
 	for rows.Next() {
 		var i GetBudgetsForUserRow
 		if err := rows.Scan(
-			&i.Count,
+			&i.TotalBudgets,
 			&i.ID,
 			&i.UserID,
 			&i.Name,
@@ -336,6 +320,64 @@ func (q *Queries) GetBudgetsForUser(ctx context.Context, arg GetBudgetsForUserPa
 		return nil, err
 	}
 	return items, nil
+}
+
+const getGoalByID = `-- name: GetGoalByID :one
+SELECT 
+    id, 
+    user_id, 
+    budget_id, 
+    name, 
+    current_amount, 
+    target_amount, 
+    monthly_contribution, 
+    start_date, 
+    end_date, 
+    created_at, 
+    updated_at,
+    status
+FROM goals
+WHERE id = $1 AND user_id = $2
+`
+
+type GetGoalByIDParams struct {
+	ID     int64
+	UserID int64
+}
+
+type GetGoalByIDRow struct {
+	ID                  int64
+	UserID              int64
+	BudgetID            sql.NullInt64
+	Name                string
+	CurrentAmount       sql.NullString
+	TargetAmount        string
+	MonthlyContribution string
+	StartDate           time.Time
+	EndDate             time.Time
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
+	Status              GoalStatus
+}
+
+func (q *Queries) GetGoalByID(ctx context.Context, arg GetGoalByIDParams) (GetGoalByIDRow, error) {
+	row := q.db.QueryRowContext(ctx, getGoalByID, arg.ID, arg.UserID)
+	var i GetGoalByIDRow
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.BudgetID,
+		&i.Name,
+		&i.CurrentAmount,
+		&i.TargetAmount,
+		&i.MonthlyContribution,
+		&i.StartDate,
+		&i.EndDate,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Status,
+	)
+	return i, err
 }
 
 const updateBudgetById = `-- name: UpdateBudgetById :one
