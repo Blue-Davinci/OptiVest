@@ -120,3 +120,87 @@ SELECT
     status
 FROM goals
 WHERE id = $1 AND user_id = $2;
+
+-- name: UpdateGoalByID :one
+UPDATE goals
+SET 
+    name = $1,
+    current_amount = $2,
+    target_amount = $3,
+    monthly_contribution = $4,
+    start_date = $5,
+    end_date = $6,
+    status = $7
+WHERE id = $8 AND user_id = $9
+RETURNING updated_at;
+
+-- name: GetAndSaveAllGoalsForTracking :many
+-- Insert tracked goals that haven't been tracked for more than 1 month
+INSERT INTO goal_tracking (user_id, goal_id, contributed_amount, tracking_type)
+SELECT g.user_id, g.id, g.monthly_contribution, 'monthly'
+FROM goals g
+LEFT JOIN goal_tracking gt ON g.id = gt.goal_id 
+   AND gt.truncated_tracking_date = date_trunc('month', CURRENT_DATE)::date
+WHERE gt.goal_id IS NULL
+  AND g.status = 'ongoing' 
+  AND g.start_date < CURRENT_DATE
+ORDER BY truncated_tracking_date ASC
+LIMIT $1
+RETURNING id, user_id, goal_id, contributed_amount;
+
+-- name: CreateNewGoalPlan :one
+INSERT INTO goal_plans (
+    user_id, 
+    name, 
+    description, 
+    target_amount, 
+    monthly_contribution, 
+    duration_in_months, 
+    is_strict
+) VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING id, created_at, updated_at;
+
+-- name: UpdateGoalPlanByID :one
+UPDATE goal_plans SET
+    name = $1,
+    description = $2,
+    target_amount = $3,
+    monthly_contribution = $4,
+    duration_in_months = $5,
+    is_strict = $6
+WHERE
+    id = $7 AND user_id = $8
+RETURNING updated_at;
+
+-- name: GetGoalPlanByID :one
+SELECT 
+    id, 
+    user_id, 
+    name, 
+    description, 
+    target_amount, 
+    monthly_contribution, 
+    duration_in_months, 
+    is_strict, 
+    created_at, 
+    updated_at
+FROM goal_plans
+WHERE id = $1 AND user_id = $2;
+
+-- name: GetGoalPlansForUser :many
+SELECT count(*) OVER() AS total_goal_plans,
+    id, 
+    user_id, 
+    name, 
+    description, 
+    target_amount, 
+    monthly_contribution, 
+    duration_in_months, 
+    is_strict, 
+    created_at, 
+    updated_at
+FROM goal_plans
+WHERE user_id = $1
+ORDER BY created_at DESC
+LIMIT $2 OFFSET $3;
+

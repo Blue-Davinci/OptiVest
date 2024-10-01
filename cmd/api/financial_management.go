@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -353,7 +354,7 @@ func (app *application) createNewGoalHandler(w http.ResponseWriter, r *http.Requ
 	}
 	mappedStatus, err := app.models.FinancialManager.MapStatusToOCFConstant(input.Status)
 	if err != nil {
-		app.badRequestResponse(w, r, err)
+		app.badRequestResponse(w, r, data.ErrInvalidOCFStatus)
 		return
 	}
 	// make a goal from the input struct
@@ -395,7 +396,12 @@ func (app *application) createNewGoalHandler(w http.ResponseWriter, r *http.Requ
 	// just directly write to the database
 	err = app.models.FinancialManager.CreateNewGoal(newGoal)
 	if err != nil {
-		app.serverErrorResponse(w, r, err)
+		switch {
+		case errors.Is(err, data.ErrDuplicateGoal):
+			app.badRequestResponse(w, r, err)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
 		return
 	}
 	oldSurplus, _ := app.getSurplus(newGoal.UserID, newGoal.BudgetID)
@@ -427,4 +433,356 @@ func (app *application) createNewGoalHandler(w http.ResponseWriter, r *http.Requ
 		app.serverErrorResponse(w, r, err)
 	}
 
+}
+
+// updatedGoalHandler() is a handler function that handles the updating of a Goal.
+// When updating a Goal, we need to perform similar validation to when we are creating a goal.
+// We check if the new monthly contribution is less than the available surplus for the budget and
+// if the budget is strict, we prevent the update otherwise add a message
+// We check if the Goal can still be achieved within the dates provided. If not, REJECT.
+// We check if the current amount is less than the target amount if changed/altered, If not REJECT.
+// If any of these checks fail, we return an error.
+// Otherwise we update the goal and return the updated goal in the response body alongside available
+// goal summaries and Update the new surplus in REDIS
+// format: /goals/{goalID}
+func (app *application) updatedGoalHandler(w http.ResponseWriter, r *http.Request) {
+	var message = data.Warning_Messages
+	var input struct {
+		BudgetID            *int64           `json:"budget_id"`
+		Name                *string          `json:"name"`
+		CurrentAmount       *decimal.Decimal `json:"current_amount"`
+		TargetAmount        *decimal.Decimal `json:"target_amount"`
+		MonthlyContribution *decimal.Decimal `json:"monthly_contribution"`
+		StartDate           *time.Time       `json:"start_date"`
+		EndDate             *time.Time       `json:"end_date"`
+		Status              *string          `json:"status"`
+	}
+	// Read goalID parameter from the URL
+	goalID, err := app.readIDParam(r, "goalID")
+	if err != nil || goalID < 1 {
+		app.notFoundResponse(w, r)
+		return
+	}
+	// get user
+	user := app.contextGetUser(r)
+	// Get the goal details from the database
+	goal, err := app.models.FinancialManager.GetGoalByID(user.ID, goalID)
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrGeneralRecordNotFound):
+			app.notFoundResponse(w, r)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
+	// We found the Goal with the user ID, Decode request body into the input struct
+	err = app.readJSON(w, r, &input)
+	if err != nil {
+		app.badRequestResponse(w, r, err)
+		return
+	}
+	// Get the budget summary and total monthly contribution
+	budgetSummary, budgetTotal, err := app.models.FinancialManager.GetAllGoalSummaryBudgetID(goal.BudgetID, user.ID)
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrGeneralRecordNotFound):
+			app.notFoundResponse(w, r)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
+	// Initialize validator
+	v := validator.New()
+	// Step 1: Subtract the current goal's monthly contribution to get the correct starting surplus
+	totalContributionExcludingCurrentGoal := budgetTotal.TotalMonthlyContribution.Sub(goal.MonthlyContribution)
+	availableSurplus := budgetTotal.BudgetTotalAmount.Sub(totalContributionExcludingCurrentGoal)
+	// Step 2: Initialize newTotalSurplus with the available surplus
+	newTotalSurplus := availableSurplus
+
+	// Step 3: Check if the monthly contribution is being updated
+	if input.MonthlyContribution != nil && input.MonthlyContribution.Cmp(goal.MonthlyContribution) != 0 {
+		// Apply the new monthly contribution (adding the updated contribution back)
+		newTotalSurplus = availableSurplus.Sub(*input.MonthlyContribution)
+
+		// Step 4: Check if the new contribution exceeds the available surplus
+		if budgetTotal.BudgetStrictness && input.MonthlyContribution.Cmp(availableSurplus) > 0 {
+			v.AddError("monthly_contribution", "monthly contribution is greater than the total surplus provisioned for this budget")
+			app.failedValidationResponse(w, r, v.Errors)
+			return
+		} else if input.MonthlyContribution.Cmp(availableSurplus) > 0 && !budgetTotal.BudgetStrictness {
+			// Allow the update but add a warning message
+			message.Message = append(message.Message, "monthly contribution is greater than the total surplus provisioned. budget needs to be updated")
+		}
+	} else {
+		// If the contribution is NOT updated, keep the current surplus
+		newTotalSurplus = budgetTotal.TotalSurplus
+	}
+	// Check for changes in other fields and update accordingly
+	if input.BudgetID != nil {
+		goal.BudgetID = *input.BudgetID
+	}
+	if input.Name != nil {
+		goal.Name = *input.Name
+	}
+	if input.CurrentAmount != nil {
+		goal.CurrentAmount = *input.CurrentAmount
+	}
+	if input.TargetAmount != nil {
+		goal.TargetAmount = *input.TargetAmount
+	}
+	if input.MonthlyContribution != nil {
+		goal.MonthlyContribution = *input.MonthlyContribution
+	}
+	if input.StartDate != nil {
+		goal.StartDate = *input.StartDate
+	}
+	if input.EndDate != nil {
+		goal.EndDate = *input.EndDate
+	}
+	if input.Status != nil {
+		mappedStatus, err := app.models.FinancialManager.MapStatusToOCFConstant(*input.Status)
+		if err != nil {
+			app.badRequestResponse(w, r, data.ErrInvalidOCFStatus)
+			return
+		}
+		goal.Status = mappedStatus
+	}
+	// Validate the updated goal
+	if data.ValidateGoal(v, goal); !v.Valid() {
+		app.failedValidationResponse(w, r, v.Errors)
+		return
+	}
+	// Proceed with the goal update in the database
+	err = app.models.FinancialManager.UpdateGoalByID(user.ID, goal)
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrEditConflict):
+			app.editConflictResponse(w, r)
+		case errors.Is(err, data.ErrDuplicateGoal):
+			app.badRequestResponse(w, r, err)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
+	// if surplus changes, we update the surplus in REDIS
+	if newTotalSurplus.Cmp(budgetTotal.TotalSurplus) != 0 {
+		// Save the new surplus to Redis
+		if err := app.saveAndUpdateSurplus(user.ID, goal.BudgetID, newTotalSurplus); err != nil {
+			app.serverErrorResponse(w, r, err)
+			return
+		}
+	}
+	app.logger.Info("New Surplus Amount from REDIS", zap.String("Surplus", newTotalSurplus.String()), zap.String("New Surplus", newTotalSurplus.String()))
+	// Return the updated budget with a 200 OK response
+	err = app.writeJSON(w, http.StatusOK, envelope{"goal": goal, "message": message, "summary": budgetSummary, "surplus": newTotalSurplus}, nil)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+	}
+}
+
+// createNewGoalPlanHandler() is a handler function that handles the creation of a Goal Plan.
+// This essentially works as a plan "template" for a goal.
+// We validate minimally and just save the plan to the database.
+func (app *application) createNewGoalPlanHandler(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Name                string          `json:"name"`
+		Description         string          `json:"description"`
+		TargetAmount        decimal.Decimal `json:"target_amount"`
+		MonthlyContribution decimal.Decimal `json:"monthly_contribution"`
+		DurationInMonths    int             `json:"duration_in_months"`
+		IsStrict            bool            `json:"is_strict"`
+	}
+	// Decode the request body into the input struct
+	err := app.readJSON(w, r, &input)
+	if err != nil {
+		app.badRequestResponse(w, r, err)
+		return
+	}
+	// Create a new Goal Plan struct and fill it with the data from the input struct
+	newGoalPlan := &data.GoalPlan{
+		Name:                input.Name,
+		Description:         input.Description,
+		TargetAmount:        input.TargetAmount,
+		MonthlyContribution: input.MonthlyContribution,
+		DurationInMonths:    input.DurationInMonths,
+		IsStrict:            input.IsStrict,
+	}
+	// Perform validation
+	v := validator.New()
+	if data.ValidateGoalPlan(v, newGoalPlan); !v.Valid() {
+		app.failedValidationResponse(w, r, v.Errors)
+		return
+	}
+	// Save the goal plan to the database
+	err = app.models.FinancialManager.CreateNewGoalPlan(app.contextGetUser(r).ID, newGoalPlan)
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrDuplicateGoalPlan):
+			app.badRequestResponse(w, r, err)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
+	// Return a 201 Created status code along with the goal plan in the response body
+	err = app.writeJSON(w, http.StatusCreated, envelope{"goal_plan": newGoalPlan}, nil)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+	}
+}
+
+// updatedGoalPlanHandler() is a handler function that handles the updating of a Goal Plan.
+// We validate the input and update the goal plan in the database.
+func (app *application) updatedGoalPlanHandler(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Name                *string          `json:"name"`
+		Description         *string          `json:"description"`
+		TargetAmount        *decimal.Decimal `json:"target_amount"`
+		MonthlyContribution *decimal.Decimal `json:"monthly_contribution"`
+		DurationInMonths    *int             `json:"duration_in_months"`
+		IsStrict            *bool            `json:"is_strict"`
+	}
+	// Read goalPlanID parameter from the URL
+	goalPlanID, err := app.readIDParam(r, "goalPlanID")
+	if err != nil || goalPlanID < 1 {
+		app.notFoundResponse(w, r)
+		return
+	}
+	// Get the goal plan details from the database
+	goalPlan, err := app.models.FinancialManager.GetGoalPlanByID(app.contextGetUser(r).ID, goalPlanID)
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrGeneralRecordNotFound):
+			app.notFoundResponse(w, r)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
+	// Decode request body into the input struct
+	err = app.readJSON(w, r, &input)
+	if err != nil {
+		app.badRequestResponse(w, r, err)
+		return
+	}
+	// Check for changes in other fields and update accordingly
+	if input.Name != nil {
+		goalPlan.Name = *input.Name
+	}
+	if input.Description != nil {
+		goalPlan.Description = *input.Description
+	}
+	if input.TargetAmount != nil {
+		goalPlan.TargetAmount = *input.TargetAmount
+	}
+	if input.MonthlyContribution != nil {
+		goalPlan.MonthlyContribution = *input.MonthlyContribution
+	}
+	if input.DurationInMonths != nil {
+		goalPlan.DurationInMonths = *input.DurationInMonths
+	}
+	if input.IsStrict != nil {
+		goalPlan.IsStrict = *input.IsStrict
+	}
+	// Validate the updated goal plan
+	v := validator.New()
+	if data.ValidateGoalPlan(v, goalPlan); !v.Valid() {
+		app.failedValidationResponse(w, r, v.Errors)
+		return
+	}
+	// Proceed with the goal plan update in the database
+	err = app.models.FinancialManager.UpdateGoalPlanByID(app.contextGetUser(r).ID, goalPlan)
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrEditConflict):
+			app.editConflictResponse(w, r)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
+	// Return the updated goal plan with a 200 OK response
+	err = app.writeJSON(w, http.StatusOK, envelope{"goal_plan": goalPlan}, nil)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+	}
+}
+
+// getGoalPlansForUserHandler() is a handler function that handles the retrieval of all goal plans for a user.
+// We first check if the goalplans are cached in REDIS using getSerializedCachedData(), if they are we return them.
+// Otherwise we get the goal plans from the database and cache them in REDIS using cacheSerializedData().
+func (app *application) getGoalPlansForUserHandler(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		data.Filters
+	}
+	// Validate if queries are provided
+	v := validator.New()
+
+	// Call r.URL.Query() to get the url.Values map containing the query string data.
+	qs := r.URL.Query()
+
+	// Get the pagesizes as ints and set to the embedded struct
+	input.Filters.Page = app.readInt(qs, "page", 1, v)
+	input.Filters.PageSize = app.readInt(qs, "page_size", 5, v)
+
+	// Get the sort values falling back to "id" if it is not provided
+	input.Filters.Sort = app.readString(qs, "sort", "id")
+
+	// Add the supported sort values for this endpoint to the sort safelist.
+	input.Filters.SortSafelist = []string{"id", "-id"}
+
+	// Perform validation
+	if data.ValidateFilters(v, input.Filters); !v.Valid() {
+		app.failedValidationResponse(w, r, v.Errors)
+		return
+	}
+
+	// Get the user
+	user := app.contextGetUser(r)
+
+	// Check if the goal plans are cached in REDIS
+	key := fmt.Sprintf("%s%d", data.RedisFinManGoalPlanPrefix, user.ID)
+
+	// Initialize unifiedGoalPlans to avoid nil pointer issues
+	unifiedGoalPlans := &data.UnifiedGoalPlanMetadata{}
+
+	// Attempt to retrieve cached data
+	cached, err := app.getSerializedCachedData(key, unifiedGoalPlans)
+	if cached && err == nil {
+		// Return cached data if available
+		err = app.writeJSON(w, http.StatusOK, envelope{"goal_plans": unifiedGoalPlans}, nil)
+		if err != nil {
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
+
+	// Get the goal plans for the user
+	goalPlans, metadata, err := app.models.FinancialManager.GetGoalPlansForUser(user.ID, input.Filters)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+		return
+	}
+
+	// Create a unified goal plan metadata
+	unifiedGoalPlans = &data.UnifiedGoalPlanMetadata{
+		GoalPlan: goalPlans,
+		Metadata: metadata,
+	}
+
+	// Cache the goal plans in REDIS
+	err = app.cacheSerializedData(key, unifiedGoalPlans, 12*time.Hour)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+		return
+	}
+
+	// Return the goal plans with a 200 OK response
+	err = app.writeJSON(w, http.StatusOK, envelope{"goal_plans": unifiedGoalPlans}, nil)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+	}
 }

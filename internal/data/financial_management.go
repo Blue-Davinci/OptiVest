@@ -17,15 +17,21 @@ const (
 	FinManEnumGoalStatusOngoing   = database.GoalStatusOngoing
 	FinManEnumGoalStatusCompleted = database.GoalStatusCompleted
 	FinManEnumGoalStatusFailed    = database.GoalStatusCancelled
+	// Enum For Tracking Type Enumeration
+	FinManTrackingTypeEnumMonthly = database.TrackingTypeEnumMonthly
+	FinManTrackingTypeEnumBonus   = database.TrackingTypeEnumBonus
+	FinManTrackingTypeEnumOther   = database.TrackingTypeEnumOther
 )
 
 var (
-	RedisFinManSurplusPrefix = "finman_nudget_surplus:"
+	RedisFinManSurplusPrefix  = "finman_nudget_surplus:"
+	RedisFinManGoalPlanPrefix = "finman_nudget_goal_plan:"
 )
 
 var (
-	ErrInvalidOCFStatus = errors.New("invalid status")
-	ErrDuplicateGoal    = errors.New("duplicate goal")
+	ErrInvalidOCFStatus  = errors.New("invalid status")
+	ErrDuplicateGoal     = errors.New("your goal has a duplicate field")
+	ErrDuplicateGoalPlan = errors.New("your goal saving plan has a duplicate field")
 )
 
 // MapStatusToConstant maps a status string to the corresponding constant
@@ -37,6 +43,20 @@ func (m FinancialManagerModel) MapStatusToOCFConstant(status string) (database.G
 		return FinManEnumGoalStatusCompleted, nil
 	case "failed":
 		return FinManEnumGoalStatusFailed, nil
+	default:
+		return "", ErrInvalidOCFStatus
+	}
+}
+
+// MapTrackingTypeToConstant maps a tracking type string to the corresponding constant
+func (m FinancialManagerModel) MapTrackingTypeToConstant(trackingType string) (database.TrackingTypeEnum, error) {
+	switch trackingType {
+	case "monthly":
+		return FinManTrackingTypeEnumMonthly, nil
+	case "bonus":
+		return FinManTrackingTypeEnumBonus, nil
+	case "other":
+		return FinManTrackingTypeEnumOther, nil
 	default:
 		return "", ErrInvalidOCFStatus
 	}
@@ -88,12 +108,16 @@ type Goals struct {
 	CreatedAt           time.Time           `json:"created_at"`
 	UpdatedAt           time.Time           `json:"updated_at"`
 }
+
+// Goal_Summary struct represents a summary of a goal
 type Goal_Summary struct {
 	Id                  int64           `json:"id"`
 	Name                string          `json:"name"`
 	MonthlyContribution decimal.Decimal `json:"monthly_contribution"`
 	TargetAmount        decimal.Decimal `json:"target_amount"`
 }
+
+// Goal_Summary_Totals struct represents the totals for a goal summary
 type Goal_Summary_Totals struct {
 	TotalGoals               int             `json:"total_goals"`
 	BudgetTotalAmount        decimal.Decimal `json:"budget_total_amount"`
@@ -101,6 +125,38 @@ type Goal_Summary_Totals struct {
 	BudgetStrictness         bool            `json:"budget_strictness"`
 	TotalMonthlyContribution decimal.Decimal `json:"total_monthly_contribution"`
 	TotalSurplus             decimal.Decimal `json:"total_surplus"`
+}
+
+// Goal Tracking struct represents howwe track our goals
+type TrackedGoal struct {
+	ID                    int64                     `json:"id"`
+	UserID                int64                     `json:"user_id"`
+	GoalID                int64                     `json:"goal_id"`
+	TrackingDate          time.Time                 `json:"tracking_date"`
+	ContributedAmount     decimal.Decimal           `json:"contributed_amount"`
+	TrackingType          database.TrackingTypeEnum `json:"tracking_type"` // What type, if monthly, bonus or other
+	CreatedAt             time.Time                 `json:"created_at"`
+	UpdatedAt             time.Time                 `json:"updated_at"`
+	TruncatedTrackingDate time.Time                 `json:"truncated_tracking_date"`
+}
+
+// Goal Plans struct represents how we plan our goals
+type GoalPlan struct {
+	ID                  int64           `json:"id"`
+	UserID              int64           `json:"user_id"`
+	Name                string          `json:"name"`
+	Description         string          `json:"description"`
+	TargetAmount        decimal.Decimal `json:"target_amount"`
+	MonthlyContribution decimal.Decimal `json:"monthly_contribution"`
+	DurationInMonths    int             `json:"duration_in_months"`
+	IsStrict            bool            `json:"is_strict"`
+	CreatedAt           time.Time       `json:"created_at"`
+	UpdatedAt           time.Time       `json:"updated_at"`
+}
+
+type UnifiedGoalPlanMetadata struct {
+	GoalPlan []*GoalPlan `json:"goal_plan"`
+	Metadata Metadata    `json:"metadata"`
 }
 
 var Warning_Messages struct {
@@ -137,6 +193,13 @@ func ValidateBudgetStrictness(v *validator.Validator, isStrict bool) {
 	v.Check(reflect.TypeOf(isStrict).Kind() == reflect.Bool, "is_strict", "must be a boolean")
 }
 
+// Goal Plan Template Validation
+func ValidateGoalPlan(v *validator.Validator, goalPlan *GoalPlan) {
+	// We only validate the Goal Plan name
+	ValidateBudgetName(v, goalPlan.Name)
+}
+
+// ValidateBudget() validates a budget when we are ypdating it
 func ValidateBudget(v *validator.Validator, budget *Budget) {
 	// Budget name
 	ValidateBudgetName(v, budget.Name)
@@ -151,6 +214,9 @@ func ValidateBudget(v *validator.Validator, budget *Budget) {
 	// IsStrict
 	ValidateBudgetStrictness(v, budget.IsStrict)
 }
+
+// ValidateBudgetUpdate() validates a budget when we are updating it
+// it has a very slight change from the ValidateBudget() function
 func ValidateBudgetUpdate(v *validator.Validator, budget *Budget) {
 	// Budget name
 	ValidateBudgetName(v, budget.Name)
@@ -381,6 +447,7 @@ func ValidateDates(v *validator.Validator, startDate, endDate time.Time,
 	fmt.Println("Total amount: ", totalAmount, "| Target amount: ", targetAmount, "| Month Difference", monthsDifference)
 }
 
+// ValidateGoal() validates a goal when we are adding and updating it
 func ValidateGoal(v *validator.Validator, goal *Goals) {
 	// Budget name
 	ValidateBudgetName(v, goal.Name)
@@ -430,6 +497,41 @@ func (m FinancialManagerModel) CreateNewGoal(newGoal *Goals) error {
 	return nil
 }
 
+// UpdateGoalByID() updates a goal record in the database by its ID
+// It takes the user ID and a pointer to a Goals struct as parameters
+func (m FinancialManagerModel) UpdateGoalByID(userID int64, updatedGoal *Goals) error {
+	ctx, cancel := contextGenerator(context.Background(), DefaultFinManDBContextTimeout)
+	defer cancel()
+	updatedAt, err := m.DB.UpdateGoalByID(ctx, database.UpdateGoalByIDParams{
+		Name:                updatedGoal.Name,
+		CurrentAmount:       sql.NullString{String: updatedGoal.CurrentAmount.String(), Valid: updatedGoal.CurrentAmount.String() != ""},
+		TargetAmount:        updatedGoal.TargetAmount.String(),
+		MonthlyContribution: updatedGoal.MonthlyContribution.String(),
+		StartDate:           updatedGoal.StartDate,
+		EndDate:             updatedGoal.EndDate,
+		Status:              updatedGoal.Status,
+		ID:                  updatedGoal.Id,
+		UserID:              userID,
+	})
+	// check for an error
+	if err != nil {
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return ErrEditConflict
+		case err.Error() == `pq: duplicate key value violates unique constraint "unique_user_goal_name"`:
+			fmt.Println("---- Duplicate key error")
+			return ErrDuplicateGoal
+		default:
+			fmt.Println("---- 1Error: ", err)
+			return err
+		}
+	}
+	// fill in the updatedGoal with the timestamps
+	updatedGoal.UpdatedAt = updatedAt
+	// everything went well
+	return nil
+}
+
 // GetGoalByID() retrieves a goal record from the database by its ID
 // It takes the goal ID as a parameter and returns a pointer to a Goals struct
 // and an error if the operation fails.
@@ -454,6 +556,174 @@ func (m FinancialManagerModel) GetGoalByID(userID, goalID int64) (*Goals, error)
 	return idGoals, nil
 }
 
+// ============================================================================================================
+// Goal Tracking
+// ============================================================================================================
+
+// CreateNewGoalPlan() creates a new goal plan record in the database
+// This are essentially templates for goals that users can create
+// so validation need not be as strict as when creating a goal
+// It takes a pointer to a GoalPlan struct and a user ID
+// We return an error if the operation fails.
+func (m FinancialManagerModel) CreateNewGoalPlan(userID int64, newGoalPlan *GoalPlan) error {
+	ctx, cancel := contextGenerator(context.Background(), DefaultFinManDBContextTimeout)
+	defer cancel()
+	goalPlan, err := m.DB.CreateNewGoalPlan(ctx, database.CreateNewGoalPlanParams{
+		UserID:              userID,
+		Name:                newGoalPlan.Name,
+		Description:         sql.NullString{String: newGoalPlan.Description, Valid: newGoalPlan.Description != ""},
+		TargetAmount:        sql.NullString{String: newGoalPlan.TargetAmount.String(), Valid: newGoalPlan.TargetAmount.String() != ""},
+		MonthlyContribution: sql.NullString{String: newGoalPlan.MonthlyContribution.String(), Valid: newGoalPlan.MonthlyContribution.String() != ""},
+		DurationInMonths:    sql.NullInt32{Int32: int32(newGoalPlan.DurationInMonths), Valid: newGoalPlan.DurationInMonths != 0},
+		IsStrict:            newGoalPlan.IsStrict,
+	})
+	if err != nil {
+		switch {
+		case err.Error() == `pq: duplicate key value violates unique constraint "idx_unique_user_goal_plan_name"`:
+			return ErrDuplicateGoalPlan
+		default:
+			return err
+		}
+	}
+	// fill in the newGoalPlan with the ID and timestamps
+	newGoalPlan.ID = goalPlan.ID
+	newGoalPlan.UserID = userID
+	newGoalPlan.CreatedAt = goalPlan.CreatedAt.Time
+	newGoalPlan.UpdatedAt = goalPlan.UpdatedAt.Time
+	// everything went well
+	return nil
+}
+
+// UpdateGoalPlanByID() updates a goal plan record in the database by its ID and User ID
+// It takes the user ID and a pointer to a GoalPlan struct as parameters
+func (m FinancialManagerModel) UpdateGoalPlanByID(userID int64, updatedGoalPlan *GoalPlan) error {
+	ctx, cancel := contextGenerator(context.Background(), DefaultFinManDBContextTimeout)
+	defer cancel()
+	updatedAt, err := m.DB.UpdateGoalPlanByID(ctx, database.UpdateGoalPlanByIDParams{
+		Name:                updatedGoalPlan.Name,
+		Description:         sql.NullString{String: updatedGoalPlan.Description, Valid: updatedGoalPlan.Description != ""},
+		TargetAmount:        sql.NullString{String: updatedGoalPlan.TargetAmount.String(), Valid: updatedGoalPlan.TargetAmount.String() != ""},
+		MonthlyContribution: sql.NullString{String: updatedGoalPlan.MonthlyContribution.String(), Valid: updatedGoalPlan.MonthlyContribution.String() != ""},
+		DurationInMonths:    sql.NullInt32{Int32: int32(updatedGoalPlan.DurationInMonths), Valid: updatedGoalPlan.DurationInMonths != 0},
+		IsStrict:            updatedGoalPlan.IsStrict,
+		ID:                  updatedGoalPlan.ID,
+		UserID:              userID,
+	})
+	// check for an error
+	if err != nil {
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return ErrEditConflict
+		case err.Error() == `pq: duplicate key value violates unique constraint "idx_unique_user_goal_plan_name"`:
+			return ErrDuplicateGoalPlan
+		default:
+			return err
+		}
+	}
+	// fill in the updatedGoalPlan with the timestamps
+	updatedGoalPlan.UpdatedAt = updatedAt.Time
+	// everything went well
+	return nil
+}
+
+// GetGoalPlanByID() retrieves a goal plan record from the database by its ID and User ID
+// It takes the goal plan ID and user ID as parameters and returns a pointer to a GoalPlan struct
+// and an error if the operation fails.
+func (m FinancialManagerModel) GetGoalPlanByID(userID, goalPlanID int64) (*GoalPlan, error) {
+	ctx, cancel := contextGenerator(context.Background(), DefaultFinManDBContextTimeout)
+	defer cancel()
+	goalPlan, err := m.DB.GetGoalPlanByID(ctx, database.GetGoalPlanByIDParams{
+		ID:     goalPlanID,
+		UserID: userID,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return nil, ErrGeneralRecordNotFound
+		default:
+			return nil, err
+		}
+	}
+	// fill in the GoalPlan struct with the data from the database
+	idGoalPlan := populateGoalPlan(goalPlan)
+	// everything went well
+	return idGoalPlan, nil
+}
+
+// GetGoalPlansForUser() retrieves all goal plan records associated with a user
+// This supports pagination and filtering by date created.
+// It takes the user ID and pagination parameters as parameters
+func (m FinancialManagerModel) GetGoalPlansForUser(userID int64, filters Filters) ([]*GoalPlan, Metadata, error) {
+	ctx, cancel := contextGenerator(context.Background(), DefaultFinManDBContextTimeout)
+	defer cancel()
+	// Fetch goal plans from the database
+	goalPlans, err := m.DB.GetGoalPlansForUser(ctx, database.GetGoalPlansForUserParams{
+		UserID: userID,
+		Limit:  int32(filters.limit()),
+		Offset: int32(filters.offset()),
+	})
+	if err != nil {
+		return nil, Metadata{}, err
+	}
+	// initialize our total values
+	totalGoalPlans := 0
+	goalPlanSlice := []*GoalPlan{}
+	// Process each goal plan
+	for _, row := range goalPlans {
+		var goalPlan GoalPlan
+		// fill in the GoalPlan struct with the data from the database
+		goalPlan.ID = row.ID
+		goalPlan.UserID = row.UserID
+		goalPlan.Name = row.Name
+		goalPlan.Description = row.Description.String
+		goalPlan.TargetAmount = decimal.RequireFromString(row.TargetAmount.String)
+		goalPlan.MonthlyContribution = decimal.RequireFromString(row.MonthlyContribution.String)
+		goalPlan.DurationInMonths = int(row.DurationInMonths.Int32)
+		goalPlan.IsStrict = row.IsStrict
+		goalPlan.CreatedAt = row.CreatedAt.Time
+		goalPlan.UpdatedAt = row.UpdatedAt.Time
+		// append the goal plan to the slice
+		goalPlanSlice = append(goalPlanSlice, &goalPlan)
+	}
+	// create a metadata
+	metadata := calculateMetadata(totalGoalPlans, filters.Page, filters.PageSize)
+	// return the goal plans
+	return goalPlanSlice, metadata, nil
+}
+
+// GetAndSaveAllGoalsForTracking() is the main tracking function that will be used to track goals
+// It is designed to work in tandem with the cron job scheduler whih will be running to
+// check goals that are due for tracking and track them
+// We get a limit as we will be running this in batches.
+// We return a pointer to a TrackedGoal struct and an error if the operation fails.
+func (m FinancialManagerModel) GetAndSaveAllGoalsForTracking(limit int32) ([]*TrackedGoal, error) {
+	ctx, cancel := contextGenerator(context.Background(), DefaultFinManDBContextTimeout)
+	defer cancel()
+	trackedGoals, err := m.DB.GetAndSaveAllGoalsForTracking(ctx, limit)
+	if err != nil {
+		return nil, err
+	}
+	// initializa a slice of TrackedGoal
+	trackedGoalsSlice := []*TrackedGoal{}
+	// Process each tracked goal
+	for _, row := range trackedGoals {
+		var trackedGoal TrackedGoal
+		// fill in the TrackedGoal struct with the data from the database
+		trackedGoal.ID = row.ID
+		trackedGoal.UserID = row.UserID
+		trackedGoal.GoalID = row.GoalID
+		trackedGoal.ContributedAmount = decimal.RequireFromString(row.ContributedAmount)
+		// append the tracked goal to the slice
+		trackedGoalsSlice = append(trackedGoalsSlice, &trackedGoal)
+	}
+	// everything went well
+	return trackedGoalsSlice, nil
+}
+
+// ============================================================================================================
+// Saving Goal Plan
+// ============================================================================================================
+
 // GetAllGoalSummaryBuBudgetID() retrieves all goal summaries associated with a budget
 // We return the goal summaries and additional totals which contains the total goals, total monthly contribution
 // total surplus, budget total amount, budget currency and budget strictness
@@ -470,7 +740,12 @@ func (m FinancialManagerModel) GetAllGoalSummaryBudgetID(budgetID, userID int64)
 		UserID: userID,
 	})
 	if err != nil {
-		return nil, nil, err
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return nil, nil, ErrGeneralRecordNotFound
+		default:
+			return nil, nil, err
+		}
 	}
 
 	// Initialize totals and summaries
@@ -559,6 +834,10 @@ func (m FinancialManagerModel) GetAllGoalSummaryBudgetID(budgetID, userID int64)
 	return goalSummaries, goalTotals, nil
 }
 
+// ============================================================================================================
+// Populators
+// ============================================================================================================
+
 func populateGoal(goalRow interface{}) *Goals {
 	switch goal := goalRow.(type) {
 	case database.GetGoalByIDRow:
@@ -575,6 +854,26 @@ func populateGoal(goalRow interface{}) *Goals {
 			Status:              goal.Status,
 			CreatedAt:           goal.CreatedAt,
 			UpdatedAt:           goal.UpdatedAt,
+		}
+	default:
+		return nil
+	}
+}
+
+func populateGoalPlan(goalPlanRow interface{}) *GoalPlan {
+	switch goalPlan := goalPlanRow.(type) {
+	case database.GoalPlan:
+		return &GoalPlan{
+			ID:                  goalPlan.ID,
+			UserID:              goalPlan.UserID,
+			Name:                goalPlan.Name,
+			Description:         goalPlan.Description.String,
+			TargetAmount:        decimal.RequireFromString(goalPlan.TargetAmount.String),
+			MonthlyContribution: decimal.RequireFromString(goalPlan.MonthlyContribution.String),
+			DurationInMonths:    int(goalPlan.DurationInMonths.Int32),
+			IsStrict:            goalPlan.IsStrict,
+			CreatedAt:           goalPlan.CreatedAt.Time,
+			UpdatedAt:           goalPlan.UpdatedAt.Time,
 		}
 	default:
 		return nil

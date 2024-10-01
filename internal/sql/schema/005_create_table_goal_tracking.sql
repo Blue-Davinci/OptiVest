@@ -4,8 +4,8 @@ CREATE TYPE tracking_type_enum AS ENUM ('monthly', 'bonus', 'other');
 
 CREATE TABLE goal_tracking (
     id BIGSERIAL PRIMARY KEY,                                        -- Unique tracking entry ID
-    user_id BIGINT REFERENCES users(id) ON DELETE CASCADE,            -- User who owns the goal
-    goal_id BIGINT REFERENCES goals(id) ON DELETE CASCADE,            -- Reference to the goal
+    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,            -- User who owns the goal
+    goal_id BIGINT NOT NULL REFERENCES goals(id) ON DELETE SET NULL,            -- Reference to the goal
     tracking_date DATE NOT NULL DEFAULT CURRENT_DATE,                 -- Date of tracking (when progress was recorded)
     contributed_amount NUMERIC(20, 2) NOT NULL,                       -- Amount contributed towards the goal
     tracking_type tracking_type_enum NOT NULL DEFAULT 'monthly',      -- Type of tracking

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"expvar"
 	"flag"
 	"fmt"
@@ -21,7 +22,7 @@ import (
 	"github.com/go-redis/redis/v8"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
-	"github.com/shopspring/decimal"
+	"github.com/robfig/cron/v3"
 	"go.uber.org/zap"
 )
 
@@ -86,6 +87,12 @@ type config struct {
 		loginurl         string
 		passwordreseturl string
 		callback_url     string
+	}
+	scheduler struct {
+		trackMonthlyGoalsCron *cron.Cron
+	}
+	limit struct {
+		monthlyGoalProcessingBatchLimit int
 	}
 }
 
@@ -164,8 +171,13 @@ func main() {
 	flag.StringVar(&cfg.frontend.activationurl, "frontend-activation-url", "http://localhost:5173/verify?token=", "Frontend Activation URL")
 	flag.StringVar(&cfg.frontend.passwordreseturl, "frontend-password-reset-url", "http://localhost:5173/reset/password?token=", "Frontend Password Reset URL")
 	flag.StringVar(&cfg.frontend.callback_url, "frontend-callback-url", "https://adapted-healthy-monitor.ngrok-free.app/v1", "Frontend Callback URL")
+
+	// Limit configuration
+	flag.IntVar(&cfg.limit.monthlyGoalProcessingBatchLimit, "monthly-goal-batch-limit", 100, "Batching Limit for Monthly Goal Processing")
 	// Parse the flags
 	flag.Parse()
+	// Initialize our cronJobs
+	cfg.scheduler.trackMonthlyGoalsCron = cron.New()
 	// Create a new version boolean flag with the default value of false.
 	displayVersion := flag.Bool("version", false, "Display version and exit")
 	// If the version flag value is true, then print out the version number and
@@ -190,7 +202,6 @@ func main() {
 	httpClient := NewClient(cfg.http_client.timeout, cfg.http_client.retrymax)
 	// log our connection pool
 	logger.Info("database connection pool established", zap.String("dsn", cfg.db.dsn))
-	logger.Info("Encryption Key", zap.String("key", cfg.encryption.key))
 	// Init our exp metrics variables for server metrics.
 	publishMetrics()
 
@@ -205,32 +216,45 @@ func main() {
 	err = app.startupFunction()
 	if err != nil {
 		logger.Fatal("Error while starting up application", zap.String("error", err.Error()))
+		return
 	}
+	// start schedulers
+	app.startSchedulers()
 
 	err = app.server()
 	if err != nil {
 		logger.Fatal("Error while starting server.", zap.String("error", err.Error()))
 	}
+
 }
 
 func (app *application) startupFunction() error {
-	x, err := app.convertAndGetExchangeRate("usd", "eur")
+	// first we need to check if the currency is in REDIS, if it is
+	// we skip requesting the data from the API
+	// if it is not we request the data from the API and save it to REDIS
+	// If the currency cannot be found it will return ErrFailedToGetCurrency
+	err := app.verifyCurrencyInRedis(app.config.api.defaultcurrency)
 	if err != nil {
-		app.logger.Error("Error getting exchange rate", zap.String("error", err.Error()))
-	}
-	app.logger.Info("Exchange Rate", zap.Any("exchange", x.ConvertAmount(decimal.NewFromFloat(100.0)).ConvertedAmount))
-	// read and load currencies
-	err = app.getAndSaveAvailableCurrencies()
-	if err != nil {
-		return err
-	}
-	// test with verify
-	err = app.verifyCurrencyInRedis("USD")
-	if err != nil {
-		app.logger.Error("Error verifying currency in Redis", zap.String("error", err.Error()))
-		return err
+		switch {
+		case errors.Is(err, data.ErrFailedToGetCurrency):
+			// log the error and continue to fetch the data from the API
+			app.logger.Error("Failed to get currency from Redis", zap.String("currency", app.config.api.defaultcurrency))
+			// read and load currencies
+			err = app.getAndSaveAvailableCurrencies()
+			if err != nil {
+				return err
+			}
+		default:
+			app.logger.Error("Error verifying currency in Redis", zap.String("error", err.Error()))
+			return err
+		}
 	}
 	return nil
+}
+
+func (app *application) startSchedulers() {
+	app.logger.Info("Starting Schedulers")
+	go app.trackMonthlyGoalsScheduleHandler()
 }
 
 // publishMetrics sets up the expvar variables for the application

@@ -114,6 +114,50 @@ func (q *Queries) CreateNewGoal(ctx context.Context, arg CreateNewGoalParams) (C
 	return i, err
 }
 
+const createNewGoalPlan = `-- name: CreateNewGoalPlan :one
+INSERT INTO goal_plans (
+    user_id, 
+    name, 
+    description, 
+    target_amount, 
+    monthly_contribution, 
+    duration_in_months, 
+    is_strict
+) VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING id, created_at, updated_at
+`
+
+type CreateNewGoalPlanParams struct {
+	UserID              int64
+	Name                string
+	Description         sql.NullString
+	TargetAmount        sql.NullString
+	MonthlyContribution sql.NullString
+	DurationInMonths    sql.NullInt32
+	IsStrict            bool
+}
+
+type CreateNewGoalPlanRow struct {
+	ID        int64
+	CreatedAt sql.NullTime
+	UpdatedAt sql.NullTime
+}
+
+func (q *Queries) CreateNewGoalPlan(ctx context.Context, arg CreateNewGoalPlanParams) (CreateNewGoalPlanRow, error) {
+	row := q.db.QueryRowContext(ctx, createNewGoalPlan,
+		arg.UserID,
+		arg.Name,
+		arg.Description,
+		arg.TargetAmount,
+		arg.MonthlyContribution,
+		arg.DurationInMonths,
+		arg.IsStrict,
+	)
+	var i CreateNewGoalPlanRow
+	err := row.Scan(&i.ID, &i.CreatedAt, &i.UpdatedAt)
+	return i, err
+}
+
 const deleteBudgetById = `-- name: DeleteBudgetById :one
 DELETE FROM budgets
 WHERE id = $1 AND user_id = $2
@@ -189,6 +233,56 @@ func (q *Queries) GetAllGoalSummaryBuBudgetID(ctx context.Context, arg GetAllGoa
 			&i.IsStrict,
 			&i.TotalMonthlyContributions,
 			&i.BudgetSurplus,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getAndSaveAllGoalsForTracking = `-- name: GetAndSaveAllGoalsForTracking :many
+INSERT INTO goal_tracking (user_id, goal_id, contributed_amount, tracking_type)
+SELECT g.user_id, g.id, g.monthly_contribution, 'monthly'
+FROM goals g
+LEFT JOIN goal_tracking gt ON g.id = gt.goal_id 
+   AND gt.truncated_tracking_date = date_trunc('month', CURRENT_DATE)::date
+WHERE gt.goal_id IS NULL
+  AND g.status = 'ongoing' 
+  AND g.start_date < CURRENT_DATE
+ORDER BY truncated_tracking_date ASC
+LIMIT $1
+RETURNING id, user_id, goal_id, contributed_amount
+`
+
+type GetAndSaveAllGoalsForTrackingRow struct {
+	ID                int64
+	UserID            int64
+	GoalID            int64
+	ContributedAmount string
+}
+
+// Insert tracked goals that haven't been tracked for more than 1 month
+func (q *Queries) GetAndSaveAllGoalsForTracking(ctx context.Context, limit int32) ([]GetAndSaveAllGoalsForTrackingRow, error) {
+	rows, err := q.db.QueryContext(ctx, getAndSaveAllGoalsForTracking, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetAndSaveAllGoalsForTrackingRow
+	for rows.Next() {
+		var i GetAndSaveAllGoalsForTrackingRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.GoalID,
+			&i.ContributedAmount,
 		); err != nil {
 			return nil, err
 		}
@@ -380,6 +474,118 @@ func (q *Queries) GetGoalByID(ctx context.Context, arg GetGoalByIDParams) (GetGo
 	return i, err
 }
 
+const getGoalPlanByID = `-- name: GetGoalPlanByID :one
+SELECT 
+    id, 
+    user_id, 
+    name, 
+    description, 
+    target_amount, 
+    monthly_contribution, 
+    duration_in_months, 
+    is_strict, 
+    created_at, 
+    updated_at
+FROM goal_plans
+WHERE id = $1 AND user_id = $2
+`
+
+type GetGoalPlanByIDParams struct {
+	ID     int64
+	UserID int64
+}
+
+func (q *Queries) GetGoalPlanByID(ctx context.Context, arg GetGoalPlanByIDParams) (GoalPlan, error) {
+	row := q.db.QueryRowContext(ctx, getGoalPlanByID, arg.ID, arg.UserID)
+	var i GoalPlan
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Name,
+		&i.Description,
+		&i.TargetAmount,
+		&i.MonthlyContribution,
+		&i.DurationInMonths,
+		&i.IsStrict,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getGoalPlansForUser = `-- name: GetGoalPlansForUser :many
+SELECT count(*) OVER() AS total_goal_plans,
+    id, 
+    user_id, 
+    name, 
+    description, 
+    target_amount, 
+    monthly_contribution, 
+    duration_in_months, 
+    is_strict, 
+    created_at, 
+    updated_at
+FROM goal_plans
+WHERE user_id = $1
+ORDER BY created_at DESC
+LIMIT $2 OFFSET $3
+`
+
+type GetGoalPlansForUserParams struct {
+	UserID int64
+	Limit  int32
+	Offset int32
+}
+
+type GetGoalPlansForUserRow struct {
+	TotalGoalPlans      int64
+	ID                  int64
+	UserID              int64
+	Name                string
+	Description         sql.NullString
+	TargetAmount        sql.NullString
+	MonthlyContribution sql.NullString
+	DurationInMonths    sql.NullInt32
+	IsStrict            bool
+	CreatedAt           sql.NullTime
+	UpdatedAt           sql.NullTime
+}
+
+func (q *Queries) GetGoalPlansForUser(ctx context.Context, arg GetGoalPlansForUserParams) ([]GetGoalPlansForUserRow, error) {
+	rows, err := q.db.QueryContext(ctx, getGoalPlansForUser, arg.UserID, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetGoalPlansForUserRow
+	for rows.Next() {
+		var i GetGoalPlansForUserRow
+		if err := rows.Scan(
+			&i.TotalGoalPlans,
+			&i.ID,
+			&i.UserID,
+			&i.Name,
+			&i.Description,
+			&i.TargetAmount,
+			&i.MonthlyContribution,
+			&i.DurationInMonths,
+			&i.IsStrict,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updateBudgetById = `-- name: UpdateBudgetById :one
 UPDATE budgets
 SET 
@@ -419,6 +625,89 @@ func (q *Queries) UpdateBudgetById(ctx context.Context, arg UpdateBudgetByIdPara
 		arg.UserID,
 	)
 	var updated_at time.Time
+	err := row.Scan(&updated_at)
+	return updated_at, err
+}
+
+const updateGoalByID = `-- name: UpdateGoalByID :one
+UPDATE goals
+SET 
+    name = $1,
+    current_amount = $2,
+    target_amount = $3,
+    monthly_contribution = $4,
+    start_date = $5,
+    end_date = $6,
+    status = $7
+WHERE id = $8 AND user_id = $9
+RETURNING updated_at
+`
+
+type UpdateGoalByIDParams struct {
+	Name                string
+	CurrentAmount       sql.NullString
+	TargetAmount        string
+	MonthlyContribution string
+	StartDate           time.Time
+	EndDate             time.Time
+	Status              GoalStatus
+	ID                  int64
+	UserID              int64
+}
+
+func (q *Queries) UpdateGoalByID(ctx context.Context, arg UpdateGoalByIDParams) (time.Time, error) {
+	row := q.db.QueryRowContext(ctx, updateGoalByID,
+		arg.Name,
+		arg.CurrentAmount,
+		arg.TargetAmount,
+		arg.MonthlyContribution,
+		arg.StartDate,
+		arg.EndDate,
+		arg.Status,
+		arg.ID,
+		arg.UserID,
+	)
+	var updated_at time.Time
+	err := row.Scan(&updated_at)
+	return updated_at, err
+}
+
+const updateGoalPlanByID = `-- name: UpdateGoalPlanByID :one
+UPDATE goal_plans SET
+    name = $1,
+    description = $2,
+    target_amount = $3,
+    monthly_contribution = $4,
+    duration_in_months = $5,
+    is_strict = $6
+WHERE
+    id = $7 AND user_id = $8
+RETURNING updated_at
+`
+
+type UpdateGoalPlanByIDParams struct {
+	Name                string
+	Description         sql.NullString
+	TargetAmount        sql.NullString
+	MonthlyContribution sql.NullString
+	DurationInMonths    sql.NullInt32
+	IsStrict            bool
+	ID                  int64
+	UserID              int64
+}
+
+func (q *Queries) UpdateGoalPlanByID(ctx context.Context, arg UpdateGoalPlanByIDParams) (sql.NullTime, error) {
+	row := q.db.QueryRowContext(ctx, updateGoalPlanByID,
+		arg.Name,
+		arg.Description,
+		arg.TargetAmount,
+		arg.MonthlyContribution,
+		arg.DurationInMonths,
+		arg.IsStrict,
+		arg.ID,
+		arg.UserID,
+	)
+	var updated_at sql.NullTime
 	err := row.Scan(&updated_at)
 	return updated_at, err
 }

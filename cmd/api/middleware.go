@@ -14,7 +14,6 @@ import (
 	"github.com/Blue-Davinci/OptiVest/internal/validator"
 	"github.com/felixge/httpsnoop"
 	"github.com/tomasen/realip"
-	"go.uber.org/zap"
 	"golang.org/x/time/rate"
 )
 
@@ -81,7 +80,7 @@ func (app *application) authenticate(next http.Handler) http.Handler {
 			app.invalidAuthenticationTokenResponse(w, r)
 			return
 		}
-		app.logger.Info("Retrieved Token: ", zap.String("Token", token))
+		//app.logger.Info("Retrieved Token: ", zap.String("Token", token))
 		// Retrieve the details of the user associated with the authentication token,
 		// again calling the invalidAuthenticationTokenResponse() helper if no
 		// matching record was found. IMPORTANT: Notice that we are using

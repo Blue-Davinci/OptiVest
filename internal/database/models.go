@@ -169,10 +169,23 @@ type Goal struct {
 	UpdatedAt           time.Time
 }
 
+type GoalPlan struct {
+	ID                  int64
+	UserID              int64
+	Name                string
+	Description         sql.NullString
+	TargetAmount        sql.NullString
+	MonthlyContribution sql.NullString
+	DurationInMonths    sql.NullInt32
+	IsStrict            bool
+	CreatedAt           sql.NullTime
+	UpdatedAt           sql.NullTime
+}
+
 type GoalTracking struct {
 	ID                    int64
-	UserID                sql.NullInt64
-	GoalID                sql.NullInt64
+	UserID                int64
+	GoalID                int64
 	TrackingDate          time.Time
 	ContributedAmount     string
 	TrackingType          TrackingTypeEnum

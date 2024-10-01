@@ -186,7 +186,7 @@ func (app *application) verifyCurrencyInRedis(currency string) error {
 	if !exists {
 		return data.ErrFailedToGetCurrency
 	}
-	app.logger.Info("Currency exists in Redis", zap.String("currency", currency))
+	app.logger.Info("currency cerified, using cached currencies", zap.String("currency", currency))
 	return nil
 }
 
@@ -295,4 +295,44 @@ func (app *application) readInt(qs url.Values, key string, defaultValue int, v *
 	}
 	// Otherwise, return the converted integer value.
 	return i
+}
+
+// isLastDayOfMonth() checks if the given time is the last day of the month.
+func (app *application) isLastDayOfMonth(t time.Time) bool {
+	nextDay := t.AddDate(0, 0, 1) // Add one day
+	return nextDay.Day() == 1     // If the next day is the first day of the month
+}
+
+// cacheData caches any data structure with a given key and TTL
+func (app *application) cacheSerializedData(key string, data interface{}, ttl time.Duration) error {
+	serializedData, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+
+	err = app.RedisDB.Set(context.Background(), key, serializedData, ttl).Err()
+	if err != nil {
+		return err
+	}
+	app.logger.Info("saving data to cache", zap.String("key", key))
+	return nil
+}
+
+// getCachedData retrieves cached data for a given key and deserializes it into the provided target
+func (app *application) getSerializedCachedData(key string, target interface{}) (bool, error) {
+	cachedData, err := app.RedisDB.Get(context.Background(), key).Bytes()
+	if err != nil {
+		if err == redis.Nil {
+			return false, nil
+		}
+		return false, err
+	}
+
+	err = json.Unmarshal(cachedData, target)
+	if err != nil {
+		return false, err
+	}
+
+	app.logger.Info("retrieved cached data", zap.String("key", key))
+	return true, nil
 }

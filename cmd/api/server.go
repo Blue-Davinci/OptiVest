@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/robfig/cron/v3"
 	"go.uber.org/zap"
 )
 
@@ -46,11 +47,10 @@ func (app *application) server() error {
 		app.logger.Info("completing background tasks...", zap.String("addr", srv.Addr))
 		// wait for any background tasks to complete
 		app.wg.Wait()
-		// stop the cron job schedulers
-		/*app.stopCronJobs(
-			app.config.notifier.cronJob,
-			app.config.paystack.cronJob,
-		)*/
+		//stop the cron job schedulers
+		app.stopCronJobs(
+			app.config.scheduler.trackMonthlyGoalsCron,
+		)
 		// Call Shutdown() on our server, passing in the context we just made.
 		shutdownChan <- srv.Shutdown(ctx)
 	}()
@@ -73,13 +73,12 @@ func (app *application) server() error {
 	return nil
 }
 
-/**stopCronJobs() essentially stopns all the cron jobs that are running in the application
+// stopCronJobs() essentially stopns all the cron jobs that are running in the application
 func (app *application) stopCronJobs(cronJobs ...*cron.Cron) {
-	app.logger.PrintInfo("stopping cron jobs...", nil)
+	app.logger.Info("stopping cron jobs..", zap.Int("count", len(cronJobs)))
 	for _, cronJob := range cronJobs {
 		ctx := cronJob.Stop()
 		<-ctx.Done()
 	}
 
 }
-**/

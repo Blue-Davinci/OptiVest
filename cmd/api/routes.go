@@ -8,6 +8,7 @@ import (
 	"github.com/justinas/alice"
 )
 
+// routes() is a method that returns a http.Handler that contains all the routes for the application
 func (app *application) routes() http.Handler {
 	router := chi.NewRouter()
 	router.Use(cors.Handler(cors.Options{
@@ -40,6 +41,7 @@ func (app *application) routes() http.Handler {
 	return router
 }
 
+// userRoutes() is a method that returns a chi.Router that contains all the routes for the users
 func (app *application) userRoutes(dynamicMiddleware *alice.Chain) chi.Router {
 	userRoutes := chi.NewRouter()
 	userRoutes.Post("/", app.registerUserHandler)
@@ -50,6 +52,7 @@ func (app *application) userRoutes(dynamicMiddleware *alice.Chain) chi.Router {
 	return userRoutes
 }
 
+// apiKeyRoutes() is a method that returns a chi.Router that contains all the routes for the api keys
 func (app *application) apiKeyRoutes() chi.Router {
 	apiKeyRoutes := chi.NewRouter()
 	// initial request for token
@@ -60,6 +63,7 @@ func (app *application) apiKeyRoutes() chi.Router {
 	return apiKeyRoutes
 }
 
+// budgetRoutes() is a method that returns a chi.Router that contains all the routes for the budgets
 func (app *application) budgetRoutes() chi.Router {
 	budgetRoutes := chi.NewRouter()
 	budgetRoutes.Get("/", app.getBudgetsForUserHandler)
@@ -69,8 +73,14 @@ func (app *application) budgetRoutes() chi.Router {
 	return budgetRoutes
 }
 
+// goalRoutes() is a method that returns a chi.Router that contains all the routes for the goals
 func (app *application) goalRoutes() chi.Router {
 	goalRoutes := chi.NewRouter()
 	goalRoutes.Post("/", app.createNewGoalHandler)
+	goalRoutes.Patch("/{goalID}", app.updatedGoalHandler)
+	// /plan : for creating a new plan for a goal
+	goalRoutes.Post("/plan", app.createNewGoalPlanHandler)
+	goalRoutes.Patch("/plan/{goalPlanID}", app.updatedGoalPlanHandler)
+	goalRoutes.Get("/plan", app.getGoalPlansForUserHandler)
 	return goalRoutes
 }

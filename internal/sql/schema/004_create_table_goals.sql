@@ -21,10 +21,22 @@ CREATE TABLE goals (
     CONSTRAINT unique_user_goal_name UNIQUE (user_id, name)
 );
 
+-- Trigger function to insert a tracking record when a new goal is created
+-- +goose StatementBegin
+CREATE OR REPLACE FUNCTION add_goal_to_tracking_table()
+RETURNS TRIGGER AS $$
+BEGIN
+    INSERT INTO goal_tracking (user_id, goal_id, contributed_amount, tracking_type, truncated_tracking_date)
+    VALUES (NEW.user_id, NEW.id, NEW.monthly_contribution, 'monthly', date_trunc('month', NEW.start_date)::DATE);
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+-- +goose StatementEnd
+
 -- Attach the reusable trigger to the `budgets` table
 -- +goose StatementBegin
 CREATE TRIGGER trigger_update_goals_timestamp
-BEFORE UPDATE ON goals
+AFTER UPDATE ON goals
 FOR EACH ROW
 EXECUTE FUNCTION update_timestamp();
 -- +goose StatementEnd
@@ -41,6 +53,12 @@ CREATE INDEX idx_goals_user_id_status ON goals (user_id, status);
 CREATE INDEX idx_goals_end_date ON goals (end_date);
 -- Composite index to retrieve goals by budget and user quickly
 CREATE INDEX idx_goals_budget_id_user_id ON goals(budget_id, user_id);
+
+-- Attach the trigger to the goals table
+CREATE TRIGGER trigger_add_goal_to_tracking_table
+AFTER INSERT ON goals
+FOR EACH ROW
+EXECUTE FUNCTION add_goal_to_tracking_table();
 
 
 -- +goose Down
