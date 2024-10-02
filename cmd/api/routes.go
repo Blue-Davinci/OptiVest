@@ -35,6 +35,7 @@ func (app *application) routes() http.Handler {
 	v1Router.Mount("/api", app.apiKeyRoutes())
 	v1Router.With(dynamicMiddleware.Then).Mount("/budgets", app.budgetRoutes())
 	v1Router.With(dynamicMiddleware.Then).Mount("/goals", app.goalRoutes())
+	v1Router.With(dynamicMiddleware.Then).Mount("/groups", app.groupRoutes())
 
 	// Moount the v1Router to the main base router
 	router.Mount("/v1", v1Router)
@@ -83,4 +84,16 @@ func (app *application) goalRoutes() chi.Router {
 	goalRoutes.Patch("/plan/{goalPlanID}", app.updatedGoalPlanHandler)
 	goalRoutes.Get("/plan", app.getGoalPlansForUserHandler)
 	return goalRoutes
+}
+
+// groupRoutes() is a method that returns a chi.Router that contains all the routes for the user groups
+func (app *application) groupRoutes() chi.Router {
+	groupRoutes := chi.NewRouter()
+	groupRoutes.Post("/", app.createNewUserGroupHandler)
+	groupRoutes.Patch("/{groupID}", app.updateUserGroupHandler)
+
+	// group invitations
+	groupRoutes.Post("/invite", app.createNewGroupInvitation)
+	groupRoutes.Patch("/invite/{groupID}", app.updateGroupInvitationStatusHandler)
+	return groupRoutes
 }

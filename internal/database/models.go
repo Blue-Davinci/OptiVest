@@ -54,6 +54,93 @@ func (ns NullGoalStatus) Value() (driver.Value, error) {
 	return string(ns.GoalStatus), nil
 }
 
+type InvitationStatusType string
+
+const (
+	InvitationStatusTypePending  InvitationStatusType = "pending"
+	InvitationStatusTypeAccepted InvitationStatusType = "accepted"
+	InvitationStatusTypeDeclined InvitationStatusType = "declined"
+	InvitationStatusTypeExpired  InvitationStatusType = "expired"
+)
+
+func (e *InvitationStatusType) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = InvitationStatusType(s)
+	case string:
+		*e = InvitationStatusType(s)
+	default:
+		return fmt.Errorf("unsupported scan type for InvitationStatusType: %T", src)
+	}
+	return nil
+}
+
+type NullInvitationStatusType struct {
+	InvitationStatusType InvitationStatusType
+	Valid                bool // Valid is true if InvitationStatusType is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullInvitationStatusType) Scan(value interface{}) error {
+	if value == nil {
+		ns.InvitationStatusType, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.InvitationStatusType.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullInvitationStatusType) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.InvitationStatusType), nil
+}
+
+type MembershipRole string
+
+const (
+	MembershipRoleMember    MembershipRole = "member"
+	MembershipRoleAdmin     MembershipRole = "admin"
+	MembershipRoleModerator MembershipRole = "moderator"
+)
+
+func (e *MembershipRole) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = MembershipRole(s)
+	case string:
+		*e = MembershipRole(s)
+	default:
+		return fmt.Errorf("unsupported scan type for MembershipRole: %T", src)
+	}
+	return nil
+}
+
+type NullMembershipRole struct {
+	MembershipRole MembershipRole
+	Valid          bool // Valid is true if MembershipRole is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullMembershipRole) Scan(value interface{}) error {
+	if value == nil {
+		ns.MembershipRole, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.MembershipRole.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullMembershipRole) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.MembershipRole), nil
+}
+
 type MfaStatusType string
 
 const (
@@ -192,6 +279,55 @@ type GoalTracking struct {
 	CreatedAt             sql.NullTime
 	UpdatedAt             sql.NullTime
 	TruncatedTrackingDate sql.NullTime
+}
+
+type Group struct {
+	ID             int64
+	CreatorUserID  sql.NullInt64
+	GroupImageUrl  string
+	Name           string
+	IsPrivate      sql.NullBool
+	MaxMemberCount sql.NullInt32
+	Description    sql.NullString
+	ActivityCount  sql.NullInt32
+	LastActivityAt sql.NullTime
+	CreatedAt      sql.NullTime
+	UpdatedAt      sql.NullTime
+	Version        sql.NullInt32
+}
+
+type GroupInvitation struct {
+	ID               int64
+	GroupID          sql.NullInt64
+	InviterUserID    sql.NullInt64
+	InviteeUserEmail string
+	Status           InvitationStatusType
+	SentAt           sql.NullTime
+	RespondedAt      sql.NullTime
+	ExpirationDate   time.Time
+}
+
+type GroupMembership struct {
+	ID           int64
+	GroupID      sql.NullInt64
+	UserID       sql.NullInt64
+	Status       NullMfaStatusType
+	ApprovalTime sql.NullTime
+	RequestTime  sql.NullTime
+	Role         NullMembershipRole
+	CreatedAt    sql.NullTime
+	UpdatedAt    sql.NullTime
+}
+
+type GroupTransaction struct {
+	ID              int64
+	GroupID         sql.NullInt64
+	MemberID        sql.NullInt64
+	TransactionType string
+	Amount          string
+	Description     sql.NullString
+	CreatedAt       sql.NullTime
+	UpdatedAt       sql.NullTime
 }
 
 type Token struct {

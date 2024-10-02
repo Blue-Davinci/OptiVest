@@ -354,7 +354,12 @@ func (app *application) createNewGoalHandler(w http.ResponseWriter, r *http.Requ
 	}
 	mappedStatus, err := app.models.FinancialManager.MapStatusToOCFConstant(input.Status)
 	if err != nil {
-		app.badRequestResponse(w, r, data.ErrInvalidOCFStatus)
+		switch {
+		case errors.Is(err, data.ErrInvalidOCFStatus):
+			app.badRequestResponse(w, r, err)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
 		return
 	}
 	// make a goal from the input struct

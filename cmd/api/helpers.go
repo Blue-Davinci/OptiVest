@@ -336,3 +336,18 @@ func (app *application) getSerializedCachedData(key string, target interface{}) 
 	app.logger.Info("retrieved cached data", zap.String("key", key))
 	return true, nil
 }
+
+// validateURL() checks if the input string is a valid URL
+func validateURL(input string) error {
+	parsedURL, err := url.ParseRequestURI(input)
+	if err != nil {
+		return fmt.Errorf("invalid URL: %w", err)
+	}
+
+	// Further validate URL components
+	if parsedURL.Scheme == "" || parsedURL.Host == "" {
+		return fmt.Errorf("URL must contain both scheme and host")
+	}
+
+	return nil
+}

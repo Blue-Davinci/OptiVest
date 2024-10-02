@@ -14,17 +14,19 @@ var (
 )
 
 type Models struct {
-	Users            UserModel
-	Tokens           TokenModel
-	ApiManager       ApiManagerModel
-	FinancialManager FinancialManagerModel
+	Users                 UserModel
+	Tokens                TokenModel
+	ApiManager            ApiManagerModel
+	FinancialManager      FinancialManagerModel
+	FinancialGroupManager FinancialGroupManagerModel
 }
 
 func NewModels(db *database.Queries) Models {
 	return Models{
-		Users:            UserModel{DB: db},
-		Tokens:           TokenModel{DB: db},
-		ApiManager:       ApiManagerModel{DB: db},
-		FinancialManager: FinancialManagerModel{DB: db},
+		Users:                 UserModel{DB: db},
+		Tokens:                TokenModel{DB: db},
+		ApiManager:            ApiManagerModel{DB: db},
+		FinancialManager:      FinancialManagerModel{DB: db},
+		FinancialGroupManager: FinancialGroupManagerModel{DB: db},
 	}
 }
