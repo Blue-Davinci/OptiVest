@@ -272,7 +272,7 @@ type GoalPlan struct {
 type GoalTracking struct {
 	ID                    int64
 	UserID                int64
-	GoalID                int64
+	GoalID                sql.NullInt64
 	TrackingDate          time.Time
 	ContributedAmount     string
 	TrackingType          TrackingTypeEnum
@@ -294,6 +294,32 @@ type Group struct {
 	CreatedAt      sql.NullTime
 	UpdatedAt      sql.NullTime
 	Version        sql.NullInt32
+}
+
+type GroupExpense struct {
+	ID          int64
+	GroupID     sql.NullInt64
+	MemberID    sql.NullInt64
+	Amount      string
+	Description sql.NullString
+	Category    sql.NullString
+	CreatedAt   sql.NullTime
+	UpdatedAt   sql.NullTime
+}
+
+type GroupGoal struct {
+	ID            int64
+	GroupID       int64
+	CreatorUserID int64
+	GoalName      string
+	TargetAmount  string
+	CurrentAmount sql.NullString
+	StartDate     time.Time
+	Deadline      time.Time
+	Description   string
+	Status        GoalStatus
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 type GroupInvitation struct {
@@ -320,14 +346,13 @@ type GroupMembership struct {
 }
 
 type GroupTransaction struct {
-	ID              int64
-	GroupID         sql.NullInt64
-	MemberID        sql.NullInt64
-	TransactionType string
-	Amount          string
-	Description     sql.NullString
-	CreatedAt       sql.NullTime
-	UpdatedAt       sql.NullTime
+	ID          int64
+	GoalID      sql.NullInt64
+	MemberID    sql.NullInt64
+	Amount      string
+	Description sql.NullString
+	CreatedAt   sql.NullTime
+	UpdatedAt   sql.NullTime
 }
 
 type Token struct {

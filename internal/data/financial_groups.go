@@ -9,6 +9,7 @@ import (
 
 	"github.com/Blue-Davinci/OptiVest/internal/database"
 	"github.com/Blue-Davinci/OptiVest/internal/validator"
+	"github.com/shopspring/decimal"
 )
 
 const (
@@ -25,6 +26,7 @@ var (
 	ErrGroupNameExists       = errors.New("group name already exists")
 	ErrInvalidStatusType     = errors.New("invalid status type")
 	ErrGroupInvitationExists = errors.New("group invitation already exists")
+	ErrOverFunding           = errors.New("overfunding is not allowed, please check the amount")
 )
 
 type FinancialGroupManagerModel struct {
@@ -47,6 +49,22 @@ type Group struct {
 	Version        int       `json:"version"`
 }
 
+// GroupGoal struct represents how we group our goals
+type GroupGoal struct {
+	ID            int64               `json:"id"`
+	GroupID       int64               `json:"group_id"`
+	CreatorUserID int64               `json:"creator_user_id"`
+	GoalName      string              `json:"name"`
+	TargetAmount  decimal.Decimal     `json:"target_amount"`
+	CurrentAmount decimal.Decimal     `json:"current_amount"`
+	Startdate     time.Time           `json:"start_date"`
+	Deadline      time.Time           `json:"deadline"`
+	Description   string              `json:"description"`
+	Status        database.GoalStatus `json:"status"`
+	CreatedAt     time.Time           `json:"created_at"`
+	UpdatedAt     time.Time           `json:"updated_at"`
+}
+
 // Group Invitation struct represents a group invitation in the database
 type GroupInvitation struct {
 	ID               int64                         `json:"id"`
@@ -57,6 +75,29 @@ type GroupInvitation struct {
 	SentAt           time.Time                     `json:"sent_at"`
 	RespondedAt      time.Time                     `json:"responded_at,omitempty"`
 	ExpirationDate   time.Time                     `json:"expiration_date"`
+}
+
+// GroupTransaction struct represents a group transaction in the database
+type GroupTransaction struct {
+	ID          int64           `json:"id"`
+	GoalID      int64           `json:"goal_id"`
+	MemberID    int64           `json:"member_id"`
+	Amount      decimal.Decimal `json:"amount"`
+	Description string          `json:"description"`
+	CreatedAt   time.Time       `json:"created_at"`
+	UpdatedAt   time.Time       `json:"updated_at"`
+}
+
+// GroupExpense struct represents a group expense in the database
+type GroupExpense struct {
+	ID          int64           `json:"id"`          // Unique expense ID
+	GroupID     int64           `json:"group_id"`    // Reference to the group
+	MemberID    int64           `json:"member_id"`   // Reference to the member who made the expense
+	Amount      decimal.Decimal `json:"amount"`      // Amount of the expense
+	Description string          `json:"description"` // Optional description of the expense
+	Category    string          `json:"category"`    // Category of the expense (e.g., 'operations', 'purchase', etc.)
+	CreatedAt   time.Time       `json:"created_at"`  // Time when the expense was created
+	UpdatedAt   time.Time       `json:"updated_at"`  // Time when the expense was last updated
 }
 
 // MapInvitationInvitationStatusTypeToConstant() maps the invitation status type to a constant
@@ -91,12 +132,15 @@ func ValidateGroupVersion(v *validator.Validator, version int) {
 	v.Check(version < 1, "version", "must be greater than 0")
 }
 
+// ValidateGroup() validates the group entry
 func ValidateGroup(v *validator.Validator, group *Group) {
 	ValidateGroupName(v, group.Name)
 	ValidateGroupPrivacy(v, group.IsPrivate)
 	ValidateGroupMaxMemberCount(v, group.MaxMemberCount)
 	ValidateGroupDescription(v, group.Description)
 }
+
+// ValidateGroupUpdate() validates the group update
 func ValidateGroupUpdate(v *validator.Validator, group *Group) {
 	ValidateGroupName(v, group.Name)
 	ValidateGroupPrivacy(v, group.IsPrivate)
@@ -104,12 +148,59 @@ func ValidateGroupUpdate(v *validator.Validator, group *Group) {
 	ValidateGroupDescription(v, group.Description)
 	ValidateGroupVersion(v, group.Version)
 }
+
+// ================================================================================
+// Group Goals
+// ================================================================================
+func ValidateGroupDate(v *validator.Validator, startDate, endDate time.Time) {
+	// check start data is less than end date
+	v.Check(startDate.Before(endDate), "start_date", "must be before end date")
+	// validate deadline is more than now
+	v.Check(endDate.After(time.Now()), "deadline", "must be after today")
+}
+func ValidateGroupAmounts(v *validator.Validator, targetAmount, currentAmount decimal.Decimal) {
+	// check if they are provided
+	v.Check(targetAmount.String() != "", "target_amount", "must be provided")
+	v.Check(currentAmount.String() != "", "current_amount", "must be provided")
+	// check if target is more than current
+	v.Check(targetAmount.GreaterThan(currentAmount), "target_amount", "must be greater than current amount")
+}
+func ValidateGroupGoal(v *validator.Validator, goal *GroupGoal) {
+	ValidateGroupName(v, goal.GoalName)
+	ValidateGroupDate(v, goal.Startdate, goal.Deadline)
+	ValidateGroupAmounts(v, goal.TargetAmount, goal.CurrentAmount)
+}
+
+// ================================================================================
+// Group Invitations
+// ================================================================================
 func ValidateGroupInvitationGroupID(v *validator.Validator, groupID int64) {
 	v.Check(groupID > 0, "group_id", "must be greater than 0")
 }
 func ValidateGroupInvitation(v *validator.Validator, invitation *GroupInvitation) {
 	ValidateGroupInvitationGroupID(v, invitation.GroupID)
 	ValidateEmail(v, invitation.InviteeUserEmail)
+}
+
+// ================================================================================
+// Group Transactions
+// ================================================================================
+func ValidateAmount(v *validator.Validator, amount decimal.Decimal) {
+	v.Check(amount.String() != "", "amount", "must be provided")
+	v.Check(amount.GreaterThan(decimal.NewFromInt(0)), "amount", "must be greater than 0")
+}
+func ValidateGroupTransaction(v *validator.Validator, transaction *GroupTransaction) {
+	ValidateBudgetDescription(v, transaction.Description)
+	ValidateAmount(v, transaction.Amount)
+}
+
+// ================================================================================
+// Group Expenses
+// ================================================================================
+func ValidateGroupExpense(v *validator.Validator, expense *GroupExpense) {
+	ValidateGroupName(v, expense.Description)
+	ValidateGroupName(v, expense.Category)
+	ValidateAmount(v, expense.Amount)
 }
 
 // CheckIfGroupMembersAreMaxedOut() checks if the group has reached its maximum member count
@@ -308,6 +399,238 @@ func (m FinancialGroupManagerModel) CreateNewGroupInvitation(userID int64, invit
 	return nil
 }
 
+// UpdateExpiredGroupInvitations() updates the status of expired group invitations
+// It is used by a cronjob, dauily to update the status of expired group invitations
+func (m FinancialGroupManagerModel) UpdateExpiredGroupInvitations() error {
+	// get our context
+	ctx, cancel := contextGenerator(context.Background(), DefualtFinManGroupsContextTimeout)
+	defer cancel()
+	// update the data
+	err := m.DB.UpdateExpiredGroupInvitations(ctx)
+	if err != nil {
+		return err
+	}
+	// we are good now
+	return nil
+}
+
+// CreateNewGroupGoal() creates a new group goal in the database
+// We take in a GroupGoal struct and return an error
+func (m FinancialGroupManagerModel) CreateNewGroupGoal(userID int64, groupGoal *GroupGoal) error {
+	// get our context
+	ctx, cancel := contextGenerator(context.Background(), DefualtFinManGroupsContextTimeout)
+	defer cancel()
+	// insert the data
+	goalDetail, err := m.DB.CreateNewGroupGoal(ctx, database.CreateNewGroupGoalParams{
+		GroupID:       groupGoal.GroupID,
+		CreatorUserID: userID,
+		GoalName:      groupGoal.GoalName,
+		TargetAmount:  groupGoal.TargetAmount.String(),
+		CurrentAmount: sql.NullString{String: groupGoal.CurrentAmount.String(), Valid: true},
+		StartDate:     groupGoal.Startdate,
+		Deadline:      groupGoal.Deadline,
+		Description:   groupGoal.Description,
+	})
+	if err != nil {
+		switch {
+		case err.Error() == `pq: new row for relation "group_goals" violates check constraint "unique_goal_name_per_user_group"`:
+			return ErrGroupNameExists
+		default:
+			return err
+		}
+	}
+	// fill in the details
+	groupGoal.ID = goalDetail.ID
+	groupGoal.CreatorUserID = userID
+	groupGoal.CreatedAt = goalDetail.CreatedAt
+	groupGoal.UpdatedAt = goalDetail.UpdatedAt
+	// we are good now
+	return nil
+}
+
+// UpdateGroupGoal() updates the group goal for a specific goal
+// This can only be done by the Group's creator or an Admin
+// Add this to the require permission group:admin/moderator
+// Even if the goals can be updates, only the name, deadline and description can be updated
+// This is to prevent any form of fraud and increase transparency in the group
+func (m FinancialGroupManagerModel) UpdateGroupGoal(userID int64, groupGoal *GroupGoal) error {
+	// get our context
+	ctx, cancel := contextGenerator(context.Background(), DefualtFinManGroupsContextTimeout)
+	defer cancel()
+	// update the data
+	updatedAt, err := m.DB.UpdateGroupGoal(ctx, database.UpdateGroupGoalParams{
+		GoalName:    groupGoal.GoalName,
+		Deadline:    groupGoal.Deadline,
+		Description: groupGoal.Description,
+		ID:          groupGoal.ID,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return ErrEditConflict
+		case err.Error() == `pq: new row for relation "group_goals" violates check constraint "unique_goal_name_per_user_group"`:
+			return ErrGroupNameExists
+		default:
+			return err
+		}
+	}
+	// Reflect the updated time
+	groupGoal.UpdatedAt = updatedAt
+	// we are good now
+	return nil
+}
+
+// GetGroupGoalById() retrieves a group goal by its ID
+// We take in the group goal ID and return the group goal and an error
+func (m FinancialGroupManagerModel) GetGroupGoalById(groupGoalID int64) (*GroupGoal, error) {
+	// get our context
+	ctx, cancel := contextGenerator(context.Background(), DefualtFinManGroupsContextTimeout)
+	defer cancel()
+	// get the group goal
+	groupGoal, err := m.DB.GetGroupGoalById(ctx, groupGoalID)
+	if err != nil {
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return nil, ErrGeneralRecordNotFound
+		default:
+			return nil, err
+		}
+	}
+	// populate our group goal
+	goal := populateGroupGoal(groupGoal)
+	// we are good now
+	return goal, nil
+}
+
+// CreateNewGroupTransaction() creates a new group transaction in the database
+// We take in a GroupTransaction struct and return an error
+func (m FinancialGroupManagerModel) CreateNewGroupTransaction(userID int64, transaction *GroupTransaction) error {
+	// get our context
+	ctx, cancel := contextGenerator(context.Background(), DefualtFinManGroupsContextTimeout)
+	defer cancel()
+	// insert the data
+	transactionDetail, err := m.DB.CreateNewGroupTransaction(ctx, database.CreateNewGroupTransactionParams{
+		GoalID:      sql.NullInt64{Int64: transaction.GoalID, Valid: true},
+		MemberID:    sql.NullInt64{Int64: userID, Valid: true},
+		Amount:      transaction.Amount.String(),
+		Description: sql.NullString{String: transaction.Description, Valid: true},
+	})
+	if err != nil {
+		switch {
+		case err.Error() == `pq: new row for relation "group_goals" violates check constraint "no_overfunding"`:
+			return ErrOverFunding
+		default:
+			return err
+		}
+
+	}
+	// fill in the details
+	transaction.ID = transactionDetail.ID
+	transaction.MemberID = userID
+	transaction.CreatedAt = transactionDetail.CreatedAt.Time
+	transaction.UpdatedAt = transactionDetail.UpdatedAt.Time
+	// we are good now
+	return nil
+}
+
+// DeleteGroupTransaction() deletes a group transaction by its ID and member_id/user_id of
+// the person who created the transaction
+// We return the ID of the deleted transaction and an error especially for sql no rows
+func (m FinancialGroupManagerModel) DeleteGroupTransaction(userID, transactionID int64) (int64, error) {
+	// get our context
+	ctx, cancel := contextGenerator(context.Background(), DefualtFinManGroupsContextTimeout)
+	defer cancel()
+	// delete the data
+	deletedTransactionID, err := m.DB.DeleteGroupTransaction(ctx, database.DeleteGroupTransactionParams{
+		ID:       transactionID,
+		MemberID: sql.NullInt64{Int64: userID, Valid: true},
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return 0, ErrGeneralRecordNotFound
+		default:
+			return 0, err
+		}
+	}
+	// we are good now
+	return deletedTransactionID, nil
+}
+
+// CheckIfGroupExistsAndUserIsMember() checks whether a group exists and if the user is a member
+// of that group. We take in the user's ID number and the group ID number and return an error
+// of the record not found
+func (m FinancialGroupManagerModel) CheckIfGroupExistsAndUserIsMember(userID, groupID int64) error {
+	// get our context
+	ctx, cancel := contextGenerator(context.Background(), DefualtFinManGroupsContextTimeout)
+	defer cancel()
+	// check the group
+	_, err := m.DB.CheckIfGroupExistsAndUserIsMember(ctx, database.CheckIfGroupExistsAndUserIsMemberParams{
+		UserID: sql.NullInt64{Int64: userID, Valid: true},
+		ID:     groupID,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return ErrGeneralRecordNotFound
+		default:
+			return err
+		}
+	}
+	// we are good now
+	return nil
+}
+
+// CreateNewGroupExpense() creates a new group expense in the database
+// We take in pointers to a group expense and userID and return an error if any
+func (m FinancialGroupManagerModel) CreateNewGroupExpense(userID int64, expense *GroupExpense) error {
+	// get our context
+	ctx, cancel := contextGenerator(context.Background(), DefualtFinManGroupsContextTimeout)
+	defer cancel()
+	// insert the data
+	expenseDetail, err := m.DB.CreateNewGroupExpense(ctx, database.CreateNewGroupExpenseParams{
+		GroupID:     sql.NullInt64{Int64: expense.GroupID, Valid: true},
+		MemberID:    sql.NullInt64{Int64: userID, Valid: true},
+		Amount:      expense.Amount.String(),
+		Description: sql.NullString{String: expense.Description, Valid: true},
+		Category:    sql.NullString{String: expense.Category, Valid: true},
+	})
+	if err != nil {
+		return err
+	}
+	// fill in the details
+	expense.ID = expenseDetail.ID
+	expense.MemberID = userID
+	expense.CreatedAt = expenseDetail.CreatedAt.Time
+	expense.UpdatedAt = expenseDetail.UpdatedAt.Time
+	// we are good now
+	return nil
+}
+
+// DeleteGroupExpense() deletes a group expense by its ID and member_id/user_id of
+// the person who created the expense
+// We return the ID of the deleted expense and an error especially for sql no rows
+func (m FinancialGroupManagerModel) DeleteGroupExpense(userID, expenseID int64) (int64, error) {
+	// get our context
+	ctx, cancel := contextGenerator(context.Background(), DefualtFinManGroupsContextTimeout)
+	defer cancel()
+	// delete the data
+	deletedExpenseID, err := m.DB.DeleteGroupExpense(ctx, database.DeleteGroupExpenseParams{
+		ID:       expenseID,
+		MemberID: sql.NullInt64{Int64: userID, Valid: true},
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return 0, ErrGeneralRecordNotFound
+		default:
+			return 0, err
+		}
+	}
+	// we are good now
+	return deletedExpenseID, nil
+}
+
 func populateGroup(groupRow interface{}) *Group {
 	switch group := groupRow.(type) {
 	case database.Group:
@@ -342,6 +665,28 @@ func populateGroupInvitation(invitationRow interface{}) *GroupInvitation {
 			SentAt:           invitation.SentAt.Time,
 			RespondedAt:      invitation.RespondedAt.Time,
 			ExpirationDate:   invitation.ExpirationDate,
+		}
+	default:
+		return nil
+	}
+}
+
+func populateGroupGoal(groupGoalRow interface{}) *GroupGoal {
+	switch groupGoal := groupGoalRow.(type) {
+	case database.GroupGoal:
+		return &GroupGoal{
+			ID:            groupGoal.ID,
+			GroupID:       groupGoal.GroupID,
+			CreatorUserID: groupGoal.CreatorUserID,
+			GoalName:      groupGoal.GoalName,
+			TargetAmount:  decimal.RequireFromString(groupGoal.TargetAmount),
+			CurrentAmount: decimal.RequireFromString(groupGoal.CurrentAmount.String),
+			Startdate:     groupGoal.StartDate,
+			Deadline:      groupGoal.Deadline,
+			Description:   groupGoal.Description,
+			Status:        groupGoal.Status,
+			CreatedAt:     groupGoal.CreatedAt,
+			UpdatedAt:     groupGoal.UpdatedAt,
 		}
 	default:
 		return nil

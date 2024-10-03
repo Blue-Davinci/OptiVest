@@ -4,14 +4,14 @@ CREATE TYPE tracking_type_enum AS ENUM ('monthly', 'bonus', 'other');
 
 CREATE TABLE goal_tracking (
     id BIGSERIAL PRIMARY KEY,                                        -- Unique tracking entry ID
-    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,            -- User who owns the goal
-    goal_id BIGINT NOT NULL REFERENCES goals(id) ON DELETE SET NULL,            -- Reference to the goal
-    tracking_date DATE NOT NULL DEFAULT CURRENT_DATE,                 -- Date of tracking (when progress was recorded)
-    contributed_amount NUMERIC(20, 2) NOT NULL,                       -- Amount contributed towards the goal
-    tracking_type tracking_type_enum NOT NULL DEFAULT 'monthly',      -- Type of tracking
-    created_at TIMESTAMP(0) WITH TIME ZONE DEFAULT NOW(),             -- When the contribution was made
-    updated_at TIMESTAMP(0) WITH TIME ZONE DEFAULT NOW(),             -- When the contribution was last updated
-    truncated_tracking_date DATE,                                     -- Truncated tracking date for indexing
+    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,  -- User who owns the goal
+    goal_id BIGINT REFERENCES goals(id) ON DELETE SET NULL, -- Reference to the goal
+    tracking_date DATE NOT NULL DEFAULT CURRENT_DATE,                -- Date of tracking (when progress was recorded)
+    contributed_amount NUMERIC(20, 2) NOT NULL,                      -- Amount contributed towards the goal
+    tracking_type tracking_type_enum NOT NULL DEFAULT 'monthly',     -- Type of tracking
+    created_at TIMESTAMP(0) WITH TIME ZONE DEFAULT NOW(),            -- When the contribution was made
+    updated_at TIMESTAMP(0) WITH TIME ZONE DEFAULT NOW(),            -- When the contribution was last updated
+    truncated_tracking_date DATE,                                    -- Truncated tracking date for indexing
 
     CONSTRAINT check_positive_contribution CHECK (contributed_amount > 0)
 );
@@ -22,6 +22,39 @@ CREATE OR REPLACE FUNCTION set_truncated_tracking_date()
 RETURNS TRIGGER AS $$
 BEGIN
     NEW.truncated_tracking_date := date_trunc('month', NEW.tracking_date)::DATE;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+-- +goose StatementEnd
+
+-- Trigger function to update the current amount in goals on insert, update, or delete
+-- +goose StatementBegin
+CREATE OR REPLACE FUNCTION update_goal_current_amount()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- Handle insert or update
+    IF (TG_OP = 'INSERT') THEN
+        -- Increment the current amount in the goal
+        UPDATE goals
+        SET current_amount = current_amount + NEW.contributed_amount,
+            updated_at = NOW()
+        WHERE id = NEW.goal_id;
+
+    ELSIF (TG_OP = 'UPDATE') THEN
+        -- Adjust the current amount by the difference between the new and old contribution
+        UPDATE goals
+        SET current_amount = current_amount + (NEW.contributed_amount - OLD.contributed_amount),
+            updated_at = NOW()
+        WHERE id = NEW.goal_id;
+
+    ELSIF (TG_OP = 'DELETE') THEN
+        -- Subtract the contribution amount from the goal's current amount
+        UPDATE goals
+        SET current_amount = current_amount - OLD.contributed_amount,
+            updated_at = NOW()
+        WHERE id = OLD.goal_id;
+    END IF;
+
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
@@ -40,6 +73,12 @@ CREATE TRIGGER set_truncated_tracking_date_trigger
 BEFORE INSERT OR UPDATE ON goal_tracking
 FOR EACH ROW
 EXECUTE FUNCTION set_truncated_tracking_date();
+
+-- Trigger to update goal's current amount on insert, update, or delete of goal_tracking
+CREATE TRIGGER update_goal_current_amount_trigger
+AFTER INSERT OR UPDATE OR DELETE ON goal_tracking
+FOR EACH ROW
+EXECUTE FUNCTION update_goal_current_amount();
 
 -- Index for fast retrieval by goal and user
 CREATE INDEX idx_goal_tracking_goal_user ON goal_tracking (goal_id, user_id);
@@ -60,7 +99,9 @@ WHERE tracking_type = 'monthly';
 -- +goose StatementBegin
 DROP TRIGGER IF EXISTS trigger_update_goals_tracking_timestamp ON goal_tracking;
 DROP TRIGGER IF EXISTS set_truncated_tracking_date_trigger ON goal_tracking;
+DROP TRIGGER IF EXISTS update_goal_current_amount_trigger ON goal_tracking;
 DROP FUNCTION IF EXISTS set_truncated_tracking_date;
+DROP FUNCTION IF EXISTS update_goal_current_amount;
 -- +goose StatementEnd
 DROP INDEX IF EXISTS unique_goal_monthly_tracking;
 DROP INDEX IF EXISTS idx_goal_tracking_date;

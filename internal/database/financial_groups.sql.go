@@ -11,6 +11,32 @@ import (
 	"time"
 )
 
+const checkIfGroupExistsAndUserIsMember = `-- name: CheckIfGroupExistsAndUserIsMember :one
+SELECT g.id, g.name
+FROM groups g
+JOIN group_memberships gm ON g.id = gm.group_id
+WHERE g.id = $1         -- Check if the group with this ID exists
+  AND gm.user_id = $2  -- Check if this user is a member of the group
+  AND gm.status = 'accepted'
+`
+
+type CheckIfGroupExistsAndUserIsMemberParams struct {
+	ID     int64
+	UserID sql.NullInt64
+}
+
+type CheckIfGroupExistsAndUserIsMemberRow struct {
+	ID   int64
+	Name string
+}
+
+func (q *Queries) CheckIfGroupExistsAndUserIsMember(ctx context.Context, arg CheckIfGroupExistsAndUserIsMemberParams) (CheckIfGroupExistsAndUserIsMemberRow, error) {
+	row := q.db.QueryRowContext(ctx, checkIfGroupExistsAndUserIsMember, arg.ID, arg.UserID)
+	var i CheckIfGroupExistsAndUserIsMemberRow
+	err := row.Scan(&i.ID, &i.Name)
+	return i, err
+}
+
 const checkIfGroupMembersAreMaxedOut = `-- name: CheckIfGroupMembersAreMaxedOut :one
 SELECT COUNT(*) AS member_count, g.max_member_count
 FROM group_memberships gm
@@ -28,6 +54,98 @@ func (q *Queries) CheckIfGroupMembersAreMaxedOut(ctx context.Context, groupID sq
 	row := q.db.QueryRowContext(ctx, checkIfGroupMembersAreMaxedOut, groupID)
 	var i CheckIfGroupMembersAreMaxedOutRow
 	err := row.Scan(&i.MemberCount, &i.MaxMemberCount)
+	return i, err
+}
+
+const createNewGroupExpense = `-- name: CreateNewGroupExpense :one
+
+
+INSERT INTO group_expenses (
+    group_id, 
+    member_id, 
+    amount, 
+    description, 
+    category
+    )
+VALUES ($1, $2, $3, $4, $5)
+RETURNING id, created_at, updated_at
+`
+
+type CreateNewGroupExpenseParams struct {
+	GroupID     sql.NullInt64
+	MemberID    sql.NullInt64
+	Amount      string
+	Description sql.NullString
+	Category    sql.NullString
+}
+
+type CreateNewGroupExpenseRow struct {
+	ID        int64
+	CreatedAt sql.NullTime
+	UpdatedAt sql.NullTime
+}
+
+// Assuming you have a status column for member approval
+func (q *Queries) CreateNewGroupExpense(ctx context.Context, arg CreateNewGroupExpenseParams) (CreateNewGroupExpenseRow, error) {
+	row := q.db.QueryRowContext(ctx, createNewGroupExpense,
+		arg.GroupID,
+		arg.MemberID,
+		arg.Amount,
+		arg.Description,
+		arg.Category,
+	)
+	var i CreateNewGroupExpenseRow
+	err := row.Scan(&i.ID, &i.CreatedAt, &i.UpdatedAt)
+	return i, err
+}
+
+const createNewGroupGoal = `-- name: CreateNewGroupGoal :one
+INSERT INTO group_goals (
+    group_id, 
+    creator_user_id, 
+    goal_name,
+    target_amount, 
+    current_amount, 
+    start_date,
+    deadline, 
+    description
+) 
+VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8
+)
+RETURNING id, created_at, updated_at
+`
+
+type CreateNewGroupGoalParams struct {
+	GroupID       int64
+	CreatorUserID int64
+	GoalName      string
+	TargetAmount  string
+	CurrentAmount sql.NullString
+	StartDate     time.Time
+	Deadline      time.Time
+	Description   string
+}
+
+type CreateNewGroupGoalRow struct {
+	ID        int64
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+func (q *Queries) CreateNewGroupGoal(ctx context.Context, arg CreateNewGroupGoalParams) (CreateNewGroupGoalRow, error) {
+	row := q.db.QueryRowContext(ctx, createNewGroupGoal,
+		arg.GroupID,
+		arg.CreatorUserID,
+		arg.GoalName,
+		arg.TargetAmount,
+		arg.CurrentAmount,
+		arg.StartDate,
+		arg.Deadline,
+		arg.Description,
+	)
+	var i CreateNewGroupGoalRow
+	err := row.Scan(&i.ID, &i.CreatedAt, &i.UpdatedAt)
 	return i, err
 }
 
@@ -66,6 +184,42 @@ func (q *Queries) CreateNewGroupInvitation(ctx context.Context, arg CreateNewGro
 		&i.SentAt,
 		&i.ExpirationDate,
 	)
+	return i, err
+}
+
+const createNewGroupTransaction = `-- name: CreateNewGroupTransaction :one
+INSERT INTO group_transactions (
+    goal_id,
+    member_id, 
+    amount, 
+    description
+) VALUES 
+($1, $2, $3, $4)
+RETURNING id, created_at, updated_at
+`
+
+type CreateNewGroupTransactionParams struct {
+	GoalID      sql.NullInt64
+	MemberID    sql.NullInt64
+	Amount      string
+	Description sql.NullString
+}
+
+type CreateNewGroupTransactionRow struct {
+	ID        int64
+	CreatedAt sql.NullTime
+	UpdatedAt sql.NullTime
+}
+
+func (q *Queries) CreateNewGroupTransaction(ctx context.Context, arg CreateNewGroupTransactionParams) (CreateNewGroupTransactionRow, error) {
+	row := q.db.QueryRowContext(ctx, createNewGroupTransaction,
+		arg.GoalID,
+		arg.MemberID,
+		arg.Amount,
+		arg.Description,
+	)
+	var i CreateNewGroupTransactionRow
+	err := row.Scan(&i.ID, &i.CreatedAt, &i.UpdatedAt)
 	return i, err
 }
 
@@ -118,6 +272,42 @@ func (q *Queries) CreateNewUserGroup(ctx context.Context, arg CreateNewUserGroup
 	return i, err
 }
 
+const deleteGroupExpense = `-- name: DeleteGroupExpense :one
+DELETE FROM group_expenses
+WHERE id = $1 AND member_id = $2
+RETURNING id
+`
+
+type DeleteGroupExpenseParams struct {
+	ID       int64
+	MemberID sql.NullInt64
+}
+
+func (q *Queries) DeleteGroupExpense(ctx context.Context, arg DeleteGroupExpenseParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, deleteGroupExpense, arg.ID, arg.MemberID)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const deleteGroupTransaction = `-- name: DeleteGroupTransaction :one
+DELETE FROM group_transactions
+WHERE id = $1 AND member_id = $2
+RETURNING id
+`
+
+type DeleteGroupTransactionParams struct {
+	ID       int64
+	MemberID sql.NullInt64
+}
+
+func (q *Queries) DeleteGroupTransaction(ctx context.Context, arg DeleteGroupTransactionParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, deleteGroupTransaction, arg.ID, arg.MemberID)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
 const getGroupById = `-- name: GetGroupById :one
 SELECT
     id,
@@ -152,6 +342,82 @@ func (q *Queries) GetGroupById(ctx context.Context, id int64) (Group, error) {
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Version,
+	)
+	return i, err
+}
+
+const getGroupGoalById = `-- name: GetGroupGoalById :one
+SELECT
+    id,
+    group_id,
+    creator_user_id,
+    goal_name,
+    target_amount,
+    current_amount,
+    start_date,
+    deadline,
+    description,
+    status,
+    created_at,
+    updated_at
+FROM group_goals
+WHERE id = $1
+`
+
+func (q *Queries) GetGroupGoalById(ctx context.Context, id int64) (GroupGoal, error) {
+	row := q.db.QueryRowContext(ctx, getGroupGoalById, id)
+	var i GroupGoal
+	err := row.Scan(
+		&i.ID,
+		&i.GroupID,
+		&i.CreatorUserID,
+		&i.GoalName,
+		&i.TargetAmount,
+		&i.CurrentAmount,
+		&i.StartDate,
+		&i.Deadline,
+		&i.Description,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getGroupGoalsByGroupId = `-- name: GetGroupGoalsByGroupId :one
+SELECT
+    id,
+    group_id,
+    creator_user_id,
+    goal_name,
+    target_amount,
+    current_amount,
+    start_date,
+    deadline,
+    description,
+    status,
+    created_at,
+    updated_at
+FROM group_goals
+WHERE group_id = $1
+`
+
+func (q *Queries) GetGroupGoalsByGroupId(ctx context.Context, groupID int64) (GroupGoal, error) {
+	row := q.db.QueryRowContext(ctx, getGroupGoalsByGroupId, groupID)
+	var i GroupGoal
+	err := row.Scan(
+		&i.ID,
+		&i.GroupID,
+		&i.CreatorUserID,
+		&i.GoalName,
+		&i.TargetAmount,
+		&i.CurrentAmount,
+		&i.StartDate,
+		&i.Deadline,
+		&i.Description,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -203,6 +469,34 @@ WHERE status = 'pending' AND expiration_date < NOW()
 func (q *Queries) UpdateExpiredGroupInvitations(ctx context.Context) error {
 	_, err := q.db.ExecContext(ctx, updateExpiredGroupInvitations)
 	return err
+}
+
+const updateGroupGoal = `-- name: UpdateGroupGoal :one
+UPDATE group_goals SET
+    goal_name = $1,
+    deadline = $2,
+    description = $3
+WHERE id = $4  
+RETURNING updated_at
+`
+
+type UpdateGroupGoalParams struct {
+	GoalName    string
+	Deadline    time.Time
+	Description string
+	ID          int64
+}
+
+func (q *Queries) UpdateGroupGoal(ctx context.Context, arg UpdateGroupGoalParams) (time.Time, error) {
+	row := q.db.QueryRowContext(ctx, updateGroupGoal,
+		arg.GoalName,
+		arg.Deadline,
+		arg.Description,
+		arg.ID,
+	)
+	var updated_at time.Time
+	err := row.Scan(&updated_at)
+	return updated_at, err
 }
 
 const updateGroupInvitationStatus = `-- name: UpdateGroupInvitationStatus :one

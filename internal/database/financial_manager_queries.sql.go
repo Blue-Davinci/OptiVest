@@ -257,20 +257,19 @@ WHERE gt.goal_id IS NULL
   AND g.status = 'ongoing' 
   AND g.start_date < CURRENT_DATE
 ORDER BY truncated_tracking_date ASC
-LIMIT $1
 RETURNING id, user_id, goal_id, contributed_amount
 `
 
 type GetAndSaveAllGoalsForTrackingRow struct {
 	ID                int64
 	UserID            int64
-	GoalID            int64
+	GoalID            sql.NullInt64
 	ContributedAmount string
 }
 
 // Insert tracked goals that haven't been tracked for more than 1 month
-func (q *Queries) GetAndSaveAllGoalsForTracking(ctx context.Context, limit int32) ([]GetAndSaveAllGoalsForTrackingRow, error) {
-	rows, err := q.db.QueryContext(ctx, getAndSaveAllGoalsForTracking, limit)
+func (q *Queries) GetAndSaveAllGoalsForTracking(ctx context.Context) ([]GetAndSaveAllGoalsForTrackingRow, error) {
+	rows, err := q.db.QueryContext(ctx, getAndSaveAllGoalsForTracking)
 	if err != nil {
 		return nil, err
 	}
@@ -710,4 +709,17 @@ func (q *Queries) UpdateGoalPlanByID(ctx context.Context, arg UpdateGoalPlanByID
 	var updated_at sql.NullTime
 	err := row.Scan(&updated_at)
 	return updated_at, err
+}
+
+const updateGoalProgressOnExpiredGoals = `-- name: UpdateGoalProgressOnExpiredGoals :exec
+UPDATE goals
+SET status = 'completed',
+    updated_at = NOW()
+WHERE current_amount >= target_amount
+  AND status = 'ongoing'
+`
+
+func (q *Queries) UpdateGoalProgressOnExpiredGoals(ctx context.Context) error {
+	_, err := q.db.ExecContext(ctx, updateGoalProgressOnExpiredGoals)
+	return err
 }

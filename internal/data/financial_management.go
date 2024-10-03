@@ -483,7 +483,7 @@ func (m FinancialManagerModel) CreateNewGoal(newGoal *Goals) error {
 	})
 	if err != nil {
 		switch {
-		case err.Error() == `pq: duplicate key value violates unique constraint "unique_user_goal_name""`:
+		case err.Error() == `pq: duplicate key value violates unique constraint "unique_user_goal_name"`:
 			return ErrDuplicateGoal
 		default:
 			return err
@@ -696,12 +696,17 @@ func (m FinancialManagerModel) GetGoalPlansForUser(userID int64, filters Filters
 // check goals that are due for tracking and track them
 // We get a limit as we will be running this in batches.
 // We return a pointer to a TrackedGoal struct and an error if the operation fails.
-func (m FinancialManagerModel) GetAndSaveAllGoalsForTracking(limit int32) ([]*TrackedGoal, error) {
+func (m FinancialManagerModel) GetAndSaveAllGoalsForTracking() ([]*TrackedGoal, error) {
 	ctx, cancel := contextGenerator(context.Background(), DefaultFinManDBContextTimeout)
 	defer cancel()
-	trackedGoals, err := m.DB.GetAndSaveAllGoalsForTracking(ctx, limit)
+	trackedGoals, err := m.DB.GetAndSaveAllGoalsForTracking(ctx)
 	if err != nil {
-		return nil, err
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return nil, ErrGeneralRecordNotFound
+		default:
+			return nil, err
+		}
 	}
 	// initializa a slice of TrackedGoal
 	trackedGoalsSlice := []*TrackedGoal{}
@@ -711,13 +716,32 @@ func (m FinancialManagerModel) GetAndSaveAllGoalsForTracking(limit int32) ([]*Tr
 		// fill in the TrackedGoal struct with the data from the database
 		trackedGoal.ID = row.ID
 		trackedGoal.UserID = row.UserID
-		trackedGoal.GoalID = row.GoalID
+		trackedGoal.GoalID = row.GoalID.Int64
 		trackedGoal.ContributedAmount = decimal.RequireFromString(row.ContributedAmount)
 		// append the tracked goal to the slice
 		trackedGoalsSlice = append(trackedGoalsSlice, &trackedGoal)
 	}
 	// everything went well
 	return trackedGoalsSlice, nil
+}
+
+// UpdateGoalProgressOnExpiredGoals() is the main function that will be used to update goals that have expired
+// Will be used in tandem and work 1 way with the cron job scheduler
+// We return nothing and an error if the operation fails.
+func (m FinancialManagerModel) UpdateGoalProgressOnExpiredGoals() error {
+	ctx, cancel := contextGenerator(context.Background(), DefaultFinManDBContextTimeout)
+	defer cancel()
+	err := m.DB.UpdateGoalProgressOnExpiredGoals(ctx)
+	if err != nil {
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return ErrGeneralRecordNotFound
+		default:
+			return err
+		}
+	}
+	// everything went well
+	return nil
 }
 
 // ============================================================================================================

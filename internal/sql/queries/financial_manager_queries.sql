@@ -145,7 +145,6 @@ WHERE gt.goal_id IS NULL
   AND g.status = 'ongoing' 
   AND g.start_date < CURRENT_DATE
 ORDER BY truncated_tracking_date ASC
-LIMIT $1
 RETURNING id, user_id, goal_id, contributed_amount;
 
 -- name: CreateNewGoalPlan :one
@@ -204,3 +203,9 @@ WHERE user_id = $1
 ORDER BY created_at DESC
 LIMIT $2 OFFSET $3;
 
+-- name: UpdateGoalProgressOnExpiredGoals :exec
+UPDATE goals
+SET status = 'completed',
+    updated_at = NOW()
+WHERE current_amount >= target_amount
+  AND status = 'ongoing';

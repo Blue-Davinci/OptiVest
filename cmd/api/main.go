@@ -89,7 +89,9 @@ type config struct {
 		callback_url     string
 	}
 	scheduler struct {
-		trackMonthlyGoalsCron *cron.Cron
+		trackMonthlyGoalsCron        *cron.Cron
+		trackGoalProgressStatus      *cron.Cron
+		trackExpiredGroupInvitations *cron.Cron
 	}
 	limit struct {
 		monthlyGoalProcessingBatchLimit int
@@ -178,6 +180,8 @@ func main() {
 	flag.Parse()
 	// Initialize our cronJobs
 	cfg.scheduler.trackMonthlyGoalsCron = cron.New()
+	cfg.scheduler.trackGoalProgressStatus = cron.New()
+	cfg.scheduler.trackExpiredGroupInvitations = cron.New()
 	// Create a new version boolean flag with the default value of false.
 	displayVersion := flag.Bool("version", false, "Display version and exit")
 	// If the version flag value is true, then print out the version number and
@@ -252,9 +256,12 @@ func (app *application) startupFunction() error {
 	return nil
 }
 
+// startSchedulers starts the cronjobs for the application
 func (app *application) startSchedulers() {
 	app.logger.Info("Starting Schedulers")
-	go app.trackMonthlyGoalsScheduleHandler()
+	go app.trackMonthlyGoalsScheduleHandler()        // trackMonthlyGoals
+	go app.updateGoalProgressOnExpiredGoalsHandler() // updateGoalProgressOnExpiredGoals
+	go app.trackExpiredGroupInvitationsHandler()     // trackExpiredGroupInvitations
 }
 
 // publishMetrics sets up the expvar variables for the application

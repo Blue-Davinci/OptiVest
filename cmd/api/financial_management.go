@@ -386,16 +386,17 @@ func (app *application) createNewGoalHandler(w http.ResponseWriter, r *http.Requ
 		app.serverErrorResponse(w, r, err)
 		return
 	}
-	// if newGoal.MonthlyContribution is greater than the goalSummaryTotals.TotalMonthlyContribution
-	// and the goalSumaryTotals.BudgetStrictness is true, we prevent the creation of the goal
-	if goalSummaryTotals.TotalMonthlyContribution.Cmp(decimal.Zero) != 0 && newGoal.MonthlyContribution.Cmp(goalSummaryTotals.TotalMonthlyContribution) > 0 && goalSummaryTotals.BudgetStrictness {
-		v.AddError("monthly_contribution", "monthly contribution is greater than the total surplus provisioned for this budget")
-		app.failedValidationResponse(w, r, v.Errors)
-		return
-	} else if newGoal.MonthlyContribution.Cmp(goalSummaryTotals.TotalMonthlyContribution) > 0 && !goalSummaryTotals.BudgetStrictness {
-		// if the goal is not strict, we allow the creation of the goal but add a message
-		// that the budget needs to be updated
-		message.Message = append(message.Message, "monthly contribution is greater than the total surplus provisioned. budget needs to be updated")
+	// Check if the new goal's monthly contribution exceeds the available surplus
+	if newGoal.MonthlyContribution.Cmp(goalSummaryTotals.TotalSurplus) > 0 {
+		if goalSummaryTotals.BudgetStrictness {
+			// Prevent the creation of the goal if the budget is strict
+			v.AddError("monthly_contribution", "monthly contribution is greater than the available surplus for this budget")
+			app.failedValidationResponse(w, r, v.Errors)
+			return
+		} else {
+			// Add a warning message but allow the creation of the goal if the budget is not strict
+			message.Message = append(message.Message, "monthly contribution exceeds the available surplus. Budget needs to be updated.")
+		}
 	}
 
 	// just directly write to the database

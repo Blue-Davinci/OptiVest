@@ -2,10 +2,13 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/Blue-Davinci/OptiVest/internal/data"
 	"github.com/Blue-Davinci/OptiVest/internal/validator"
+	"github.com/shopspring/decimal"
 )
 
 // createNewUserGroupHandler() is a handler function that creates a new user group
@@ -326,4 +329,335 @@ func (app *application) updateGroupInvitationStatusHandler(w http.ResponseWriter
 		app.serverErrorResponse(w, r, err)
 	}
 
+}
+
+// createNewGroupGoalHandler() will create a new group goal for a group
+// we will take an input from the user, validate it and then create a new group goal
+// Some of the validations, apart from data sanity, include whether current amount
+// is more than the target amount and that the start date is before the end date
+// Groups are meant to be straightforward and simple, so we will not include any
+// complex validations
+func (app *application) createNewGroupGoalHandler(w http.ResponseWriter, r *http.Request) {
+	// input
+	var input struct {
+		GroupID       int64           `json:"group_id"`
+		Name          string          `json:"name"`
+		TargetAmount  decimal.Decimal `json:"target_amount"`
+		CurrentAmount decimal.Decimal `json:"current_amount"`
+		StartDate     time.Time       `json:"start_date"`
+		EndDate       time.Time       `json:"end_date"`
+	}
+	// decode the input
+	err := app.readJSON(w, r, &input)
+	if err != nil {
+		app.badRequestResponse(w, r, err)
+		return
+	}
+	// check if the group exists
+	_, err = app.models.FinancialGroupManager.GetGroupById(input.GroupID)
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrGeneralRecordNotFound):
+			app.notFoundResponse(w, r)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
+	// create a new group goal
+	groupGoal := &data.GroupGoal{
+		GroupID:       input.GroupID,
+		GoalName:      input.Name,
+		TargetAmount:  input.TargetAmount,
+		CurrentAmount: input.CurrentAmount,
+		CreatedAt:     input.StartDate,
+		Deadline:      input.EndDate,
+	}
+	// make a validator
+	v := validator.New()
+	// validate the group goal
+	if data.ValidateGroupGoal(v, groupGoal); !v.Valid() {
+		app.failedValidationResponse(w, r, v.Errors)
+		return
+	}
+	// create a new group goal
+	err = app.models.FinancialGroupManager.CreateNewGroupGoal(app.contextGetUser(r).ID, groupGoal)
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrGroupNameExists):
+			v.AddError("name", "a group goal with this name already exists")
+			app.failedValidationResponse(w, r, v.Errors)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
+	// send the group goal in the response
+	err = app.writeJSON(w, http.StatusCreated, envelope{"group_goal": groupGoal}, nil)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+	}
+}
+
+// updateGroupGoalHandler() will update a group goal for a group
+// This will be a permission route and only the creator of the group or a Group Admin/Moderator
+// will be able to update the group goal
+func (app *application) updateGroupGoalHandler(w http.ResponseWriter, r *http.Request) {
+	// grab group ID from the URL
+	groupID, err := app.readIDParam(r, "groupGoalID")
+	if err != nil || groupID < 1 {
+		app.notFoundResponse(w, r)
+		return
+	}
+	// input
+	var input struct {
+		Name        *string    `json:"name"`
+		EndDate     *time.Time `json:"end_date"`
+		Description *string    `json:"description"`
+	}
+	// decode the input
+	err = app.readJSON(w, r, &input)
+	if err != nil {
+		app.badRequestResponse(w, r, err)
+		return
+	}
+	// get the group goal by the details
+	groupGoal, err := app.models.FinancialGroupManager.GetGroupGoalById(groupID)
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrGeneralRecordNotFound):
+			app.notFoundResponse(w, r)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
+	// CHECK FOR CHANGES
+	if input.Name != nil {
+		groupGoal.GoalName = *input.Name
+	}
+	if input.Description != nil {
+		groupGoal.Description = *input.Description
+	}
+	if input.EndDate != nil {
+		groupGoal.Deadline = *input.EndDate
+	}
+	// validate the group goal
+	v := validator.New()
+	if data.ValidateGroupGoal(v, groupGoal); !v.Valid() {
+		app.failedValidationResponse(w, r, v.Errors)
+		return
+	}
+	// update the group goal
+	err = app.models.FinancialGroupManager.UpdateGroupGoal(app.contextGetUser(r).ID, groupGoal)
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrGroupNameExists):
+			v.AddError("name", "a group goal with this name already exists")
+			app.failedValidationResponse(w, r, v.Errors)
+		case errors.Is(err, data.ErrEditConflict):
+			app.notFoundResponse(w, r)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
+	// send the group goal in the response
+	err = app.writeJSON(w, http.StatusOK, envelope{"group_goal": groupGoal}, nil)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+	}
+}
+
+// createNewGroupTransactionHandler() will create a new group transaction for a group
+// we will take an input from the user, validate it and then create a new group transaction
+// Any added transaction, will be immediately added to the group's current amount
+func (app *application) createNewGroupTransactionHandler(w http.ResponseWriter, r *http.Request) {
+	// input
+	var input struct {
+		GroupID     int64           `json:"group_id"`
+		GoalID      int64           `json:"goal_id"`
+		Amount      decimal.Decimal `json:"amount"`
+		Description string          `json:"description"`
+	}
+	// decode the input
+	err := app.readJSON(w, r, &input)
+	if err != nil {
+		app.badRequestResponse(w, r, err)
+		return
+	}
+	// check if user is member and group exists
+	err = app.models.FinancialGroupManager.CheckIfGroupExistsAndUserIsMember(app.contextGetUser(r).ID, input.GroupID)
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrGeneralRecordNotFound):
+			app.notFoundResponse(w, r)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
+	// check if Goal exists
+	groupGoal, err := app.models.FinancialGroupManager.GetGroupGoalById(input.GoalID)
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrGeneralRecordNotFound):
+			app.notFoundResponse(w, r)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
+	// check that groupGoal.CurrentAmount is less than groupGoal.TargetAmount
+	// if it is not less than, then we will not allow the user to add a new transaction
+	if groupGoal.CurrentAmount.GreaterThanOrEqual(groupGoal.TargetAmount) {
+		app.failedValidationResponse(w, r, map[string]string{"amount": "goal has already been reached"})
+		return
+	}
+	// amount left to reach the target
+	amountLeft := groupGoal.TargetAmount.Sub(groupGoal.CurrentAmount)
+	// create a new transaction
+	groupTransaction := &data.GroupTransaction{
+		GoalID:      input.GoalID,
+		Amount:      input.Amount,
+		Description: input.Description,
+	}
+	// make a validator
+	v := validator.New()
+	// validate the group transaction
+	if data.ValidateGroupTransaction(v, groupTransaction); !v.Valid() {
+		app.failedValidationResponse(w, r, v.Errors)
+		return
+	}
+	// create a new group transaction
+	err = app.models.FinancialGroupManager.CreateNewGroupTransaction(app.contextGetUser(r).ID, groupTransaction)
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrOverFunding):
+			message := fmt.Sprintf("this transaction will overfund the goal, the amount you can enter is %s", amountLeft.String())
+			v.AddError("amount", message)
+			app.failedValidationResponse(w, r, v.Errors)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
+	// send the group transaction in the response
+	err = app.writeJSON(w, http.StatusCreated, envelope{"group_transaction": groupTransaction}, nil)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+	}
+
+}
+
+// deleteGroupTransactionHandler() will delete a group transaction provided the user is the creator
+// of the transaction
+// We use ErrGeneralRecordNotFound, to see if the deletion was successful
+func (app *application) deleteGroupTransactionHandler(w http.ResponseWriter, r *http.Request) {
+	// get the group transaction ID from the URL
+	groupTransactionID, err := app.readIDParam(r, "groupTransactionID")
+	if err != nil || groupTransactionID < 1 {
+		app.notFoundResponse(w, r)
+		return
+	}
+	// delete the group transaction
+	_, err = app.models.FinancialGroupManager.DeleteGroupTransaction(app.contextGetUser(r).ID, groupTransactionID)
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrGeneralRecordNotFound):
+			app.notFoundResponse(w, r)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
+
+	// send a message as a response
+	err = app.writeJSON(w, http.StatusOK, envelope{"message": "group transaction deleted"}, nil)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+	}
+}
+
+// createNewGroupExpenseHandler() will create a new group expense for a group
+// we will take an input from the user, validate it and then create a new group expense
+func (app *application) createNewGroupExpenseHandler(w http.ResponseWriter, r *http.Request) {
+	// input
+	var input struct {
+		GroupID     int64           `json:"group_id"`
+		Amount      decimal.Decimal `json:"amount"`
+		Description string          `json:"description"`
+		Category    string          `json:"category"`
+	}
+	// decode the input
+	err := app.readJSON(w, r, &input)
+	if err != nil {
+		app.badRequestResponse(w, r, err)
+		return
+	}
+	// check if user is member and group exists
+	err = app.models.FinancialGroupManager.CheckIfGroupExistsAndUserIsMember(app.contextGetUser(r).ID, input.GroupID)
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrGeneralRecordNotFound):
+			app.notFoundResponse(w, r)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
+	// create a new expense
+	groupExpense := &data.GroupExpense{
+		GroupID:     input.GroupID,
+		Amount:      input.Amount,
+		Description: input.Description,
+		Category:    input.Category,
+	}
+	// make a validator
+	v := validator.New()
+	// validate the group expense
+	if data.ValidateGroupExpense(v, groupExpense); !v.Valid() {
+		app.failedValidationResponse(w, r, v.Errors)
+		return
+	}
+	// create a new group expense
+	err = app.models.FinancialGroupManager.CreateNewGroupExpense(app.contextGetUser(r).ID, groupExpense)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+		return
+	}
+	// send the group expense in the response
+	err = app.writeJSON(w, http.StatusCreated, envelope{"group_expense": groupExpense}, nil)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+	}
+}
+
+// deleteGroupExpenseHandler() will delete a group expense provided the user is the creator
+// of the expense
+// We use ErrGeneralRecordNotFound, to see if the deletion was successful
+func (app *application) deleteGroupExpenseHandler(w http.ResponseWriter, r *http.Request) {
+	// get the group expense ID from the URL
+	groupExpenseID, err := app.readIDParam(r, "groupExpenseID")
+	if err != nil || groupExpenseID < 1 {
+		app.notFoundResponse(w, r)
+		return
+	}
+	// delete the group expense
+	_, err = app.models.FinancialGroupManager.DeleteGroupExpense(app.contextGetUser(r).ID, groupExpenseID)
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrGeneralRecordNotFound):
+			app.notFoundResponse(w, r)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
+
+	// send a message as a response
+	err = app.writeJSON(w, http.StatusOK, envelope{"message": "group expense deleted"}, nil)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+	}
 }

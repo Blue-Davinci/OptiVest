@@ -95,5 +95,18 @@ func (app *application) groupRoutes() chi.Router {
 	// group invitations
 	groupRoutes.Post("/invite", app.createNewGroupInvitation)
 	groupRoutes.Patch("/invite/{groupID}", app.updateGroupInvitationStatusHandler)
+
+	// group goals
+	groupRoutes.Post("/goal", app.createNewGroupGoalHandler)
+	groupRoutes.Patch("/goal/{groupGoalID}", app.updateGroupGoalHandler)
+
+	// group Transactions
+	groupRoutes.Post("/transactions", app.createNewGroupTransactionHandler)
+	groupRoutes.Delete("/transactions/{groupTransactionID}", app.deleteGroupTransactionHandler)
+
+	// group Expenses
+	groupRoutes.Post("/expenses", app.createNewGroupExpenseHandler)
+	groupRoutes.Delete("/expenses/{groupExpenseID}", app.deleteGroupExpenseHandler)
+
 	return groupRoutes
 }
