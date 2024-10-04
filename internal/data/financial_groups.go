@@ -185,13 +185,13 @@ func ValidateGroupInvitation(v *validator.Validator, invitation *GroupInvitation
 // ================================================================================
 // Group Transactions
 // ================================================================================
-func ValidateAmount(v *validator.Validator, amount decimal.Decimal) {
-	v.Check(amount.String() != "", "amount", "must be provided")
-	v.Check(amount.GreaterThan(decimal.NewFromInt(0)), "amount", "must be greater than 0")
+func ValidateAmount(v *validator.Validator, amount decimal.Decimal, keyvalue string) {
+	v.Check(amount.String() != "", keyvalue, "must be provided")
+	v.Check(amount.GreaterThan(decimal.NewFromInt(0)), keyvalue, "must be greater than 0")
 }
 func ValidateGroupTransaction(v *validator.Validator, transaction *GroupTransaction) {
 	ValidateBudgetDescription(v, transaction.Description)
-	ValidateAmount(v, transaction.Amount)
+	ValidateAmount(v, transaction.Amount, "amount")
 }
 
 // ================================================================================
@@ -200,7 +200,7 @@ func ValidateGroupTransaction(v *validator.Validator, transaction *GroupTransact
 func ValidateGroupExpense(v *validator.Validator, expense *GroupExpense) {
 	ValidateGroupName(v, expense.Description)
 	ValidateGroupName(v, expense.Category)
-	ValidateAmount(v, expense.Amount)
+	ValidateAmount(v, expense.Amount, "amount")
 }
 
 // CheckIfGroupMembersAreMaxedOut() checks if the group has reached its maximum member count

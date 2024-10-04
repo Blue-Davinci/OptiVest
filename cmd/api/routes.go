@@ -36,6 +36,10 @@ func (app *application) routes() http.Handler {
 	v1Router.With(dynamicMiddleware.Then).Mount("/budgets", app.budgetRoutes())
 	v1Router.With(dynamicMiddleware.Then).Mount("/goals", app.goalRoutes())
 	v1Router.With(dynamicMiddleware.Then).Mount("/groups", app.groupRoutes())
+	v1Router.With(dynamicMiddleware.Then).Mount("/incomes", app.incomeRouter())
+
+	//expenses
+	v1Router.With(dynamicMiddleware.Then).Mount("/expenses", app.expenseRoutes())
 
 	// Moount the v1Router to the main base router
 	router.Mount("/v1", v1Router)
@@ -109,4 +113,20 @@ func (app *application) groupRoutes() chi.Router {
 	groupRoutes.Delete("/expenses/{groupExpenseID}", app.deleteGroupExpenseHandler)
 
 	return groupRoutes
+}
+
+// expenseRoutes() is a method that returns a chi.Router that contains all the routes for the expenses
+func (app *application) expenseRoutes() chi.Router {
+	expenseRoutes := chi.NewRouter()
+	expenseRoutes.Post("/", app.createNewRecurringExpenseHandler)
+	expenseRoutes.Patch("/{expenseID}", app.updateRecurringExpenseByIDHandler)
+
+	return expenseRoutes
+}
+
+func (app *application) incomeRouter() chi.Router {
+	incomeRoutes := chi.NewRouter()
+	incomeRoutes.Post("/", app.createNewIncomeHandler)
+
+	return incomeRoutes
 }

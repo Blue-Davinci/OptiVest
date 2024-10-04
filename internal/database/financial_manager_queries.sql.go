@@ -176,62 +176,120 @@ func (q *Queries) DeleteBudgetById(ctx context.Context, arg DeleteBudgetByIdPara
 	return id, err
 }
 
-const getAllGoalSummaryBuBudgetID = `-- name: GetAllGoalSummaryBuBudgetID :many
-SELECT count(*) OVER() AS total_goals,
-    g.id AS goal_id,
-    g.name AS goal_name,
-    g.monthly_contribution AS goal_monthly_contribution,
-    g.target_amount AS goal_target_amount,
-    b.total_amount AS budget_total_amount,
-    b.currency_code AS budget_currency,
-    b.is_strict AS is_strict,
-    COALESCE(SUM(g.monthly_contribution) OVER (), 0)::numeric AS total_monthly_contributions,
-   (b.total_amount - COALESCE(SUM(g.monthly_contribution) OVER (), 0))::numeric AS budget_surplus
+const getAllGoalSummaryByBudgetID = `-- name: GetAllGoalSummaryByBudgetID :many
+SELECT 
+    CAST(b.total_amount AS NUMERIC) AS total_amount,
+    COALESCE(CAST(SUM(g.monthly_contribution) AS NUMERIC), 0) AS total_monthly_contributions,
+
+    -- Calculate the total non-recurring expenses and cast to NUMERIC
+    (
+        SELECT COALESCE(CAST(SUM(e.amount) AS NUMERIC), 0)
+        FROM expenses e
+        WHERE e.budget_id = b.id
+        AND e.is_recurring = FALSE
+        AND e.created_at >= DATE_TRUNC('month', CURRENT_DATE)
+    ) AS total_expenses,
+
+    -- Calculate the projected recurring expenses and cast to NUMERIC
+    (
+        SELECT COALESCE(CAST(SUM(
+            r.amount * 
+            CASE 
+                WHEN r.recurrence_interval = 'daily' THEN 30
+                WHEN r.recurrence_interval = 'weekly' THEN 4
+                WHEN r.recurrence_interval = 'monthly' THEN 1
+                ELSE 0
+            END) AS NUMERIC), 0)
+        FROM recurring_expenses r
+        WHERE r.budget_id = b.id
+    ) AS projected_recurring_expenses,
+
+    -- Calculate the budget surplus
+    CAST(
+        CAST(b.total_amount AS NUMERIC) - 
+        (
+            COALESCE(CAST(SUM(g.monthly_contribution) AS NUMERIC), 0) + 
+            (
+                SELECT COALESCE(CAST(SUM(e.amount) AS NUMERIC), 0)
+                FROM expenses e
+                WHERE e.budget_id = b.id
+                AND e.is_recurring = FALSE
+                AND e.created_at >= DATE_TRUNC('month', CURRENT_DATE)
+            ) + 
+            (
+                SELECT COALESCE(CAST(SUM(
+                    r.amount * 
+                    CASE 
+                        WHEN r.recurrence_interval = 'daily' THEN 30
+                        WHEN r.recurrence_interval = 'weekly' THEN 4
+                        WHEN r.recurrence_interval = 'monthly' THEN 1
+                        ELSE 0
+                    END) AS NUMERIC), 0)
+                FROM recurring_expenses r
+                WHERE r.budget_id = b.id
+            )
+        ) AS NUMERIC
+    ) AS budget_surplus
+
 FROM budgets b
 LEFT JOIN goals g ON g.budget_id = b.id
-WHERE b.id = $1 AND b.user_id = $2
-GROUP BY 
-    b.id, g.id
-ORDER BY g.name
+WHERE b.id = $1
+AND b.user_id = $2
+GROUP BY b.id, b.total_amount
+HAVING (CAST(b.total_amount AS NUMERIC) - 
+    (
+        COALESCE(CAST(SUM(g.monthly_contribution) AS NUMERIC), 0) + 
+        (
+            SELECT COALESCE(CAST(SUM(e.amount) AS NUMERIC), 0)
+            FROM expenses e
+            WHERE e.budget_id = b.id
+            AND e.is_recurring = FALSE
+            AND e.created_at >= DATE_TRUNC('month', CURRENT_DATE)
+        ) + 
+        (
+            SELECT COALESCE(CAST(SUM(
+                r.amount * 
+                CASE 
+                    WHEN r.recurrence_interval = 'daily' THEN 30
+                    WHEN r.recurrence_interval = 'weekly' THEN 4
+                    WHEN r.recurrence_interval = 'monthly' THEN 1
+                    ELSE 0
+                END) AS NUMERIC), 0)
+            FROM recurring_expenses r
+            WHERE r.budget_id = b.id
+        )
+    )
+) >= $3
 `
 
-type GetAllGoalSummaryBuBudgetIDParams struct {
-	ID     int64
-	UserID int64
+type GetAllGoalSummaryByBudgetIDParams struct {
+	ID          int64
+	UserID      int64
+	TotalAmount string
 }
 
-type GetAllGoalSummaryBuBudgetIDRow struct {
-	TotalGoals                int64
-	GoalID                    sql.NullInt64
-	GoalName                  sql.NullString
-	GoalMonthlyContribution   sql.NullString
-	GoalTargetAmount          sql.NullString
-	BudgetTotalAmount         string
-	BudgetCurrency            string
-	IsStrict                  bool
-	TotalMonthlyContributions string
-	BudgetSurplus             string
+type GetAllGoalSummaryByBudgetIDRow struct {
+	TotalAmount                string
+	TotalMonthlyContributions  interface{}
+	TotalExpenses              interface{}
+	ProjectedRecurringExpenses interface{}
+	BudgetSurplus              string
 }
 
-func (q *Queries) GetAllGoalSummaryBuBudgetID(ctx context.Context, arg GetAllGoalSummaryBuBudgetIDParams) ([]GetAllGoalSummaryBuBudgetIDRow, error) {
-	rows, err := q.db.QueryContext(ctx, getAllGoalSummaryBuBudgetID, arg.ID, arg.UserID)
+func (q *Queries) GetAllGoalSummaryByBudgetID(ctx context.Context, arg GetAllGoalSummaryByBudgetIDParams) ([]GetAllGoalSummaryByBudgetIDRow, error) {
+	rows, err := q.db.QueryContext(ctx, getAllGoalSummaryByBudgetID, arg.ID, arg.UserID, arg.TotalAmount)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []GetAllGoalSummaryBuBudgetIDRow
+	var items []GetAllGoalSummaryByBudgetIDRow
 	for rows.Next() {
-		var i GetAllGoalSummaryBuBudgetIDRow
+		var i GetAllGoalSummaryByBudgetIDRow
 		if err := rows.Scan(
-			&i.TotalGoals,
-			&i.GoalID,
-			&i.GoalName,
-			&i.GoalMonthlyContribution,
-			&i.GoalTargetAmount,
-			&i.BudgetTotalAmount,
-			&i.BudgetCurrency,
-			&i.IsStrict,
+			&i.TotalAmount,
 			&i.TotalMonthlyContributions,
+			&i.TotalExpenses,
+			&i.ProjectedRecurringExpenses,
 			&i.BudgetSurplus,
 		); err != nil {
 			return nil, err

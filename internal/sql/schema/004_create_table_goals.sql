@@ -36,7 +36,7 @@ $$ LANGUAGE plpgsql;
 -- Attach the reusable trigger to the `budgets` table
 -- +goose StatementBegin
 CREATE TRIGGER trigger_update_goals_timestamp
-AFTER UPDATE ON goals
+BEFORE UPDATE ON goals
 FOR EACH ROW
 EXECUTE FUNCTION update_timestamp();
 -- +goose StatementEnd

@@ -10,6 +10,12 @@ CREATE TABLE group_expenses (
     updated_at TIMESTAMP(0) WITH TIME ZONE DEFAULT NOW()        -- Time when the expense was last updated
 );
 
+-- +goose StatementBegin
+CREATE TRIGGER trigger_update_goals_tracking_timestamp
+BEFORE UPDATE ON group_expenses
+FOR EACH ROW
+EXECUTE FUNCTION update_timestamp();
+-- +goose StatementEnd
 -- Indexes for optimization
 CREATE INDEX idx_group_expenses_group_id ON group_expenses (group_id);
 CREATE INDEX idx_group_expenses_member_id ON group_expenses (member_id);

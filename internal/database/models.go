@@ -184,6 +184,50 @@ func (ns NullMfaStatusType) Value() (driver.Value, error) {
 	return string(ns.MfaStatusType), nil
 }
 
+type RecurrenceIntervalEnum string
+
+const (
+	RecurrenceIntervalEnumDaily   RecurrenceIntervalEnum = "daily"
+	RecurrenceIntervalEnumWeekly  RecurrenceIntervalEnum = "weekly"
+	RecurrenceIntervalEnumMonthly RecurrenceIntervalEnum = "monthly"
+	RecurrenceIntervalEnumYearly  RecurrenceIntervalEnum = "yearly"
+)
+
+func (e *RecurrenceIntervalEnum) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = RecurrenceIntervalEnum(s)
+	case string:
+		*e = RecurrenceIntervalEnum(s)
+	default:
+		return fmt.Errorf("unsupported scan type for RecurrenceIntervalEnum: %T", src)
+	}
+	return nil
+}
+
+type NullRecurrenceIntervalEnum struct {
+	RecurrenceIntervalEnum RecurrenceIntervalEnum
+	Valid                  bool // Valid is true if RecurrenceIntervalEnum is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullRecurrenceIntervalEnum) Scan(value interface{}) error {
+	if value == nil {
+		ns.RecurrenceIntervalEnum, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.RecurrenceIntervalEnum.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullRecurrenceIntervalEnum) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.RecurrenceIntervalEnum), nil
+}
+
 type TrackingTypeEnum string
 
 const (
@@ -239,6 +283,20 @@ type Budget struct {
 	Description    sql.NullString
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
+}
+
+type Expense struct {
+	ID           int64
+	UserID       int64
+	BudgetID     int64
+	Name         string
+	Category     string
+	Amount       string
+	IsRecurring  bool
+	Description  sql.NullString
+	DateOccurred time.Time
+	CreatedAt    sql.NullTime
+	UpdatedAt    sql.NullTime
 }
 
 type Goal struct {
@@ -353,6 +411,34 @@ type GroupTransaction struct {
 	Description sql.NullString
 	CreatedAt   sql.NullTime
 	UpdatedAt   sql.NullTime
+}
+
+type Income struct {
+	ID                   int64
+	UserID               int64
+	Source               string
+	OriginalCurrencyCode string
+	AmountOriginal       string
+	Amount               string
+	ExchangeRate         string
+	Description          sql.NullString
+	DateReceived         time.Time
+	CreatedAt            sql.NullTime
+	UpdatedAt            sql.NullTime
+}
+
+type RecurringExpense struct {
+	ID                 int64
+	UserID             int64
+	BudgetID           int64
+	Amount             string
+	Name               string
+	Description        sql.NullString
+	RecurrenceInterval RecurrenceIntervalEnum
+	ProjectedAmount    string
+	NextOccurrence     time.Time
+	CreatedAt          sql.NullTime
+	UpdatedAt          sql.NullTime
 }
 
 type Token struct {

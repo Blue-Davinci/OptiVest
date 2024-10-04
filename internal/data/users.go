@@ -122,7 +122,7 @@ func ValidateEmail(v *validator.Validator, email string) {
 func ValidateImageURL(v *validator.Validator, image_url string) {
 	v.Check(image_url != "", "image", "must be provided")
 }
-func ValidateName(v *validator.Validator, name string) {
+func ValidateName(v *validator.Validator, name, keyvalue string) {
 	v.Check(name != "", "name", "must be provided")
 	v.Check(len(name) <= 500, "name", "must not be more than 500 bytes long")
 }
@@ -146,8 +146,8 @@ func ValidatePhoneNumber(v *validator.Validator, phone_number, region string) {
 
 func ValidateUser(v *validator.Validator, user *User) {
 	// Call the standalone ValidateName() helper.
-	ValidateName(v, user.FirstName)
-	ValidateName(v, user.LastName)
+	ValidateName(v, user.FirstName, "first_name")
+	ValidateName(v, user.LastName, "last_name")
 	// Call the standalone ValidateEmail() helper.
 	ValidateEmail(v, user.Email)
 	// Call the standalone ValidatePhoneNumber() helper.

@@ -143,7 +143,7 @@ func (app *application) updateBudgetHandler(w http.ResponseWriter, r *http.Reque
 	user := app.contextGetUser(r)
 
 	// Retrieve the budget summary and total monthly contribution
-	budgetSummary, budgetTotal, err := app.models.FinancialManager.GetAllGoalSummaryBudgetID(budget.Id, user.ID)
+	budgetTotal, err := app.models.FinancialManager.GetAllGoalSummaryBudgetID(budget.Id, user.ID, decimal.NewFromInt(0))
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
@@ -233,15 +233,11 @@ func (app *application) updateBudgetHandler(w http.ResponseWriter, r *http.Reque
 	if newSurplus.Cmp(decimal.Zero) < 0 {
 		newSurplus = decimal.Zero // Ensure surplus doesn't go negative
 	}
-
-	// Save the new surplus to Redis
-	if err := app.saveAndUpdateSurplus(user.ID, budgetID, newSurplus); err != nil {
-		app.serverErrorResponse(w, r, err)
-		return
-	}
+	// set to totals
+	budgetTotal.TotalSurplus = newSurplus
 
 	// Return the updated budget with a 200 OK response
-	err = app.writeJSON(w, http.StatusOK, envelope{"budget": budget, "message": message, "summary": budgetSummary}, nil)
+	err = app.writeJSON(w, http.StatusOK, envelope{"budget": budget, "message": message, "totals": budgetTotal}, nil)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 	}
@@ -352,6 +348,17 @@ func (app *application) createNewGoalHandler(w http.ResponseWriter, r *http.Requ
 		app.badRequestResponse(w, r, err)
 		return
 	}
+	// check if budget exists
+	budget, err := app.models.FinancialManager.GetBudgetByID(input.BudgetID)
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrGeneralRecordNotFound):
+			app.notFoundResponse(w, r)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
 	mappedStatus, err := app.models.FinancialManager.MapStatusToOCFConstant(input.Status)
 	if err != nil {
 		switch {
@@ -381,14 +388,14 @@ func (app *application) createNewGoalHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	// check if the goal is still within the budget
-	goalSumary, goalSummaryTotals, err := app.models.FinancialManager.GetAllGoalSummaryBudgetID(newGoal.BudgetID, newGoal.UserID)
+	goalSummaryTotals, err := app.models.FinancialManager.GetAllGoalSummaryBudgetID(newGoal.BudgetID, newGoal.UserID, newGoal.MonthlyContribution)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
 	}
 	// Check if the new goal's monthly contribution exceeds the available surplus
 	if newGoal.MonthlyContribution.Cmp(goalSummaryTotals.TotalSurplus) > 0 {
-		if goalSummaryTotals.BudgetStrictness {
+		if budget.IsStrict {
 			// Prevent the creation of the goal if the budget is strict
 			v.AddError("monthly_contribution", "monthly contribution is greater than the available surplus for this budget")
 			app.failedValidationResponse(w, r, v.Errors)
@@ -410,31 +417,16 @@ func (app *application) createNewGoalHandler(w http.ResponseWriter, r *http.Requ
 		}
 		return
 	}
-	oldSurplus, _ := app.getSurplus(newGoal.UserID, newGoal.BudgetID)
-	app.logger.Info("New Surplus Amount from REDIS", zap.String("Surplus", oldSurplus.String()))
-	// calculate the new surplus by simly substracting the new goal total monthly contribution from the surplus we had
+
 	newSurplus := goalSummaryTotals.TotalSurplus.Sub(newGoal.MonthlyContribution)
 	if newSurplus.Cmp(decimal.Zero) < 0 {
 		newSurplus = decimal.Zero
 	}
-	// if eeverything is successful, we update the surplus in REDIS
-	if err := app.saveAndUpdateSurplus(newGoal.UserID, newGoal.BudgetID, newSurplus); err != nil {
-		app.serverErrorResponse(w, r, err)
-		return
-	}
-	// get the new goal summary
-	redisSurplus, err := app.getSurplus(newGoal.UserID, newGoal.BudgetID)
-	if err != nil {
-		app.serverErrorResponse(w, r, err)
-		return
-	}
-	// Check if TotalMonthlyContribution is zero and set goalSummary to an empty slice if it is
-	// This is to prevent the response from returning a default value if no goals exist for the budget
-	if goalSummaryTotals.TotalMonthlyContribution.Cmp(decimal.Zero) == 0 {
-		goalSumary = []*data.Goal_Summary{}
-	}
-	app.logger.Info("New Surplus Amount from REDIS", zap.String("Surplus", redisSurplus.String()))
-	err = app.writeJSON(w, http.StatusCreated, envelope{"goal": newGoal, "Existing Goal Summary": goalSumary}, nil)
+	// Update new data
+	goalSummaryTotals.TotalSurplus = newSurplus
+	goalSummaryTotals.TotalMonthlyContribution = goalSummaryTotals.TotalMonthlyContribution.Add(newGoal.MonthlyContribution)
+	// Write the response
+	err = app.writeJSON(w, http.StatusCreated, envelope{"goal": newGoal, "Totals": goalSummaryTotals}, nil)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 	}
@@ -482,6 +474,17 @@ func (app *application) updatedGoalHandler(w http.ResponseWriter, r *http.Reques
 		}
 		return
 	}
+	// check if budget exists
+	budget, err := app.models.FinancialManager.GetBudgetByID(goal.BudgetID)
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrGeneralRecordNotFound):
+			app.notFoundResponse(w, r)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
 	// We found the Goal with the user ID, Decode request body into the input struct
 	err = app.readJSON(w, r, &input)
 	if err != nil {
@@ -489,7 +492,7 @@ func (app *application) updatedGoalHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	// Get the budget summary and total monthly contribution
-	budgetSummary, budgetTotal, err := app.models.FinancialManager.GetAllGoalSummaryBudgetID(goal.BudgetID, user.ID)
+	budgetTotal, err := app.models.FinancialManager.GetAllGoalSummaryBudgetID(goal.BudgetID, user.ID, decimal.NewFromInt(0))
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -503,7 +506,7 @@ func (app *application) updatedGoalHandler(w http.ResponseWriter, r *http.Reques
 	v := validator.New()
 	// Step 1: Subtract the current goal's monthly contribution to get the correct starting surplus
 	totalContributionExcludingCurrentGoal := budgetTotal.TotalMonthlyContribution.Sub(goal.MonthlyContribution)
-	availableSurplus := budgetTotal.BudgetTotalAmount.Sub(totalContributionExcludingCurrentGoal)
+	availableSurplus := budgetTotal.TotalSurplus.Sub(totalContributionExcludingCurrentGoal)
 	// Step 2: Initialize newTotalSurplus with the available surplus
 	newTotalSurplus := availableSurplus
 
@@ -513,11 +516,11 @@ func (app *application) updatedGoalHandler(w http.ResponseWriter, r *http.Reques
 		newTotalSurplus = availableSurplus.Sub(*input.MonthlyContribution)
 
 		// Step 4: Check if the new contribution exceeds the available surplus
-		if budgetTotal.BudgetStrictness && input.MonthlyContribution.Cmp(availableSurplus) > 0 {
+		if budget.IsStrict && input.MonthlyContribution.Cmp(availableSurplus) > 0 {
 			v.AddError("monthly_contribution", "monthly contribution is greater than the total surplus provisioned for this budget")
 			app.failedValidationResponse(w, r, v.Errors)
 			return
-		} else if input.MonthlyContribution.Cmp(availableSurplus) > 0 && !budgetTotal.BudgetStrictness {
+		} else if input.MonthlyContribution.Cmp(availableSurplus) > 0 && !budget.IsStrict {
 			// Allow the update but add a warning message
 			message.Message = append(message.Message, "monthly contribution is greater than the total surplus provisioned. budget needs to be updated")
 		}
@@ -526,9 +529,6 @@ func (app *application) updatedGoalHandler(w http.ResponseWriter, r *http.Reques
 		newTotalSurplus = budgetTotal.TotalSurplus
 	}
 	// Check for changes in other fields and update accordingly
-	if input.BudgetID != nil {
-		goal.BudgetID = *input.BudgetID
-	}
 	if input.Name != nil {
 		goal.Name = *input.Name
 	}
@@ -573,17 +573,12 @@ func (app *application) updatedGoalHandler(w http.ResponseWriter, r *http.Reques
 		}
 		return
 	}
-	// if surplus changes, we update the surplus in REDIS
-	if newTotalSurplus.Cmp(budgetTotal.TotalSurplus) != 0 {
-		// Save the new surplus to Redis
-		if err := app.saveAndUpdateSurplus(user.ID, goal.BudgetID, newTotalSurplus); err != nil {
-			app.serverErrorResponse(w, r, err)
-			return
-		}
-	}
+	// Set totals to new surplus
+	budgetTotal.TotalSurplus = newTotalSurplus
+
 	app.logger.Info("New Surplus Amount from REDIS", zap.String("Surplus", newTotalSurplus.String()), zap.String("New Surplus", newTotalSurplus.String()))
 	// Return the updated budget with a 200 OK response
-	err = app.writeJSON(w, http.StatusOK, envelope{"goal": goal, "message": message, "summary": budgetSummary, "surplus": newTotalSurplus}, nil)
+	err = app.writeJSON(w, http.StatusOK, envelope{"goal": goal, "message": message, "totals": budgetTotal}, nil)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 	}

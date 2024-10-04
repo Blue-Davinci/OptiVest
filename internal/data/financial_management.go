@@ -119,12 +119,11 @@ type Goal_Summary struct {
 
 // Goal_Summary_Totals struct represents the totals for a goal summary
 type Goal_Summary_Totals struct {
-	TotalGoals               int             `json:"total_goals"`
-	BudgetTotalAmount        decimal.Decimal `json:"budget_total_amount"`
-	BudgetCurrency           string          `json:"budget_currency"`
-	BudgetStrictness         bool            `json:"budget_strictness"`
-	TotalMonthlyContribution decimal.Decimal `json:"total_monthly_contribution"`
-	TotalSurplus             decimal.Decimal `json:"total_surplus"`
+	TotalBudgetAmount          decimal.Decimal `json:"total_budget_amount"`
+	TotalMonthlyContribution   decimal.Decimal `json:"total_monthly_contribution"`
+	TotalExpenses              decimal.Decimal `json:"total_expenses"`
+	ProjectedRecurringExpenses decimal.Decimal `json:"projected_recurring_expenses"`
+	TotalSurplus               decimal.Decimal `json:"total_surplus"`
 }
 
 // Goal Tracking struct represents howwe track our goals
@@ -359,18 +358,16 @@ func (m FinancialManagerModel) GetBudgetsForUser(userID int64, searchQuery strin
 		// make a budget
 		budget := populateBudget(row)
 		// return a goal summary and totals for each budget
-		goalSummary, goalSummaryTotals, err := m.GetAllGoalSummaryBudgetID(budget.Id, userID)
+		goalSummaryTotals, err := m.GetAllGoalSummaryBudgetID(budget.Id, userID, decimal.NewFromInt(0))
 		if err != nil {
 			return nil, Metadata{}, err
 		}
 		// account for 0 goals by checking for the monthly contribution, if 0, we set empty structs {}
 		if goalSummaryTotals.TotalMonthlyContribution.Equal(decimal.NewFromInt(0)) {
-			goalSummary = []*Goal_Summary{}
 			goalSummaryTotals = &Goal_Summary_Totals{}
 		}
 		//enrich our budget
 		enrichedBudget.Budget = *budget
-		enrichedBudget.Goal_Summary = goalSummary
 		enrichedBudget.Goal_Summary_Totals = *goalSummaryTotals
 		// append the enriched budget to the slice
 		enrichedBudgets = append(enrichedBudgets, &enrichedBudget)
@@ -735,7 +732,7 @@ func (m FinancialManagerModel) UpdateGoalProgressOnExpiredGoals() error {
 	if err != nil {
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
-			return ErrGeneralRecordNotFound
+			return ErrEditConflict
 		default:
 			return err
 		}
@@ -752,110 +749,92 @@ func (m FinancialManagerModel) UpdateGoalProgressOnExpiredGoals() error {
 // We return the goal summaries and additional totals which contains the total goals, total monthly contribution
 // total surplus, budget total amount, budget currency and budget strictness
 // This is the main function that will be used to get and manage surplus by most of the handlers
-func (m FinancialManagerModel) GetAllGoalSummaryBudgetID(budgetID, userID int64) ([]*Goal_Summary, *Goal_Summary_Totals, error) {
+func (m FinancialManagerModel) GetAllGoalSummaryBudgetID(budgetID, userID int64, totalAmount decimal.Decimal) (*Goal_Summary_Totals, error) {
 	ctx, cancel := contextGenerator(context.Background(), DefaultFinManDBContextTimeout)
 	defer cancel()
 
 	fmt.Println("Received data: budgetID:", budgetID, "userID:", userID)
 
 	// Fetch goals from the database
-	goals, err := m.DB.GetAllGoalSummaryBuBudgetID(ctx, database.GetAllGoalSummaryBuBudgetIDParams{
-		ID:     budgetID,
-		UserID: userID,
+	goals, err := m.DB.GetAllGoalSummaryByBudgetID(ctx, database.GetAllGoalSummaryByBudgetIDParams{
+		ID:          budgetID,
+		UserID:      userID,
+		TotalAmount: totalAmount.String(),
 	})
 	if err != nil {
+		fmt.Println("0Error: ", err)
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
-			return nil, nil, ErrGeneralRecordNotFound
+			return nil, ErrGeneralRecordNotFound
 		default:
-			return nil, nil, err
+			return nil, err
 		}
 	}
 
 	// Initialize totals and summaries
 	goalTotals := &Goal_Summary_Totals{}
-	goalSummaries := []*Goal_Summary{}
 
 	// Process each goal
 	for _, row := range goals {
-		var goalSummary Goal_Summary
-
-		// Fill totals with default values if necessary
-		goalTotals.TotalGoals = int(row.TotalGoals)
 
 		// Check if BudgetTotalAmount is empty and set a default value if needed
-		if row.BudgetTotalAmount != "" {
-			goalTotals.BudgetTotalAmount, err = decimal.NewFromString(row.BudgetTotalAmount)
+		if row.TotalAmount != "" {
+			goalTotals.TotalBudgetAmount, err = convertToDecimal(row.TotalAmount)
 			if err != nil {
 				fmt.Println("--Error: ", err)
-				return nil, nil, err
+				return nil, err
 			}
 		} else {
-			goalTotals.BudgetTotalAmount = decimal.NewFromInt(0) // Default to 0 if empty
+			goalTotals.TotalBudgetAmount = decimal.NewFromInt(0) // Default to 0 if empty
 		}
 
-		goalTotals.BudgetCurrency = row.BudgetCurrency
-		goalTotals.BudgetStrictness = row.IsStrict
-
 		// Check if TotalMonthlyContributions is empty and set default if necessary
+		// type conversion is necessary as the value is a string
 		if row.TotalMonthlyContributions != "" {
-			goalTotals.TotalMonthlyContribution, err = decimal.NewFromString(row.TotalMonthlyContributions)
+			goalTotals.TotalMonthlyContribution, err = convertToDecimal(row.TotalMonthlyContributions)
 			if err != nil {
 				fmt.Println("--1Error: ", err)
-				return nil, nil, err
+				return nil, err
 			}
 		} else {
 			goalTotals.TotalMonthlyContribution = decimal.NewFromInt(0) // Default to 0 if empty
+		}
+
+		// Total expenses, convert to string}
+		if row.TotalExpenses != "" {
+			goalTotals.TotalExpenses, err = convertToDecimal(row.TotalExpenses)
+			if err != nil {
+				fmt.Println("--2Error: ", err)
+				return nil, err
+			}
+		} else {
+			goalTotals.TotalExpenses = decimal.NewFromInt(0) // Default to 0 if empty
+		}
+		// projected recurring expenses, convert to string
+		if row.ProjectedRecurringExpenses != "" {
+			goalTotals.ProjectedRecurringExpenses, err = convertToDecimal(row.ProjectedRecurringExpenses)
+			if err != nil {
+				fmt.Println("--3Error: ", err)
+				return nil, err
+			}
+		} else {
+			goalTotals.ProjectedRecurringExpenses = decimal.NewFromInt(0) // Default to 0 if empty
 		}
 
 		// Check if BudgetSurplus is empty and set default if necessary
 		if row.BudgetSurplus != "" {
 			goalTotals.TotalSurplus, err = decimal.NewFromString(row.BudgetSurplus)
 			if err != nil {
-				fmt.Println("--2Error: ", err)
-				return nil, nil, err
+				fmt.Println("--4Error: ", err)
+				return nil, err
 			}
 		} else {
 			goalTotals.TotalSurplus = decimal.NewFromInt(0) // Default to 0 if empty
 		}
-
-		// Process goal summary
-		goalSummary.Id = row.GoalID.Int64 // Assuming GoalID is valid and not empty
-
-		if row.GoalName.String != "" {
-			goalSummary.Name = row.GoalName.String
-		} else {
-			goalSummary.Name = "Unnamed Goal" // Default name if empty
-		}
-
-		// Check if GoalMonthlyContribution is empty
-		if row.GoalMonthlyContribution.String != "" {
-			goalSummary.MonthlyContribution, err = decimal.NewFromString(row.GoalMonthlyContribution.String)
-			if err != nil {
-				fmt.Println("--3Error: ", err)
-				return nil, nil, err
-			}
-		} else {
-			goalSummary.MonthlyContribution = decimal.NewFromInt(0) // Default to 0 if empty
-		}
-
-		// Check if GoalTargetAmount is empty
-		if row.GoalTargetAmount.String != "" {
-			goalSummary.TargetAmount, err = decimal.NewFromString(row.GoalTargetAmount.String)
-			if err != nil {
-				fmt.Println("--4Error: ", err)
-				return nil, nil, err
-			}
-		} else {
-			goalSummary.TargetAmount = decimal.NewFromInt(0) // Default to 0 if empty
-		}
-
-		// Append the goal summary to the slice
-		goalSummaries = append(goalSummaries, &goalSummary)
 	}
 
 	// Return the goal summaries and totals
-	return goalSummaries, goalTotals, nil
+	return goalTotals, nil
 }
 
 // ============================================================================================================

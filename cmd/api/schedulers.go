@@ -1,8 +1,10 @@
 package main
 
 import (
+	"errors"
 	"time"
 
+	"github.com/Blue-Davinci/OptiVest/internal/data"
 	"go.uber.org/zap"
 )
 
@@ -61,7 +63,12 @@ func (app *application) trackGoalProgressStatus() {
 	app.logger.Info("Tracking goal progress status", zap.String("time", time.Now().String()))
 	err := app.models.FinancialManager.UpdateGoalProgressOnExpiredGoals()
 	if err != nil {
-		app.logger.Error("Error tracking goal progress status", zap.Error(err))
+		switch {
+		case errors.Is(err, data.ErrEditConflict):
+			app.logger.Info("Edit conflict while updating the Goal progress status", zap.Error(err))
+		default:
+			app.logger.Error("Error tracking goal progress status", zap.Error(err))
+		}
 	}
 }
 
