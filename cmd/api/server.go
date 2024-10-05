@@ -50,6 +50,9 @@ func (app *application) server() error {
 		//stop the cron job schedulers
 		app.stopCronJobs(
 			app.config.scheduler.trackMonthlyGoalsCron,
+			app.config.scheduler.trackGoalProgressStatus,
+			app.config.scheduler.trackExpiredGroupInvitations,
+			app.config.scheduler.trackRecurringExpenses,
 		)
 		// Call Shutdown() on our server, passing in the context we just made.
 		shutdownChan <- srv.Shutdown(ctx)

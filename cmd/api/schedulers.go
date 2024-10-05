@@ -57,6 +57,22 @@ func (app *application) trackExpiredGroupInvitationsHandler() {
 	app.config.scheduler.trackExpiredGroupInvitations.Start()
 }
 
+// trackRecurringExpensesHandler() is a cronjob method that sets a cronJob to run at the end of every day
+// to track all the recurring expenses for users
+func (app *application) trackRecurringExpensesHandler() {
+	app.logger.Info("Starting the recurring expenses tracking handler..", zap.String("time", time.Now().String()))
+	updateInterval := "0 0 * * *"
+
+	_, err := app.config.scheduler.trackRecurringExpenses.AddFunc(updateInterval, app.trackRecurringExpenses)
+	if err != nil {
+		app.logger.Error("Error adding [trackRecurringExpenses] to scheduler", zap.Error(err))
+	}
+	// Run the tracking first before starting the cron
+	app.trackRecurringExpenses()
+	// start the cron scheduler
+	app.config.scheduler.trackRecurringExpenses.Start()
+}
+
 // trackGoalProgressStatus() is the method called by the cronjob to update the progress of all the goals that have expired
 // It will be called every day at midnight to update the progress of the expired goals.
 func (app *application) trackGoalProgressStatus() {
@@ -99,5 +115,78 @@ func (app *application) trackExpiredGroupInvitations() {
 	err := app.models.FinancialGroupManager.UpdateExpiredGroupInvitations()
 	if err != nil {
 		app.logger.Error("Error tracking expired group invitations", zap.Error(err))
+	}
+}
+
+// trackRecurringExpenses() is the method called by the cronjob to track all the recurring expenses for users
+// We will need to pass a burst and offset. After each burst, wwe recieve the  expenses than need to be tracked
+// For each of those expenses, we add them to the expenses table after which we update the next tracking date
+// of the current recurring expense.
+// After processing we increment the offset by the burst and repeat the process until we get
+// an ErrGenerealRecordNotFound error which just means we have no more expenses to track and we can stop
+func (app *application) trackRecurringExpenses() {
+	app.logger.Info("Tracking recurring expenses", zap.String("time", time.Now().String()))
+
+	// Define burst size and start from the first page
+	burst := app.config.limit.recurringExpenseTrackerBurstLimit
+	currentPage := 1 // Start with page 1
+
+	for {
+		// Create filter with current page and burst size
+		filter := data.Filters{
+			Page:     currentPage,
+			PageSize: burst,
+		}
+
+		// Retrieve expenses that need to be tracked for the current page
+		recurringExpensesToTrack, metadata, err := app.models.FinancialTrackingManager.GetAllRecurringExpensesDueForProcessing(filter)
+		if err != nil {
+			// Handle case where no more records are found, break out of the loop
+			if errors.Is(err, data.ErrGeneralRecordNotFound) {
+				app.logger.Info("No more recurring expenses to track", zap.Error(err))
+				break
+			}
+			// Log any other errors and stop further processing
+			app.logger.Error("Error tracking recurring expenses", zap.Error(err))
+			break
+		}
+
+		// Process each recurring expense in the batch
+		for _, recurringExpenseToTrack := range recurringExpensesToTrack {
+			// Create a new expense record
+			expense := &data.Expense{
+				BudgetID:     recurringExpenseToTrack.BudgetID,
+				Name:         recurringExpenseToTrack.Name,
+				Category:     "recurring",
+				Amount:       recurringExpenseToTrack.Amount,
+				IsRecurring:  true,
+				Description:  recurringExpenseToTrack.Description,
+				DateOccurred: time.Now(),
+			}
+
+			// Add the expense to the expenses table
+			err := app.models.FinancialTrackingManager.CreateNewExpense(recurringExpenseToTrack.UserID, expense)
+			if err != nil {
+				app.logger.Error("Error adding recurring expense to expenses table", zap.Error(err))
+				continue
+			}
+
+			// Update the next tracking date for the current recurring expense
+			recurringExpenseToTrack.CalculateNextOccurrence()
+			err = app.models.FinancialTrackingManager.UpdateRecurringExpenseByID(recurringExpenseToTrack.UserID, recurringExpenseToTrack)
+			if err != nil {
+				app.logger.Error("Error updating recurring expense", zap.Error(err))
+				continue
+			}
+		}
+
+		// Check if this is the last page of records
+		if metadata.LastPage == metadata.CurrentPage {
+			app.logger.Info("All recurring expenses processed. Ending tracking.")
+			break
+		}
+
+		// Move to the next page
+		currentPage = metadata.CurrentPage + 1
 	}
 }

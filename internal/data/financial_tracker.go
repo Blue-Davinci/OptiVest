@@ -31,6 +31,22 @@ var (
 	ErrDuplicateRecurringExpense   = errors.New("recurring expense already exists")
 )
 
+// Represents an expense
+type Expense struct {
+	ID           int64           `json:"id"`
+	UserID       int64           `json:"user_id"`
+	BudgetID     int64           `json:"budget_id"`
+	Name         string          `json:"name"`
+	Category     string          `json:"category"`
+	Amount       decimal.Decimal `json:"amount"`
+	IsRecurring  bool            `json:"is_recurring"`
+	Description  string          `json:"description"`
+	DateOccurred time.Time       `json:"date_occurred"`
+	CreatedAt    time.Time       `json:"created_at"`
+	UpdatedAt    time.Time       `json:"updated_at"`
+}
+
+// Represents a recurring expense
 type RecurringExpense struct {
 	ID                 int64                           `json:"id"`                  // Unique ID for the recurring expense
 	UserID             int64                           `json:"user_id"`             // Reference to the user
@@ -44,6 +60,8 @@ type RecurringExpense struct {
 	CreatedAt          time.Time                       `json:"created_at"`          // Creation timestamp
 	UpdatedAt          time.Time                       `json:"updated_at"`          // Last updated timestamp
 }
+
+// Represents an income
 type Income struct {
 	ID                   int64           `json:"id"`
 	UserID               int64           `json:"user_id"`
@@ -119,6 +137,14 @@ func ValidateRecurringExpense(v *validator.Validator, expense *RecurringExpense)
 	ValidateBudgetDescription(v, expense.Description)
 	ValidateNextOccurrence(v, expense.NextOccurrence)
 	ValidateName(v, expense.Name, "name")
+}
+
+// validate expense
+func ValidateExpense(v *validator.Validator, expense *Expense) {
+	ValidateAmount(v, expense.Amount, "amount")
+	ValidateBudgetDescription(v, expense.Description)
+	ValidateName(v, expense.Name, "name")
+	ValidateName(v, expense.Category, "category")
 }
 
 // validate an income
@@ -222,6 +248,128 @@ func (m *FinancialTrackingModel) GetRecurringExpenseByID(userID, recurringExpens
 	return populatedExpens, nil
 }
 
+// GetAllRecurringExpensesDueForProcessing() gets all the recurring expenses that are due for processing
+// That is, we get all recurring expenses that have a next occurrence that is less than or equal to the current time
+// We will need an offset and a limit so that we support batch processing.
+// This method is made to work in tandem with our cron job
+func (m *FinancialTrackingModel) GetAllRecurringExpensesDueForProcessing(filters Filters) ([]*RecurringExpense, Metadata, error) {
+	// set our context
+	ctx, cancel := contextGenerator(context.Background(), DefaultFinTrackDBContextTimeout)
+	defer cancel()
+	// get the expenses
+	recurringExpenses, err := m.DB.GetAllRecurringExpensesDueForProcessing(ctx, database.GetAllRecurringExpensesDueForProcessingParams{
+		Limit:  int32(filters.limit()),
+		Offset: int32(filters.offset()),
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return nil, Metadata{}, ErrGeneralRecordNotFound
+		default:
+			return nil, Metadata{}, err
+		}
+	}
+	// set totals
+	totalRecords := 0
+	// populate the expenses
+	var populatedExpenses []*RecurringExpense
+	for _, expense := range recurringExpenses {
+		totalRecords = int(expense.TotalCount)
+		populatedExpenses = append(populatedExpenses, populateRecurringExpense(expense))
+	}
+	// calculate metadata
+	metadata := calculateMetadata(totalRecords, filters.Page, filters.PageSize)
+	// we are good
+	return populatedExpenses, metadata, nil
+
+}
+
+// CreateNewExpense() creates a new expense in the expenses table
+// This expense is a one way expense in that it is not recurring
+// But the caller still needs to verify that the surplus is enough to cover the expense
+func (m *FinancialTrackingModel) CreateNewExpense(userID int64, expense *Expense) error {
+	// make context
+	ctx, cancel := contextGenerator(context.Background(), DefaultFinTrackDBContextTimeout)
+	defer cancel()
+	// create the expense
+	createdExpense, err := m.DB.CreateNewExpense(ctx, database.CreateNewExpenseParams{
+		UserID:       userID,
+		BudgetID:     expense.BudgetID,
+		Name:         expense.Name,
+		Category:     expense.Category,
+		Amount:       expense.Amount.String(),
+		IsRecurring:  expense.IsRecurring,
+		Description:  sql.NullString{String: expense.Description, Valid: true},
+		DateOccurred: expense.DateOccurred,
+	})
+	if err != nil {
+		return err
+	}
+	// set the created expense
+	expense.ID = createdExpense.ID
+	expense.UserID = userID
+	expense.CreatedAt = createdExpense.CreatedAt.Time
+	expense.UpdatedAt = createdExpense.UpdatedAt.Time
+	// we are good
+	return nil
+}
+
+// UpdateExpenseByID() is a method that updates an expense by its ID and user ID
+// We enrich it back with the updated at timestamp
+func (m *FinancialTrackingModel) UpdateExpenseByID(userID int64, expense *Expense) error {
+	// set our context
+	ctx, cancel := contextGenerator(context.Background(), DefaultFinTrackDBContextTimeout)
+	defer cancel()
+	// create the expense
+	updatedAt, err := m.DB.UpdateExpenseByID(ctx, database.UpdateExpenseByIDParams{
+		Name:         expense.Name,
+		Category:     expense.Category,
+		Amount:       expense.Amount.String(),
+		IsRecurring:  expense.IsRecurring,
+		Description:  sql.NullString{String: expense.Description, Valid: true},
+		DateOccurred: expense.DateOccurred,
+		ID:           expense.ID,
+		UserID:       userID,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return ErrEditConflict
+		default:
+			return err
+		}
+	}
+	// set the updated expense
+	expense.UpdatedAt = updatedAt.Time
+	// we are good
+	return nil
+}
+
+// GetExpenseByID() gets an expense by both the ID and the user ID
+// We return back an expense and an error if any was found
+func (m *FinancialTrackingModel) GetExpenseByID(userID, expenseID int64) (*Expense, error) {
+	// set our context
+	ctx, cancel := contextGenerator(context.Background(), DefaultFinTrackDBContextTimeout)
+	defer cancel()
+	// get the expense
+	expense, err := m.DB.GetExpenseByID(ctx, database.GetExpenseByIDParams{
+		ID:     expenseID,
+		UserID: userID,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return nil, ErrGeneralRecordNotFound
+		default:
+			return nil, err
+		}
+	}
+	// we are good, populate the expense
+	updatedExpense := populateExpense(expense)
+	// we are good
+	return updatedExpense, nil
+}
+
 // =========================================================================================================
 // Income
 // =========================================================================================================
@@ -272,6 +420,27 @@ func populateRecurringExpense(recurringExpensRow interface{}) *RecurringExpense 
 			ProjectedAmount:    decimal.RequireFromString(recurringExpense.ProjectedAmount),
 			CreatedAt:          recurringExpense.CreatedAt.Time,
 			UpdatedAt:          recurringExpense.UpdatedAt.Time,
+		}
+	default:
+		return nil
+	}
+}
+
+func populateExpense(expenseRow interface{}) *Expense {
+	switch expense := expenseRow.(type) {
+	case database.Expense:
+		return &Expense{
+			ID:           expense.ID,
+			UserID:       expense.UserID,
+			BudgetID:     expense.BudgetID,
+			Name:         expense.Name,
+			Category:     expense.Category,
+			Amount:       decimal.RequireFromString(expense.Amount),
+			IsRecurring:  expense.IsRecurring,
+			Description:  expense.Description.String,
+			DateOccurred: expense.DateOccurred,
+			CreatedAt:    expense.CreatedAt.Time,
+			UpdatedAt:    expense.UpdatedAt.Time,
 		}
 	default:
 		return nil

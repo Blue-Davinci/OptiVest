@@ -118,8 +118,10 @@ func (app *application) groupRoutes() chi.Router {
 // expenseRoutes() is a method that returns a chi.Router that contains all the routes for the expenses
 func (app *application) expenseRoutes() chi.Router {
 	expenseRoutes := chi.NewRouter()
-	expenseRoutes.Post("/", app.createNewRecurringExpenseHandler)
-	expenseRoutes.Patch("/{expenseID}", app.updateRecurringExpenseByIDHandler)
+	expenseRoutes.Post("/", app.createNewExpenseHandler)
+	expenseRoutes.Patch("/{expenseID}", app.updateExpenseByIDHandler)
+	expenseRoutes.Post("/recurring", app.createNewRecurringExpenseHandler)
+	expenseRoutes.Patch("/recurring/{expenseID}", app.updateRecurringExpenseByIDHandler)
 
 	return expenseRoutes
 }

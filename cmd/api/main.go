@@ -92,9 +92,11 @@ type config struct {
 		trackMonthlyGoalsCron        *cron.Cron
 		trackGoalProgressStatus      *cron.Cron
 		trackExpiredGroupInvitations *cron.Cron
+		trackRecurringExpenses       *cron.Cron
 	}
 	limit struct {
-		monthlyGoalProcessingBatchLimit int
+		monthlyGoalProcessingBatchLimit   int
+		recurringExpenseTrackerBurstLimit int
 	}
 }
 
@@ -176,12 +178,14 @@ func main() {
 
 	// Limit configuration
 	flag.IntVar(&cfg.limit.monthlyGoalProcessingBatchLimit, "monthly-goal-batch-limit", 100, "Batching Limit for Monthly Goal Processing")
+	flag.IntVar(&cfg.limit.recurringExpenseTrackerBurstLimit, "recurring-expense-burst-limit", 100, "Batch Limit for Recurring Expense Tracker")
 	// Parse the flags
 	flag.Parse()
 	// Initialize our cronJobs
 	cfg.scheduler.trackMonthlyGoalsCron = cron.New()
 	cfg.scheduler.trackGoalProgressStatus = cron.New()
 	cfg.scheduler.trackExpiredGroupInvitations = cron.New()
+	cfg.scheduler.trackRecurringExpenses = cron.New()
 	// Create a new version boolean flag with the default value of false.
 	displayVersion := flag.Bool("version", false, "Display version and exit")
 	// If the version flag value is true, then print out the version number and
@@ -262,6 +266,7 @@ func (app *application) startSchedulers() {
 	go app.trackMonthlyGoalsScheduleHandler()        // trackMonthlyGoals
 	go app.updateGoalProgressOnExpiredGoalsHandler() // updateGoalProgressOnExpiredGoals
 	go app.trackExpiredGroupInvitationsHandler()     // trackExpiredGroupInvitations
+	go app.trackRecurringExpensesHandler()           // trackRecurringExpenses
 }
 
 // publishMetrics sets up the expvar variables for the application

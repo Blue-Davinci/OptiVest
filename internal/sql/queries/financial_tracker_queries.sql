@@ -8,7 +8,8 @@ INSERT INTO recurring_expenses (
 RETURNING id, created_at, updated_at;
 
 -- name: GetAllRecurringExpensesDueForProcessing :many
-SELECT 
+SELECT
+    COUNT(*) OVER() AS total_count,
     id, 
     user_id, 
     budget_id, 
@@ -52,6 +53,49 @@ SELECT
     updated_at
 FROM recurring_expenses
 WHERE id = $1 AND user_id = $2;
+
+-- name: CreateNewExpense :one
+INSERT INTO expenses (
+    user_id, 
+    budget_id, 
+    name,
+    category,
+    amount, 
+    is_recurring, 
+    description, 
+    date_occurred
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8
+)
+RETURNING id, created_at, updated_at;
+
+-- name: GetExpenseByID :one
+SELECT 
+    id, 
+    user_id, 
+    budget_id, 
+    name, 
+    category, 
+    amount, 
+    is_recurring, 
+    description, 
+    date_occurred, 
+    created_at, 
+    updated_at
+FROM expenses
+WHERE id = $1 AND user_id = $2;
+
+-- name: UpdateExpenseByID :one
+UPDATE expenses SET
+    name = $1,
+    category = $2,
+    amount = $3,
+    is_recurring = $4,
+    description = $5,
+    date_occurred = $6
+WHERE
+    id = $7 AND user_id = $8
+RETURNING updated_at;
 
 -- name: CreateNewIncome :one
     INSERT INTO income (

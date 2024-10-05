@@ -143,26 +143,27 @@ func (app *application) updateBudgetHandler(w http.ResponseWriter, r *http.Reque
 	user := app.contextGetUser(r)
 
 	// Retrieve the budget summary and total monthly contribution
-	budgetTotal, err := app.models.FinancialManager.GetAllGoalSummaryBudgetID(budget.Id, user.ID, decimal.NewFromInt(0))
+	budgetTotal, err := app.models.FinancialManager.GetAllGoalSummaryBudgetID(budget.Id, user.ID)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
 	}
+	app.logger.Info("Total Surplus", zap.String("Total Surplus", budgetTotal.TotalSurplus.String()))
 
 	// Initialize validator
 	v := validator.New()
 
-	// Check for changes in strictness
-	// if strictness is provided and it's being changed
+	// Validation and update logic combined in one function
+	totalUtilizedBudgetAmount := budget.TotalAmount.Sub(budgetTotal.TotalSurplus)
+
+	// Validate strictness change
 	if input.IsStrict != nil && *input.IsStrict != budget.IsStrict {
-		// if we are moving from non-strict to strict
-		if !budget.IsStrict && *input.IsStrict {
-			// Ensure total amount is greater than or equal to the total monthly contribution
+		if *input.IsStrict {
+			// Moving from non-strict to strict
 			if input.TotalAmount == nil {
 				input.TotalAmount = &budget.TotalAmount
 			}
-			// if total amount is less than the total monthly contribution
-			if input.TotalAmount.Cmp(budgetTotal.TotalMonthlyContribution) < 0 {
+			if input.TotalAmount.Cmp(totalUtilizedBudgetAmount) < 0 {
 				v.AddError("total_amount", "total amount is less than the total goal contribution")
 				v.AddError("is_strict", "strictness prevents the total amount from being less than the total goals")
 				app.failedValidationResponse(w, r, v.Errors)
@@ -170,27 +171,29 @@ func (app *application) updateBudgetHandler(w http.ResponseWriter, r *http.Reque
 			} else {
 				message.Message = append(message.Message, "budget strictness changed from non-strict to strict")
 			}
-		} else if budget.IsStrict && !*input.IsStrict {
-			// If strictness changed from true to false, allow the update but warn if the total amount is lower
-			message.Message = append(message.Message, "budget strictness changed from strict to non-strict")
-			if input.TotalAmount != nil && input.TotalAmount.Cmp(budgetTotal.TotalMonthlyContribution) < 0 {
-				message.Message = append(message.Message, "total amount is lower than total goal contributions")
+		} else {
+			if input.TotalAmount.LessThan(totalUtilizedBudgetAmount) {
+				// Moving from strict to non-strict
+				message.Message = append(message.Message, "though allowed, your new budget amount is less than the total current expenses and goals")
 			}
 		}
 	}
 
-	// Check for changes in total amount
+	// Validate total amount change
 	if input.TotalAmount != nil && input.TotalAmount.Cmp(budget.TotalAmount) != 0 {
-		// If strictness is true, ensure the total amount is not less than the total monthly goal contribution
-		if *input.IsStrict && input.TotalAmount.Cmp(budgetTotal.TotalMonthlyContribution) < 0 {
+		if budget.IsStrict && input.TotalAmount.Cmp(totalUtilizedBudgetAmount) < 0 {
 			v.AddError("total_amount", "total amount is less than the total goal contribution")
+			v.AddError("is_strict", "strictness prevents the total amount from being less than the total goals")
 			app.failedValidationResponse(w, r, v.Errors)
 			return
+		} else if input.TotalAmount.Cmp(totalUtilizedBudgetAmount) < 0 && !budget.IsStrict {
+			message.Message = append(message.Message, "though allowed, your new budget total amount is less than the total goal and expense amounts")
+		} else {
+			message.Message = append(message.Message, "budget total amount updated")
 		}
-		message.Message = append(message.Message, "budget total amount updated")
 	}
 
-	// Check for changes in other fields and update accordingly
+	// Apply updates if provided
 	if input.Name != nil {
 		budget.Name = *input.Name
 	}
@@ -228,13 +231,11 @@ func (app *application) updateBudgetHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Calculate new surplus after the budget update
-	newSurplus := budget.TotalAmount.Sub(budgetTotal.TotalMonthlyContribution)
-	if newSurplus.Cmp(decimal.Zero) < 0 {
-		newSurplus = decimal.Zero // Ensure surplus doesn't go negative
-	}
-	// set to totals
-	budgetTotal.TotalSurplus = newSurplus
+	// Update the budgetTotals before returning. Surplus is the same,
+	// Just updating budget total amount and new surplus which is gonna be
+	// budget total amount - totalUtilizedBudgetAmount
+	budgetTotal.TotalBudgetAmount = budget.TotalAmount
+	budgetTotal.TotalSurplus = budget.TotalAmount.Sub(totalUtilizedBudgetAmount)
 
 	// Return the updated budget with a 200 OK response
 	err = app.writeJSON(w, http.StatusOK, envelope{"budget": budget, "message": message, "totals": budgetTotal}, nil)
@@ -388,7 +389,7 @@ func (app *application) createNewGoalHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	// check if the goal is still within the budget
-	goalSummaryTotals, err := app.models.FinancialManager.GetAllGoalSummaryBudgetID(newGoal.BudgetID, newGoal.UserID, newGoal.MonthlyContribution)
+	goalSummaryTotals, err := app.models.FinancialManager.GetAllGoalSummaryBudgetID(newGoal.BudgetID, newGoal.UserID)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
@@ -492,7 +493,7 @@ func (app *application) updatedGoalHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	// Get the budget summary and total monthly contribution
-	budgetTotal, err := app.models.FinancialManager.GetAllGoalSummaryBudgetID(goal.BudgetID, user.ID, decimal.NewFromInt(0))
+	budgetTotal, err := app.models.FinancialManager.GetAllGoalSummaryBudgetID(goal.BudgetID, user.ID)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -505,15 +506,15 @@ func (app *application) updatedGoalHandler(w http.ResponseWriter, r *http.Reques
 	// Initialize validator
 	v := validator.New()
 	// Step 1: Subtract the current goal's monthly contribution to get the correct starting surplus
-	totalContributionExcludingCurrentGoal := budgetTotal.TotalMonthlyContribution.Sub(goal.MonthlyContribution)
-	availableSurplus := budgetTotal.TotalSurplus.Sub(totalContributionExcludingCurrentGoal)
+	//totalContributionExcludingCurrentGoal := budgetTotal.TotalMonthlyContribution.Sub(goal.MonthlyContribution)
+	app.logger.Info("Total redcieved surplus", zap.String("Tota Surplus", budgetTotal.TotalSurplus.String()), zap.String("Monthly Contribution", goal.MonthlyContribution.String()))
+	availableSurplus := budgetTotal.TotalSurplus.Add(goal.MonthlyContribution)
+	app.logger.Info("Available Surplus", zap.String("Available Surplus", availableSurplus.String()))
 	// Step 2: Initialize newTotalSurplus with the available surplus
 	newTotalSurplus := availableSurplus
 
 	// Step 3: Check if the monthly contribution is being updated
 	if input.MonthlyContribution != nil && input.MonthlyContribution.Cmp(goal.MonthlyContribution) != 0 {
-		// Apply the new monthly contribution (adding the updated contribution back)
-		newTotalSurplus = availableSurplus.Sub(*input.MonthlyContribution)
 
 		// Step 4: Check if the new contribution exceeds the available surplus
 		if budget.IsStrict && input.MonthlyContribution.Cmp(availableSurplus) > 0 {
@@ -524,6 +525,7 @@ func (app *application) updatedGoalHandler(w http.ResponseWriter, r *http.Reques
 			// Allow the update but add a warning message
 			message.Message = append(message.Message, "monthly contribution is greater than the total surplus provisioned. budget needs to be updated")
 		}
+		newTotalSurplus = availableSurplus.Sub(*input.MonthlyContribution)
 	} else {
 		// If the contribution is NOT updated, keep the current surplus
 		newTotalSurplus = budgetTotal.TotalSurplus
@@ -576,7 +578,7 @@ func (app *application) updatedGoalHandler(w http.ResponseWriter, r *http.Reques
 	// Set totals to new surplus
 	budgetTotal.TotalSurplus = newTotalSurplus
 
-	app.logger.Info("New Surplus Amount from REDIS", zap.String("Surplus", newTotalSurplus.String()), zap.String("New Surplus", newTotalSurplus.String()))
+	app.logger.Info("New Surplus Amount from REDIS", zap.String("Surplus", budgetTotal.TotalSurplus.String()))
 	// Return the updated budget with a 200 OK response
 	err = app.writeJSON(w, http.StatusOK, envelope{"goal": goal, "message": message, "totals": budgetTotal}, nil)
 	if err != nil {

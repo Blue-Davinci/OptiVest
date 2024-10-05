@@ -87,89 +87,64 @@ INSERT INTO goals (
 RETURNING id, created_at, updated_at;
 
 -- name: GetAllGoalSummaryByBudgetID :many
-SELECT 
-    CAST(b.total_amount AS NUMERIC) AS total_amount,
-    COALESCE(CAST(SUM(g.monthly_contribution) AS NUMERIC), 0) AS total_monthly_contributions,
-
-    -- Calculate the total non-recurring expenses and cast to NUMERIC
-    (
-        SELECT COALESCE(CAST(SUM(e.amount) AS NUMERIC), 0)
+WITH 
+    -- Calculate total non-recurring expenses
+    NonRecurringExpenses AS (
+        SELECT 
+            COALESCE(SUM(e.amount), 0) AS total_expenses
         FROM expenses e
-        WHERE e.budget_id = b.id
+        WHERE e.budget_id = $1
         AND e.is_recurring = FALSE
         AND e.created_at >= DATE_TRUNC('month', CURRENT_DATE)
-    ) AS total_expenses,
+    ),
 
-    -- Calculate the projected recurring expenses and cast to NUMERIC
-    (
-        SELECT COALESCE(CAST(SUM(
-            r.amount * 
-            CASE 
-                WHEN r.recurrence_interval = 'daily' THEN 30
-                WHEN r.recurrence_interval = 'weekly' THEN 4
-                WHEN r.recurrence_interval = 'monthly' THEN 1
-                ELSE 0
-            END) AS NUMERIC), 0)
-        FROM recurring_expenses r
-        WHERE r.budget_id = b.id
-    ) AS projected_recurring_expenses,
-
-    -- Calculate the budget surplus
-    CAST(
-        CAST(b.total_amount AS NUMERIC) - 
-        (
-            COALESCE(CAST(SUM(g.monthly_contribution) AS NUMERIC), 0) + 
-            (
-                SELECT COALESCE(CAST(SUM(e.amount) AS NUMERIC), 0)
-                FROM expenses e
-                WHERE e.budget_id = b.id
-                AND e.is_recurring = FALSE
-                AND e.created_at >= DATE_TRUNC('month', CURRENT_DATE)
-            ) + 
-            (
-                SELECT COALESCE(CAST(SUM(
-                    r.amount * 
-                    CASE 
-                        WHEN r.recurrence_interval = 'daily' THEN 30
-                        WHEN r.recurrence_interval = 'weekly' THEN 4
-                        WHEN r.recurrence_interval = 'monthly' THEN 1
-                        ELSE 0
-                    END) AS NUMERIC), 0)
-                FROM recurring_expenses r
-                WHERE r.budget_id = b.id
-            )
-        ) AS NUMERIC
-    ) AS budget_surplus
-
-FROM budgets b
-LEFT JOIN goals g ON g.budget_id = b.id
-WHERE b.id = $1
-AND b.user_id = $2
-GROUP BY b.id, b.total_amount
-HAVING (CAST(b.total_amount AS NUMERIC) - 
-    (
-        COALESCE(CAST(SUM(g.monthly_contribution) AS NUMERIC), 0) + 
-        (
-            SELECT COALESCE(CAST(SUM(e.amount) AS NUMERIC), 0)
-            FROM expenses e
-            WHERE e.budget_id = b.id
-            AND e.is_recurring = FALSE
-            AND e.created_at >= DATE_TRUNC('month', CURRENT_DATE)
-        ) + 
-        (
-            SELECT COALESCE(CAST(SUM(
+    -- Calculate projected recurring expenses
+    RecurringExpenses AS (
+        SELECT 
+            COALESCE(SUM(
                 r.amount * 
                 CASE 
                     WHEN r.recurrence_interval = 'daily' THEN 30
                     WHEN r.recurrence_interval = 'weekly' THEN 4
                     WHEN r.recurrence_interval = 'monthly' THEN 1
                     ELSE 0
-                END) AS NUMERIC), 0)
-            FROM recurring_expenses r
-            WHERE r.budget_id = b.id
-        )
+                END
+            ), 0) AS projected_recurring_expenses
+        FROM recurring_expenses r
+        WHERE r.budget_id = $1
+    ),
+
+    -- Calculate total monthly contributions from goals
+    MonthlyContributions AS (
+        SELECT 
+            COALESCE(SUM(g.monthly_contribution), 0) AS total_monthly_contributions
+        FROM goals g
+        WHERE g.budget_id = $1
     )
-) >= $3;
+
+-- Final query combining all the calculations
+SELECT 
+    CAST(b.total_amount AS NUMERIC) AS total_amount,
+    mc.total_monthly_contributions,
+    nr.total_expenses,
+    re.projected_recurring_expenses,
+
+    -- Budget surplus calculation
+    CAST(
+        b.total_amount - (
+            mc.total_monthly_contributions + 
+            nr.total_expenses + 
+            re.projected_recurring_expenses
+        ) AS NUMERIC
+    ) AS budget_surplus
+
+FROM budgets b
+LEFT JOIN MonthlyContributions mc ON TRUE
+LEFT JOIN NonRecurringExpenses nr ON TRUE
+LEFT JOIN RecurringExpenses re ON TRUE
+WHERE b.id = $1
+AND b.user_id = $2;
+
 
 
 

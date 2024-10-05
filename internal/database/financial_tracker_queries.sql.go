@@ -11,6 +11,55 @@ import (
 	"time"
 )
 
+const createNewExpense = `-- name: CreateNewExpense :one
+INSERT INTO expenses (
+    user_id, 
+    budget_id, 
+    name,
+    category,
+    amount, 
+    is_recurring, 
+    description, 
+    date_occurred
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8
+)
+RETURNING id, created_at, updated_at
+`
+
+type CreateNewExpenseParams struct {
+	UserID       int64
+	BudgetID     int64
+	Name         string
+	Category     string
+	Amount       string
+	IsRecurring  bool
+	Description  sql.NullString
+	DateOccurred time.Time
+}
+
+type CreateNewExpenseRow struct {
+	ID        int64
+	CreatedAt sql.NullTime
+	UpdatedAt sql.NullTime
+}
+
+func (q *Queries) CreateNewExpense(ctx context.Context, arg CreateNewExpenseParams) (CreateNewExpenseRow, error) {
+	row := q.db.QueryRowContext(ctx, createNewExpense,
+		arg.UserID,
+		arg.BudgetID,
+		arg.Name,
+		arg.Category,
+		arg.Amount,
+		arg.IsRecurring,
+		arg.Description,
+		arg.DateOccurred,
+	)
+	var i CreateNewExpenseRow
+	err := row.Scan(&i.ID, &i.CreatedAt, &i.UpdatedAt)
+	return i, err
+}
+
 const createNewIncome = `-- name: CreateNewIncome :one
     INSERT INTO income (
         user_id, 
@@ -102,7 +151,8 @@ func (q *Queries) CreateNewRecurringExpense(ctx context.Context, arg CreateNewRe
 }
 
 const getAllRecurringExpensesDueForProcessing = `-- name: GetAllRecurringExpensesDueForProcessing :many
-SELECT 
+SELECT
+    COUNT(*) OVER() AS total_count,
     id, 
     user_id, 
     budget_id, 
@@ -125,16 +175,32 @@ type GetAllRecurringExpensesDueForProcessingParams struct {
 	Offset int32
 }
 
-func (q *Queries) GetAllRecurringExpensesDueForProcessing(ctx context.Context, arg GetAllRecurringExpensesDueForProcessingParams) ([]RecurringExpense, error) {
+type GetAllRecurringExpensesDueForProcessingRow struct {
+	TotalCount         int64
+	ID                 int64
+	UserID             int64
+	BudgetID           int64
+	Amount             string
+	Name               string
+	Description        sql.NullString
+	RecurrenceInterval RecurrenceIntervalEnum
+	ProjectedAmount    string
+	NextOccurrence     time.Time
+	CreatedAt          sql.NullTime
+	UpdatedAt          sql.NullTime
+}
+
+func (q *Queries) GetAllRecurringExpensesDueForProcessing(ctx context.Context, arg GetAllRecurringExpensesDueForProcessingParams) ([]GetAllRecurringExpensesDueForProcessingRow, error) {
 	rows, err := q.db.QueryContext(ctx, getAllRecurringExpensesDueForProcessing, arg.Limit, arg.Offset)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []RecurringExpense
+	var items []GetAllRecurringExpensesDueForProcessingRow
 	for rows.Next() {
-		var i RecurringExpense
+		var i GetAllRecurringExpensesDueForProcessingRow
 		if err := rows.Scan(
+			&i.TotalCount,
 			&i.ID,
 			&i.UserID,
 			&i.BudgetID,
@@ -158,6 +224,47 @@ func (q *Queries) GetAllRecurringExpensesDueForProcessing(ctx context.Context, a
 		return nil, err
 	}
 	return items, nil
+}
+
+const getExpenseByID = `-- name: GetExpenseByID :one
+SELECT 
+    id, 
+    user_id, 
+    budget_id, 
+    name, 
+    category, 
+    amount, 
+    is_recurring, 
+    description, 
+    date_occurred, 
+    created_at, 
+    updated_at
+FROM expenses
+WHERE id = $1 AND user_id = $2
+`
+
+type GetExpenseByIDParams struct {
+	ID     int64
+	UserID int64
+}
+
+func (q *Queries) GetExpenseByID(ctx context.Context, arg GetExpenseByIDParams) (Expense, error) {
+	row := q.db.QueryRowContext(ctx, getExpenseByID, arg.ID, arg.UserID)
+	var i Expense
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.BudgetID,
+		&i.Name,
+		&i.Category,
+		&i.Amount,
+		&i.IsRecurring,
+		&i.Description,
+		&i.DateOccurred,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const getRecurringExpenseByID = `-- name: GetRecurringExpenseByID :one
@@ -199,6 +306,46 @@ func (q *Queries) GetRecurringExpenseByID(ctx context.Context, arg GetRecurringE
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const updateExpenseByID = `-- name: UpdateExpenseByID :one
+UPDATE expenses SET
+    name = $1,
+    category = $2,
+    amount = $3,
+    is_recurring = $4,
+    description = $5,
+    date_occurred = $6
+WHERE
+    id = $7 AND user_id = $8
+RETURNING updated_at
+`
+
+type UpdateExpenseByIDParams struct {
+	Name         string
+	Category     string
+	Amount       string
+	IsRecurring  bool
+	Description  sql.NullString
+	DateOccurred time.Time
+	ID           int64
+	UserID       int64
+}
+
+func (q *Queries) UpdateExpenseByID(ctx context.Context, arg UpdateExpenseByIDParams) (sql.NullTime, error) {
+	row := q.db.QueryRowContext(ctx, updateExpenseByID,
+		arg.Name,
+		arg.Category,
+		arg.Amount,
+		arg.IsRecurring,
+		arg.Description,
+		arg.DateOccurred,
+		arg.ID,
+		arg.UserID,
+	)
+	var updated_at sql.NullTime
+	err := row.Scan(&updated_at)
+	return updated_at, err
 }
 
 const updateRecurringExpenseByID = `-- name: UpdateRecurringExpenseByID :one

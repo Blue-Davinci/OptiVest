@@ -12,6 +12,213 @@ import (
 	"go.uber.org/zap"
 )
 
+// createNewExpenseHandler() creates a new one way/ none recurring expense to the database
+// We still verify if the budget exists, if it does not, we return an error
+// We then check if the amount of the expense is more than the surplus, if it is, we return an error only if the budget is strict
+// If the budget is not strict, we add a message to the response and proceed with the save
+func (app *application) createNewExpenseHandler(w http.ResponseWriter, r *http.Request) {
+	message := data.Warning_Messages
+	var input struct {
+		BudgetID    int64           `json:"budget_id"`
+		Name        string          `json:"name"`
+		Category    string          `json:"category"`
+		Amount      decimal.Decimal `json:"amount"`
+		Description string          `json:"description"`
+		DateOcurred time.Time       `json:"date_occurred"`
+	}
+	// read the request body into the input struct
+	err := app.readJSON(w, r, &input)
+	if err != nil {
+		app.badRequestResponse(w, r, err)
+		return
+	}
+	// get the user
+	user := app.contextGetUser(r)
+	// get the budget
+	budget, err := app.models.FinancialManager.GetBudgetByID(input.BudgetID)
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrGeneralRecordNotFound):
+			app.notFoundResponse(w, r)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
+	// create a new expense
+	expense := &data.Expense{
+		UserID:       user.ID,
+		BudgetID:     input.BudgetID,
+		Name:         input.Name,
+		Category:     input.Category,
+		Amount:       input.Amount,
+		IsRecurring:  false,
+		Description:  input.Description,
+		DateOccurred: input.DateOcurred,
+	}
+	// create a validator
+	v := validator.New()
+	// validate the expense
+	if data.ValidateExpense(v, expense); !v.Valid() {
+		app.failedValidationResponse(w, r, v.Errors)
+		return
+	}
+	// get the available surplus
+	goalTotals, err := app.models.FinancialManager.GetAllGoalSummaryBudgetID(expense.BudgetID, user.ID)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+		return
+	}
+	// check if the expense is more than the surplus
+	if expense.Amount.Cmp(goalTotals.TotalSurplus) > 0 {
+		if budget.IsStrict {
+			v.AddError("amount", "expense amount is more than the available surplus")
+			app.failedValidationResponse(w, r, v.Errors)
+			return
+		} else {
+			// add a message to the response
+			message.Message = append(message.Message, "expense amount is more than the available surplus")
+		}
+	}
+	// save the expense
+	err = app.models.FinancialTrackingManager.CreateNewExpense(user.ID, expense)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+		return
+	}
+	// send the response
+	err = app.writeJSON(w, http.StatusCreated, envelope{"expense": expense, "message": message, "totals": goalTotals}, nil)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+	}
+
+}
+
+// updateExpenseByIDHandler() is a handler method that will update an expense in the database
+// We check if the budget exists, if it does not, we return an error
+// We check if the expense exists, if it does not, we return an error
+// We check if the amount has changed, if it has, we check if the new amount is more than the total surplus - old amount
+// If the amount is more than the surplus and the budget is strict, we return an error
+// If the budget is not strict, we add a message to the response and proceed with the save
+// We validate the expense and update it in the database
+// updateExpenseByIDHandler() is a handler method that will update an expense in the database
+func (app *application) updateExpenseByIDHandler(w http.ResponseWriter, r *http.Request) {
+	var message = data.Warning_Messages
+	var input struct {
+		Amount      *decimal.Decimal `json:"amount"`
+		Name        *string          `json:"name"`
+		Category    *string          `json:"category"`
+		Description *string          `json:"description"`
+		DateOcurred *time.Time       `json:"date_occurred"`
+	}
+
+	// get the expense ID from the url
+	expenseID, err := app.readIDParam(r, "expenseID")
+	if err != nil || expenseID < 1 {
+		app.notFoundResponse(w, r)
+		return
+	}
+
+	// read the request body into the input struct
+	err = app.readJSON(w, r, &input)
+	if err != nil {
+		app.badRequestResponse(w, r, err)
+		return
+	}
+
+	// get the user
+	user := app.contextGetUser(r)
+
+	// get the expense
+	expense, err := app.models.FinancialTrackingManager.GetExpenseByID(user.ID, expenseID)
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrGeneralRecordNotFound):
+			app.notFoundResponse(w, r)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
+
+	// get the budget
+	budget, err := app.models.FinancialManager.GetBudgetByID(expense.BudgetID)
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrGeneralRecordNotFound):
+			app.notFoundResponse(w, r)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
+
+	// get the available surplus (this includes the current expense)
+	goalTotals, err := app.models.FinancialManager.GetAllGoalSummaryBudgetID(expense.BudgetID, user.ID)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+		return
+	}
+
+	// 1. Subtract the current expense amount from the surplus
+	//    (i.e., pretend the current expense doesn't exist for a moment)
+	currentSurplus := goalTotals.TotalSurplus.Add(expense.Amount)
+
+	// 2. If the amount has changed, check the new amount against the adjusted surplus
+	if input.Amount != nil {
+		newAmount := *input.Amount
+
+		// If the new amount is larger than the available surplus
+		if newAmount.GreaterThan(currentSurplus) {
+			// If the budget is strict, return an error
+			if budget.IsStrict {
+				app.errorResponse(w, r, http.StatusForbidden, "Budget surplus is insufficient for this expense.")
+				return
+			} else {
+				// Otherwise, proceed but log a warning
+				message.Message = append(message.Message, "The expense exceeds the available surplus, but the budget is not strict.")
+			}
+		}
+
+		// Set the new amount
+		expense.Amount = newAmount
+	}
+
+	// 3. Update other fields if provided
+	if input.Category != nil {
+		expense.Category = *input.Category
+	}
+	if input.Name != nil {
+		expense.Name = *input.Name
+	}
+	if input.Description != nil {
+		expense.Description = *input.Description
+	}
+	if input.DateOcurred != nil {
+		expense.DateOccurred = *input.DateOcurred
+	}
+
+	// 4. Validate the expense before saving
+	v := validator.New()
+	if data.ValidateExpense(v, expense); !v.Valid() {
+		app.failedValidationResponse(w, r, v.Errors)
+		return
+	}
+
+	// 5. Save the updated expense to the database
+	err = app.models.FinancialTrackingManager.UpdateExpenseByID(user.ID, expense)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+		return
+	}
+
+	// 6. Respond with success
+	err = app.writeJSON(w, http.StatusOK, envelope{"expense": expense, "warnings": message}, nil)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+	}
+}
+
 // createNewRecurringExpenseHandler() is an handler method that will add a recurring expense to the database
 // Expenses are tied to a badget. A badget is either strict or not. If it is strict, the user cannot spend more than the budget.
 // We first check if the budget exists, if it does not, we return an error
@@ -78,7 +285,7 @@ func (app *application) createNewRecurringExpenseHandler(w http.ResponseWriter, 
 	// calculate amount of the expense per month based on the recurrence interval
 	recurringExpense.ProjectedAmount = recurringExpense.CalculateTotalAmountPerMonth()
 	// Get our totals
-	goalTotals, err := app.models.FinancialManager.GetAllGoalSummaryBudgetID(recurringExpense.BudgetID, user.ID, recurringExpense.Amount)
+	goalTotals, err := app.models.FinancialManager.GetAllGoalSummaryBudgetID(recurringExpense.BudgetID, user.ID)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
@@ -112,7 +319,7 @@ func (app *application) createNewRecurringExpenseHandler(w http.ResponseWriter, 
 	// determine next occurrence
 
 	// Send the response
-	err = app.writeJSON(w, http.StatusCreated, envelope{"expense": recurringExpense}, nil)
+	err = app.writeJSON(w, http.StatusCreated, envelope{"expense": recurringExpense, "totals": goalTotals}, nil)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 	}
@@ -212,14 +419,15 @@ func (app *application) updateRecurringExpenseByIDHandler(w http.ResponseWriter,
 	app.logger.Info("new projected amount", zap.String("new_projected_amount", newProjectedAmount.String()))
 
 	// Get available surplus
-	goalTotals, err := app.models.FinancialManager.GetAllGoalSummaryBudgetID(recurringExpense.BudgetID, user.ID, recurringExpense.Amount)
+	goalTotals, err := app.models.FinancialManager.GetAllGoalSummaryBudgetID(recurringExpense.BudgetID, user.ID)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
 	}
 	// print out hte surplus
 	app.logger.Info("surplus", zap.String("surplus", goalTotals.TotalSurplus.String()))
-	newTotalSurplus := goalTotals.TotalSurplus.Sub(oldProjectedAmount)
+	// ADD THE OLD projected amount to the surplus effectively nullifying the old expense
+	newTotalSurplus := goalTotals.TotalSurplus.Add(oldProjectedAmount)
 	// print
 	app.logger.Info("new total surplus", zap.String("new_total_surplus", newTotalSurplus.String()))
 	if newTotalSurplus.Cmp(newProjectedAmount) < 0 {
@@ -236,6 +444,11 @@ func (app *application) updateRecurringExpenseByIDHandler(w http.ResponseWriter,
 	recurringExpense.CalculateNextOccurrence()
 	// print next occurrence
 	app.logger.Info("next occurrence", zap.String("next_occurrence", recurringExpense.NextOccurrence.String()))
+	// validate recurring expense
+	if data.ValidateRecurringExpense(v, recurringExpense); !v.Valid() {
+		app.failedValidationResponse(w, r, v.Errors)
+		return
+	}
 	// Save the updated recurring expense
 	err = app.models.FinancialTrackingManager.UpdateRecurringExpenseByID(user.ID, recurringExpense)
 	if err != nil {
@@ -247,7 +460,7 @@ func (app *application) updateRecurringExpenseByIDHandler(w http.ResponseWriter,
 	recurringExpense.ProjectedAmount = recurringExpense.CalculateTotalAmountPerMonth()
 
 	// Send the response
-	err = app.writeJSON(w, http.StatusOK, envelope{"expense": recurringExpense}, nil)
+	err = app.writeJSON(w, http.StatusOK, envelope{"expense": recurringExpense, "totals": goalTotals}, nil)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 	}

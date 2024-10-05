@@ -358,7 +358,7 @@ func (m FinancialManagerModel) GetBudgetsForUser(userID int64, searchQuery strin
 		// make a budget
 		budget := populateBudget(row)
 		// return a goal summary and totals for each budget
-		goalSummaryTotals, err := m.GetAllGoalSummaryBudgetID(budget.Id, userID, decimal.NewFromInt(0))
+		goalSummaryTotals, err := m.GetAllGoalSummaryBudgetID(budget.Id, userID)
 		if err != nil {
 			return nil, Metadata{}, err
 		}
@@ -749,7 +749,7 @@ func (m FinancialManagerModel) UpdateGoalProgressOnExpiredGoals() error {
 // We return the goal summaries and additional totals which contains the total goals, total monthly contribution
 // total surplus, budget total amount, budget currency and budget strictness
 // This is the main function that will be used to get and manage surplus by most of the handlers
-func (m FinancialManagerModel) GetAllGoalSummaryBudgetID(budgetID, userID int64, totalAmount decimal.Decimal) (*Goal_Summary_Totals, error) {
+func (m FinancialManagerModel) GetAllGoalSummaryBudgetID(budgetID, userID int64) (*Goal_Summary_Totals, error) {
 	ctx, cancel := contextGenerator(context.Background(), DefaultFinManDBContextTimeout)
 	defer cancel()
 
@@ -757,9 +757,8 @@ func (m FinancialManagerModel) GetAllGoalSummaryBudgetID(budgetID, userID int64,
 
 	// Fetch goals from the database
 	goals, err := m.DB.GetAllGoalSummaryByBudgetID(ctx, database.GetAllGoalSummaryByBudgetIDParams{
-		ID:          budgetID,
-		UserID:      userID,
-		TotalAmount: totalAmount.String(),
+		ID:     budgetID,
+		UserID: userID,
 	})
 	if err != nil {
 		fmt.Println("0Error: ", err)
@@ -832,7 +831,7 @@ func (m FinancialManagerModel) GetAllGoalSummaryBudgetID(budgetID, userID int64,
 			goalTotals.TotalSurplus = decimal.NewFromInt(0) // Default to 0 if empty
 		}
 	}
-
+	fmt.Println("Goal Totals: ", goalTotals.TotalSurplus)
 	// Return the goal summaries and totals
 	return goalTotals, nil
 }
