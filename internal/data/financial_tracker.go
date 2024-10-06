@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/Blue-Davinci/OptiVest/internal/database"
@@ -29,6 +30,7 @@ var (
 var (
 	ErrInvalidRecurringExpenseTime = errors.New("invalid recurring expense time")
 	ErrDuplicateRecurringExpense   = errors.New("recurring expense already exists")
+	ErrDuplicateDebt               = errors.New("debt with a similar description already exists")
 )
 
 // Represents an expense
@@ -74,6 +76,39 @@ type Income struct {
 	DateReceived         time.Time       `json:"date_received"`
 	CreatedAt            time.Time       `json:"created_at"`
 	UpdatedAt            time.Time       `json:"updated_at"`
+}
+
+// Represents a Debt
+type Debt struct {
+	ID                     int64           `json:"id"`
+	UserID                 int64           `json:"user_id"`
+	Name                   string          `json:"name"`
+	Amount                 decimal.Decimal `json:"amount"`
+	RemainingBalance       decimal.Decimal `json:"remaining_balance"`
+	InterestRate           decimal.Decimal `json:"interest_rate"`
+	Description            string          `json:"description,omitempty"`
+	DueDate                time.Time       `json:"due_date"`
+	MinimumPayment         decimal.Decimal `json:"minimum_payment"`
+	CreatedAt              time.Time       `json:"created_at"`
+	UpdatedAt              time.Time       `json:"updated_at"`
+	NextPaymentDate        time.Time       `json:"next_payment_date"`
+	EstimatedPayoffDate    time.Time       `json:"estimated_payoff_date,omitempty"`
+	AccruedInterest        decimal.Decimal `json:"accrued_interest"`
+	InterestLastCalculated time.Time       `json:"interest_last_calculated"`
+	LastPaymentDate        time.Time       `json:"last_payment_date,omitempty"`
+	TotalInterestPaid      decimal.Decimal `json:"total_interest_paid"`
+}
+
+// Represents a Debt repayment
+type DebtRepayment struct {
+	ID               int64           `json:"id"`
+	DebtID           int64           `json:"debt_id"`
+	UserID           int64           `json:"user_id"`
+	PaymentAmount    decimal.Decimal `json:"payment_amount"`
+	PaymentDate      time.Time       `json:"payment_date"`
+	InterestPayment  decimal.Decimal `json:"interest_payment"`
+	PrincipalPayment decimal.Decimal `json:"principal_payment"`
+	CreatedAt        time.Time       `json:"created_at"`
 }
 
 // Map a recurring expense to a corresponding constant
@@ -155,6 +190,14 @@ func ValidateIncome(v *validator.Validator, income *Income) {
 	ValidateBudgetDescription(v, income.Description)
 	ValidateName(v, income.Source, "source")
 	ValidateName(v, income.OriginalCurrencyCode, "original_currency_code")
+}
+
+// Validate Debt
+func ValidateDebt(v *validator.Validator, debt *Debt) {
+	ValidateAmount(v, debt.Amount, "amount")
+	ValidateAmount(v, debt.MinimumPayment, "minimum_payment")
+	ValidateBudgetDescription(v, debt.Description)
+	ValidateName(v, debt.Name, "name")
 }
 
 // CreateNewRecurringExpense() Creates a new recurrent expens in the recurrence table
@@ -268,6 +311,9 @@ func (m *FinancialTrackingModel) GetAllRecurringExpensesDueForProcessing(filters
 		default:
 			return nil, Metadata{}, err
 		}
+	}
+	if len(recurringExpenses) == 0 {
+		return nil, Metadata{}, ErrGeneralRecordNotFound
 	}
 	// set totals
 	totalRecords := 0
@@ -404,6 +450,302 @@ func (m *FinancialTrackingModel) CreateNewIncome(userID int64, income *Income) e
 	return nil
 }
 
+// UpdateIncome() Updates an existing income by th eincomes userID and ID
+// We return an error if any and an updated Income
+func (m *FinancialTrackingModel) UpdateIncomeByID(userID int64, income *Income) error {
+	// set our context
+	ctx, cancel := contextGenerator(context.Background(), DefaultFinTrackDBContextTimeout)
+	defer cancel()
+	// make the update
+	updatedAT, err := m.DB.UpdateIncomeByID(ctx, database.UpdateIncomeByIDParams{
+		Source:               income.Source,
+		OriginalCurrencyCode: income.OriginalCurrencyCode,
+		AmountOriginal:       income.AmountOriginal.String(),
+		Amount:               income.AmountOriginal.String(),
+		ExchangeRate:         income.ExchangeRate.String(),
+		Description:          sql.NullString{String: income.Description, Valid: true},
+		DateReceived:         income.DateReceived,
+		ID:                   income.ID,
+		UserID:               userID,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return ErrEditConflict
+		default:
+			return err
+		}
+	}
+	// updated updated at field
+	income.UpdatedAt = updatedAT.Time
+	// we are good
+	return nil
+}
+
+// GetIncomeByID() gets an income by its ID and user ID
+// We return an error if any was found
+func (m *FinancialTrackingModel) GetIncomeByID(userID, incomeID int64) (*Income, error) {
+	// set our context
+	ctx, cancel := contextGenerator(context.Background(), DefaultFinTrackDBContextTimeout)
+	defer cancel()
+	// get the income
+	income, err := m.DB.GetIncomeByID(ctx, database.GetIncomeByIDParams{
+		ID:     incomeID,
+		UserID: userID,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return nil, ErrGeneralRecordNotFound
+		default:
+			return nil, err
+		}
+	}
+	// we are good, populate the income
+	updatedIncome := populateIncome(income)
+	// we are good
+	return updatedIncome, nil
+}
+
+// =========================================================================================================
+// Debts
+// =========================================================================================================
+
+// CreateNewDebt() creates a new debt in the debts table
+// We get a user ID and a pointer to a debt struct
+// We return an error if any was found
+func (m *FinancialTrackingModel) CreateNewDebt(userID int64, debt *Debt) error {
+	// set our context
+	ctx, cancel := contextGenerator(context.Background(), DefaultFinTrackDBContextTimeout)
+	defer cancel()
+	// create the debt
+	debtDetails, err := m.DB.CreateNewDebt(ctx, database.CreateNewDebtParams{
+		UserID:                 userID,
+		Name:                   debt.Name,
+		Amount:                 debt.Amount.String(),
+		RemainingBalance:       debt.RemainingBalance.String(),
+		InterestRate:           sql.NullString{String: debt.InterestRate.String(), Valid: true},
+		Description:            sql.NullString{String: debt.Description, Valid: true},
+		DueDate:                debt.DueDate,
+		MinimumPayment:         debt.MinimumPayment.String(),
+		NextPaymentDate:        debt.NextPaymentDate,
+		EstimatedPayoffDate:    sql.NullTime{Time: debt.EstimatedPayoffDate, Valid: true},
+		AccruedInterest:        sql.NullString{String: debt.AccruedInterest.String(), Valid: true},
+		InterestLastCalculated: sql.NullTime{Time: debt.InterestLastCalculated, Valid: true},
+		TotalInterestPaid:      sql.NullString{String: debt.TotalInterestPaid.String(), Valid: true},
+	})
+	if err != nil {
+		switch {
+		case err.Error() == `pq: duplicate key value violates unique constraint "unique_debt_description_per_user`:
+			return ErrDuplicateDebt
+		default:
+			return err
+		}
+	}
+	// set the created debt
+	debt.ID = debtDetails.ID
+	debt.UserID = userID
+	debt.CreatedAt = debtDetails.CreatedAt.Time
+	debt.UpdatedAt = debtDetails.UpdatedAt.Time
+	// we are good
+	return nil
+}
+
+// UpdateDebtByID() updates a debt WHEN given both the ID and the user ID
+// We return an error if any was found
+func (m *FinancialTrackingModel) UpdateDebtByID(userID int64, debt *Debt) error {
+	// set our context
+	ctx, cancel := contextGenerator(context.Background(), DefaultFinTrackDBContextTimeout)
+	defer cancel()
+	// create the debt
+	updatedAt, err := m.DB.UpdateDebtByID(ctx, database.UpdateDebtByIDParams{
+		UserID:                 userID,
+		Name:                   debt.Name,
+		Amount:                 debt.Amount.String(),
+		RemainingBalance:       debt.RemainingBalance.String(),
+		InterestRate:           sql.NullString{String: debt.InterestRate.String(), Valid: true},
+		Description:            sql.NullString{String: debt.Description, Valid: true},
+		DueDate:                debt.DueDate,
+		MinimumPayment:         debt.MinimumPayment.String(),
+		NextPaymentDate:        debt.NextPaymentDate,
+		EstimatedPayoffDate:    sql.NullTime{Time: debt.EstimatedPayoffDate, Valid: true},
+		AccruedInterest:        sql.NullString{String: debt.AccruedInterest.String(), Valid: true},
+		InterestLastCalculated: sql.NullTime{Time: debt.InterestLastCalculated, Valid: true},
+		TotalInterestPaid:      sql.NullString{String: debt.TotalInterestPaid.String(), Valid: true},
+		LastPaymentDate:        sql.NullTime{Time: debt.LastPaymentDate, Valid: !debt.LastPaymentDate.IsZero()},
+		ID:                     debt.ID,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return ErrEditConflict
+		default:
+			return err
+		}
+	}
+	// set the updated debt
+	debt.UpdatedAt = updatedAt.Time
+	// we are good
+	return nil
+}
+
+// GetDebtByID() gets a debt by its ID and user ID
+// We return an error if any was found
+func (m *FinancialTrackingModel) GetDebtByID(userID, debtID int64) (*Debt, error) {
+	// set our context
+	ctx, cancel := contextGenerator(context.Background(), DefaultFinTrackDBContextTimeout)
+	defer cancel()
+	// get the debt
+	debt, err := m.DB.GetDebtByID(ctx, debtID)
+	if err != nil {
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return nil, ErrGeneralRecordNotFound
+		default:
+			return nil, err
+		}
+	}
+	// we are good, populate the debt
+	updatedDebt := populateDebt(debt)
+	// we are good
+	return updatedDebt, nil
+}
+
+// CreateNewDebtPayment() creates a new debt payment in the debt payments table
+// We return an error if any was found
+func (m *FinancialTrackingModel) CreateNewDebtPayment(userID int64, debtRepayment *DebtRepayment) error {
+	// set our context
+	ctx, cancel := contextGenerator(context.Background(), DefaultFinTrackDBContextTimeout)
+	defer cancel()
+	// create the debt payment
+	debtPayment, err := m.DB.CreateNewDebtPayment(ctx, database.CreateNewDebtPaymentParams{
+		DebtID:           debtRepayment.DebtID,
+		UserID:           userID,
+		PaymentAmount:    debtRepayment.PaymentAmount.String(),
+		PaymentDate:      debtRepayment.PaymentDate,
+		InterestPayment:  debtRepayment.InterestPayment.String(),
+		PrincipalPayment: debtRepayment.PrincipalPayment.String(),
+	})
+	if err != nil {
+		return err
+	}
+	// set the debt payment
+	debtRepayment.ID = debtPayment.ID
+	debtRepayment.CreatedAt = debtPayment.CreatedAt.Time
+	// we are good
+	return nil
+}
+
+// GetAllOverdueDebts() gets all the debts that are overdue
+// This is meant to be used in tandem with a cron job
+// We also return a Metadata struct and an error if any was found
+func (m *FinancialTrackingModel) GetAllOverdueDebts(filters Filters) ([]*Debt, Metadata, error) {
+	// set our context
+	ctx, cancel := contextGenerator(context.Background(), DefaultFinTrackDBContextTimeout)
+	defer cancel()
+	// get the debts
+	debts, err := m.DB.GetAllOverdueDebts(ctx, database.GetAllOverdueDebtsParams{
+		Limit:  int32(filters.limit()),
+		Offset: int32(filters.offset()),
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return nil, Metadata{}, ErrGeneralRecordNotFound
+		default:
+			return nil, Metadata{}, err
+		}
+	}
+	if len(debts) == 0 {
+		return nil, Metadata{}, ErrGeneralRecordNotFound
+	}
+	// set totals
+	totalRecords := 0
+	// populate the debts
+	var populatedDebts []*Debt
+	for _, debt := range debts {
+		totalRecords = int(debt.TotalCount)
+		populatedDebts = append(populatedDebts, populateDebt(debt))
+	}
+
+	fmt.Println("Length of populated debts", len(populatedDebts))
+	fmt.Printf("Populated debts: %v\n", populatedDebts)
+	// calculate metadata
+	metadata := calculateMetadata(totalRecords, filters.Page, filters.PageSize)
+	fmt.Println("Id of first debt", populatedDebts[0].ID)
+	// we are good
+	return populatedDebts, metadata, nil
+}
+
+// PopulateDebt populates a debt
+func populateDebt(debtRow interface{}) *Debt {
+	switch debt := debtRow.(type) {
+	case database.Debt:
+		return &Debt{
+			ID:                     debt.ID,
+			UserID:                 debt.UserID,
+			Name:                   debt.Name,
+			Amount:                 decimal.RequireFromString(debt.Amount),
+			RemainingBalance:       decimal.RequireFromString(debt.RemainingBalance),
+			InterestRate:           decimal.RequireFromString(debt.InterestRate.String),
+			Description:            debt.Description.String,
+			DueDate:                debt.DueDate,
+			MinimumPayment:         decimal.RequireFromString(debt.MinimumPayment),
+			CreatedAt:              debt.CreatedAt.Time,
+			UpdatedAt:              debt.UpdatedAt.Time,
+			NextPaymentDate:        debt.NextPaymentDate,
+			EstimatedPayoffDate:    debt.EstimatedPayoffDate.Time,
+			AccruedInterest:        decimal.RequireFromString(debt.AccruedInterest.String),
+			InterestLastCalculated: debt.InterestLastCalculated.Time,
+			TotalInterestPaid:      decimal.RequireFromString(debt.TotalInterestPaid.String),
+		}
+	case database.GetAllOverdueDebtsRow:
+		return &Debt{
+			ID:                     debt.ID,
+			UserID:                 debt.UserID,
+			Name:                   debt.Name,
+			Amount:                 decimal.RequireFromString(debt.Amount),
+			RemainingBalance:       decimal.RequireFromString(debt.RemainingBalance),
+			InterestRate:           decimal.RequireFromString(debt.InterestRate.String),
+			Description:            debt.Description.String,
+			DueDate:                debt.DueDate,
+			MinimumPayment:         decimal.RequireFromString(debt.MinimumPayment),
+			CreatedAt:              debt.CreatedAt.Time,
+			UpdatedAt:              debt.UpdatedAt.Time,
+			NextPaymentDate:        debt.NextPaymentDate,
+			EstimatedPayoffDate:    debt.EstimatedPayoffDate.Time,
+			AccruedInterest:        decimal.RequireFromString(debt.AccruedInterest.String),
+			InterestLastCalculated: debt.InterestLastCalculated.Time,
+			TotalInterestPaid:      decimal.RequireFromString(debt.TotalInterestPaid.String),
+		}
+
+	default:
+		return nil
+	}
+}
+
+// Populate Income
+func populateIncome(incomeRow interface{}) *Income {
+	switch income := incomeRow.(type) {
+	case database.Income:
+		return &Income{
+			ID:                   income.ID,
+			UserID:               income.UserID,
+			Source:               income.Source,
+			OriginalCurrencyCode: income.OriginalCurrencyCode,
+			AmountOriginal:       decimal.RequireFromString(income.AmountOriginal),
+			Amount:               decimal.RequireFromString(income.Amount),
+			ExchangeRate:         decimal.RequireFromString(income.ExchangeRate),
+			Description:          income.Description.String,
+			DateReceived:         income.DateReceived,
+			CreatedAt:            income.CreatedAt.Time,
+			UpdatedAt:            income.UpdatedAt.Time,
+		}
+	default:
+		return nil
+	}
+}
+
 // Populate the recurring expense
 func populateRecurringExpense(recurringExpensRow interface{}) *RecurringExpense {
 	switch recurringExpense := recurringExpensRow.(type) {
@@ -418,6 +760,20 @@ func populateRecurringExpense(recurringExpensRow interface{}) *RecurringExpense 
 			RecurrenceInterval: recurringExpense.RecurrenceInterval,
 			NextOccurrence:     recurringExpense.NextOccurrence,
 			ProjectedAmount:    decimal.RequireFromString(recurringExpense.ProjectedAmount),
+			CreatedAt:          recurringExpense.CreatedAt.Time,
+			UpdatedAt:          recurringExpense.UpdatedAt.Time,
+		}
+	case database.GetAllRecurringExpensesDueForProcessingRow:
+		return &RecurringExpense{
+			ID:                 recurringExpense.ID,
+			UserID:             recurringExpense.UserID,
+			BudgetID:           recurringExpense.BudgetID,
+			Amount:             decimal.RequireFromString(recurringExpense.Amount),
+			Name:               recurringExpense.Name,
+			Description:        recurringExpense.Description.String,
+			RecurrenceInterval: recurringExpense.RecurrenceInterval,
+			ProjectedAmount:    decimal.RequireFromString(recurringExpense.ProjectedAmount),
+			NextOccurrence:     recurringExpense.NextOccurrence,
 			CreatedAt:          recurringExpense.CreatedAt.Time,
 			UpdatedAt:          recurringExpense.UpdatedAt.Time,
 		}

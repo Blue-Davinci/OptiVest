@@ -37,6 +37,7 @@ func (app *application) routes() http.Handler {
 	v1Router.With(dynamicMiddleware.Then).Mount("/goals", app.goalRoutes())
 	v1Router.With(dynamicMiddleware.Then).Mount("/groups", app.groupRoutes())
 	v1Router.With(dynamicMiddleware.Then).Mount("/incomes", app.incomeRouter())
+	v1Router.With(dynamicMiddleware.Then).Mount("/debts", app.debtRoutes())
 
 	//expenses
 	v1Router.With(dynamicMiddleware.Then).Mount("/expenses", app.expenseRoutes())
@@ -129,6 +130,16 @@ func (app *application) expenseRoutes() chi.Router {
 func (app *application) incomeRouter() chi.Router {
 	incomeRoutes := chi.NewRouter()
 	incomeRoutes.Post("/", app.createNewIncomeHandler)
-
+	incomeRoutes.Patch("/{incomeID}", app.updateIncomeHandler)
 	return incomeRoutes
+}
+
+func (app *application) debtRoutes() chi.Router {
+	debtRoutes := chi.NewRouter()
+	debtRoutes.Post("/", app.createNewDebtHandler)
+	debtRoutes.Patch("/{debtID}", app.updateDebtHandler)
+
+	//installment
+	debtRoutes.Patch("/installment/{debtID}", app.makeDebtPaymentHandler)
+	return debtRoutes
 }

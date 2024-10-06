@@ -541,3 +541,442 @@ func (app *application) createNewIncomeHandler(w http.ResponseWriter, r *http.Re
 	}
 
 }
+
+// updateIncomeHandler() Updates an existing Income
+// User must provide the income ID in the url query
+// We first check if the Income exists, if it does not, we return an error
+// Since it was saved in the users default currency BUT it was converted from the OriginalCurrencyCode
+// We check if that specific currency was changed. If the new currency is different from the original currency
+// we need to reconvert it to the users defaultcurrency, saving the new exchange rate as well otherwise we just update the income
+// We validate the income and save it to the database
+// updateIncomeHandler updates an existing income entry.
+// updateIncomeHandler updates an existing income entry.
+func (app *application) updateIncomeHandler(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Source       *string          `json:"source"`
+		CurrencyCode *string          `json:"currency_code"`
+		Amount       *decimal.Decimal `json:"amount_original"`
+		Description  *string          `json:"description"`
+		DateReceived *time.Time       `json:"date_received"`
+	}
+
+	// Get the income ID from the URL.
+	incomeID, err := app.readIDParam(r, "incomeID")
+	if err != nil || incomeID < 1 {
+		app.notFoundResponse(w, r)
+		return
+	}
+
+	// Read the request body into the input struct.
+	err = app.readJSON(w, r, &input)
+	if err != nil {
+		app.badRequestResponse(w, r, err)
+		return
+	}
+
+	// Get the user from the request context.
+	user := app.contextGetUser(r)
+
+	// Fetch the existing income entry from the database.
+	income, err := app.models.FinancialTrackingManager.GetIncomeByID(user.ID, incomeID)
+	if err != nil {
+		if errors.Is(err, data.ErrGeneralRecordNotFound) {
+			app.notFoundResponse(w, r)
+		} else {
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
+
+	// Create a validator instance.
+	v := validator.New()
+
+	// Determine if the currency code or amount has been updated.
+	if input.CurrencyCode != nil && input.Amount != nil {
+		// If both CurrencyCode and Amount are provided, use the new CurrencyCode for conversion.
+		newCurrencyCode := *input.CurrencyCode
+
+		// Ensure the new currency is supported.
+		if err := app.verifyCurrencyInRedis(newCurrencyCode); err != nil {
+			v.AddError("currency_code", "currency code not supported")
+			app.failedValidationResponse(w, r, v.Errors)
+			return
+		}
+
+		// Convert the provided amount in the new currency to the user's default currency.
+		convertedAmount, err := app.convertAndGetExchangeRate(newCurrencyCode, user.CurrencyCode)
+		if err != nil {
+			v.AddError("currency_code", "could not convert currency")
+			app.failedValidationResponse(w, r, v.Errors)
+			return
+		}
+
+		// Update the income amount and exchange rate based on the new conversion.
+		income.Amount = convertedAmount.ConvertAmount(*input.Amount).ConvertedAmount
+		income.ExchangeRate = convertedAmount.ConversionRate
+		income.OriginalCurrencyCode = newCurrencyCode // Update the original currency code as well.
+		app.logger.Info("converted amount", zap.String("converted_amount", income.Amount.String()))
+		app.logger.Info("exchange rate", zap.String("exchange_rate", income.ExchangeRate.String()))
+
+	} else if input.CurrencyCode != nil {
+		// If only the CurrencyCode is provided, ensure the amount is also updated.
+		v.AddError("amount", "amount must be provided if the currency code is changed")
+		app.failedValidationResponse(w, r, v.Errors)
+		return
+
+	} else if input.Amount != nil {
+		// If only the Amount is provided, assume it's in the same currency.
+		income.Amount = *input.Amount
+	}
+
+	// Update optional fields only if they are provided.
+	if input.Source != nil {
+		income.Source = *input.Source
+	}
+	if input.Description != nil {
+		income.Description = *input.Description
+	}
+	if input.DateReceived != nil {
+		income.DateReceived = *input.DateReceived
+	}
+
+	// Validate the updated income.
+	if data.ValidateIncome(v, income); !v.Valid() {
+		app.failedValidationResponse(w, r, v.Errors)
+		return
+	}
+
+	// Save the updated income to the database.
+	err = app.models.FinancialTrackingManager.UpdateIncomeByID(user.ID, income)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+		return
+	}
+
+	// Send a success response (optional, you may want to return the updated income).
+	err = app.writeJSON(w, http.StatusOK, envelope{"income": income}, nil)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+	}
+}
+
+// createNewDebtHandler() creates a new debt user debt for the user
+// We calculate initial values including payoff dates if not provided
+// Perform additional validation, If everything is okya, we save the ne debt
+func (app *application) createNewDebtHandler(w http.ResponseWriter, r *http.Request) {
+	// debt input from user
+	var input struct {
+		Name           string          `json:"name"` // Name of the debt
+		Amount         decimal.Decimal `json:"amount"`
+		InterestRate   decimal.Decimal `json:"interest_rate"`
+		Description    string          `json:"description"`
+		DueDate        time.Time       `json:"due_date"` // YYYY-MM-DD
+		MinimumPayment decimal.Decimal `json:"minimum_payment"`
+	}
+
+	// read the request body into the input struct
+	err := app.readJSON(w, r, &input)
+	if err != nil {
+		app.badRequestResponse(w, r, err)
+		return
+	}
+
+	// create a new debt from the input data
+	debt := &data.Debt{
+		Name:             input.Name,
+		Amount:           input.Amount,
+		RemainingBalance: input.Amount, // Initially, remaining balance is the total amount
+		InterestRate:     input.InterestRate,
+		Description:      input.Description,
+		DueDate:          input.DueDate,
+		MinimumPayment:   input.MinimumPayment,
+		CreatedAt:        time.Now(),
+		UpdatedAt:        time.Now(),
+		NextPaymentDate:  input.DueDate, // Set next payment date to the first due date initially
+	}
+
+	// validate the debt
+	v := validator.New()
+	if data.ValidateDebt(v, debt); !v.Valid() {
+		app.failedValidationResponse(w, r, v.Errors)
+		return
+	}
+
+	// Calculate some additional fields:
+	// Accrued interest starts at zero since no payments have been made yet
+	debt.AccruedInterest = decimal.NewFromFloat(0.0)
+
+	// The interest calculation date should be the current date, as this is when we start tracking
+	debt.InterestLastCalculated = time.Now()
+
+	debt.TotalInterestPaid = decimal.NewFromFloat(0.0) // Initial interest paid is 0
+
+	// Estimated payoff date can be calculated based on minimum payment
+	estimatedPayoffDate, err := app.calculateEstimatedPayoffDate(debt)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+		return
+	}
+	debt.EstimatedPayoffDate = estimatedPayoffDate
+
+	// Insert the new debt into the database
+	err = app.models.FinancialTrackingManager.CreateNewDebt(app.contextGetUser(r).ID, debt)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+		return
+	}
+
+	// Respond with the created debt
+	err = app.writeJSON(w, http.StatusCreated, envelope{"debt": debt}, nil)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+	}
+}
+
+// updateDebtByIDHandler() updates an existing debt in the database
+// We perform additional validation and calculations before saving the updated debt
+func (app *application) updateDebtHandler(w http.ResponseWriter, r *http.Request) {
+	// Get DebtID
+	debtID, err := app.readIDParam(r, "debtID")
+	if err != nil || debtID < 1 {
+		app.notFoundResponse(w, r)
+		return
+	}
+
+	// Inline struct for input
+	var input struct {
+		Name           *string          `json:"name"`
+		Amount         *decimal.Decimal `json:"amount"`
+		InterestRate   *decimal.Decimal `json:"interest_rate"`
+		Description    *string          `json:"description"`
+		DueDate        *time.Time       `json:"due_date"`
+		MinimumPayment *decimal.Decimal `json:"minimum_payment"`
+		PaymentAmount  *decimal.Decimal `json:"payment_amount"`
+	}
+
+	// Parse the JSON request
+	err = app.readJSON(w, r, &input)
+	if err != nil {
+		app.badRequestResponse(w, r, err)
+		return
+	}
+
+	// Fetch the existing debt from the DB
+	debt, err := app.models.FinancialTrackingManager.GetDebtByID(app.contextGetUser(r).ID, debtID)
+	if err != nil {
+		if errors.Is(err, data.ErrGeneralRecordNotFound) {
+			app.notFoundResponse(w, r)
+		} else {
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
+
+	// Update fields if provided in the input
+	if input.Name != nil {
+		debt.Name = *input.Name
+	}
+	if input.Amount != nil {
+		debt.Amount = *input.Amount
+		debt.RemainingBalance = *input.Amount // Reset balance to the new amount
+	}
+	if input.InterestRate != nil {
+		debt.InterestRate = *input.InterestRate
+	}
+	if input.Description != nil {
+		debt.Description = *input.Description
+	}
+	if input.DueDate != nil {
+		debt.DueDate = *input.DueDate
+		debt.NextPaymentDate = *input.DueDate // Update next payment date
+	}
+	if input.MinimumPayment != nil {
+		debt.MinimumPayment = *input.MinimumPayment
+	}
+
+	// Validate the updated debt
+	v := validator.New()
+	if data.ValidateDebt(v, debt); !v.Valid() {
+		app.failedValidationResponse(w, r, v.Errors)
+		return
+	}
+
+	// Recalculate estimated payoff date if the amount, interest rate, or minimum payment changed
+	if input.Amount != nil || input.InterestRate != nil || input.MinimumPayment != nil {
+		estimatedPayoffDate, err := app.calculateEstimatedPayoffDate(debt)
+		if err != nil {
+			app.serverErrorResponse(w, r, err)
+			return
+		}
+		debt.EstimatedPayoffDate = estimatedPayoffDate
+	}
+
+	// Handle payments, if any (ensure payment amount distribution between principal and interest)
+	if input.PaymentAmount != nil {
+		paymentAmount := *input.PaymentAmount
+		interestPayment, err := app.calculateInterestPayment(debt) // Function to calculate interest payment based on debt
+		if err != nil {
+			app.serverErrorResponse(w, r, err)
+			return
+		}
+
+		if paymentAmount.LessThan(interestPayment) {
+			app.badRequestResponse(w, r, errors.New("payment amount is less than the interest due"))
+			return
+		}
+
+		principalPayment := paymentAmount.Sub(interestPayment)
+
+		// Ensure that payment amount matches interest + principal
+		if !paymentAmount.Equal(interestPayment.Add(principalPayment)) {
+			app.badRequestResponse(w, r, errors.New("payment amount does not match the sum of interest and principal"))
+			return
+		}
+
+		// Insert payment into debt_payments table
+		payment := &data.DebtRepayment{
+			DebtID:           debtID,
+			UserID:           app.contextGetUser(r).ID,
+			PaymentAmount:    paymentAmount,
+			PaymentDate:      time.Now(),
+			InterestPayment:  interestPayment,
+			PrincipalPayment: principalPayment,
+		}
+
+		err = app.models.FinancialTrackingManager.CreateNewDebtPayment(app.contextGetUser(r).ID, payment)
+		if err != nil {
+			app.serverErrorResponse(w, r, err)
+			return
+		}
+
+		// Update debt's remaining balance after payment
+		debt.RemainingBalance = debt.RemainingBalance.Sub(principalPayment)
+	}
+
+	// Save the updated debt back to the database
+	err = app.models.FinancialTrackingManager.UpdateDebtByID(app.contextGetUser(r).ID, debt)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+		return
+	}
+
+	// Respond with the updated debt
+	err = app.writeJSON(w, http.StatusOK, envelope{"debt": debt}, nil)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+	}
+}
+
+// makeDebtPaymentHandler() is a handler method that will handle debt payments
+// We fetch the debt by ID, fetch the user input (payment amount, etc.)
+// We check if the payment is late and accrued interest
+// If it is late, we calculate overdue interest since the last calculated date
+// We update the accrued interest in the debt
+// We handle the payment by distributing between interest and principal
+// We insert the payment into the debt_payments table
+// We update the remaining balance and reset accrued interest
+// We update the next payment date
+// We save the updated debt
+// We respond with the updated debt
+func (app *application) makeDebtPaymentHandler(w http.ResponseWriter, r *http.Request) {
+	// Step 1: Read and validate the debt ID from the URL parameters
+	debtID, err := app.readIDParam(r, "debtID")
+	if err != nil || debtID < 1 {
+		app.notFoundResponse(w, r)
+		return
+	}
+
+	// Step 2: Parse the input payment amount from the request body
+	var input struct {
+		PaymentAmount decimal.Decimal `json:"payment_amount"`
+	}
+
+	err = app.readJSON(w, r, &input)
+	if err != nil {
+		app.badRequestResponse(w, r, err)
+		return
+	}
+
+	// Step 3: Retrieve the debt record for the user by debt ID
+	debt, err := app.models.FinancialTrackingManager.GetDebtByID(app.contextGetUser(r).ID, debtID)
+	if err != nil {
+		app.notFoundResponse(w, r)
+		return
+	}
+
+	// Step 4: Check if the accrued interest needs to be updated (if the cron job hasn't run)
+	if debt.AccruedInterest.IsZero() && time.Now().After(debt.NextPaymentDate) {
+		// If the interest has not been calculated for the overdue period, calculate it now
+		interestAccrued, err := app.calculateInterestPayment(debt)
+		if err != nil {
+			app.serverErrorResponse(w, r, err)
+			return
+		}
+		// Add the accrued interest to the debt's accrued interest
+		debt.AccruedInterest = debt.AccruedInterest.Add(interestAccrued)
+	}
+
+	// Step 5: Calculate the interest and principal portions of the payment
+	interestPayment := debt.AccruedInterest
+	principalPayment := input.PaymentAmount.Sub(interestPayment)
+	// make validator
+	v := validator.New()
+
+	// Step 6: If the payment does not cover the accrued interest, return an error
+	if principalPayment.LessThan(decimal.NewFromFloat(0)) {
+		v.AddError("payment_amount", "payment does not cover accrued interest")
+		app.failedValidationResponse(w, r, v.Errors)
+		return
+	}
+
+	// Step 7: Create a new debt repayment record
+	payment := &data.DebtRepayment{
+		DebtID:           debtID,
+		UserID:           app.contextGetUser(r).ID,
+		PaymentAmount:    input.PaymentAmount,
+		PaymentDate:      time.Now(),
+		InterestPayment:  interestPayment,
+		PrincipalPayment: principalPayment,
+	}
+
+	// Step 8: Save the new debt repayment record in the database
+	err = app.models.FinancialTrackingManager.CreateNewDebtPayment(debt.UserID, payment)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+		return
+	}
+
+	// Step 9: Update the debt's remaining balance by subtracting the principal payment
+	debt.RemainingBalance = debt.RemainingBalance.Sub(principalPayment)
+
+	// Step 10: Reset the accrued interest to 0 after the payment is made
+	debt.AccruedInterest = decimal.NewFromFloat(0)
+
+	// Step 11: Set the next payment date (assuming monthly payments)
+	debt.NextPaymentDate = debt.NextPaymentDate.AddDate(0, 1, 0) // Add one month to the next payment date
+
+	// Step 12: Recalculate the estimated payoff date based on the updated debt details
+	newPayoffDate, err := app.calculateEstimatedPayoffDate(debt)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+		return
+	}
+	debt.EstimatedPayoffDate = newPayoffDate
+
+	// Step 13: Update the last payment date and Total Interest Paid
+	debt.LastPaymentDate = time.Now()
+	debt.TotalInterestPaid = debt.TotalInterestPaid.Add(interestPayment)
+
+	// Step 14: Update the debt record in the database with the new balance and dates
+	err = app.models.FinancialTrackingManager.UpdateDebtByID(debt.UserID, debt)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+		return
+	}
+
+	// Step 14: Respond with the updated debt record
+	err = app.writeJSON(w, http.StatusOK, envelope{"debt": debt}, nil)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+	}
+}

@@ -9,7 +9,7 @@ import (
 var (
 	ErrFailedToSaveRecordToRedis = errors.New("failed to save record to database")
 	ErrUnableToQueryDatabase     = errors.New("unable to query database")
-	ErrGeneralRecordNotFound     = errors.New("feeds record not found")
+	ErrGeneralRecordNotFound     = errors.New("finance record not found")
 	ErrGeneralEditConflict       = errors.New("edit conflict")
 )
 

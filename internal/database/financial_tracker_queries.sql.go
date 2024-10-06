@@ -11,6 +11,105 @@ import (
 	"time"
 )
 
+const createNewDebt = `-- name: CreateNewDebt :one
+INSERT INTO debts (
+    user_id, name, amount, remaining_balance, interest_rate, description, 
+    due_date, minimum_payment, next_payment_date, estimated_payoff_date, 
+    accrued_interest, interest_last_calculated, total_interest_paid
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+RETURNING id, created_at, updated_at
+`
+
+type CreateNewDebtParams struct {
+	UserID                 int64
+	Name                   string
+	Amount                 string
+	RemainingBalance       string
+	InterestRate           sql.NullString
+	Description            sql.NullString
+	DueDate                time.Time
+	MinimumPayment         string
+	NextPaymentDate        time.Time
+	EstimatedPayoffDate    sql.NullTime
+	AccruedInterest        sql.NullString
+	InterestLastCalculated sql.NullTime
+	TotalInterestPaid      sql.NullString
+}
+
+type CreateNewDebtRow struct {
+	ID        int64
+	CreatedAt sql.NullTime
+	UpdatedAt sql.NullTime
+}
+
+func (q *Queries) CreateNewDebt(ctx context.Context, arg CreateNewDebtParams) (CreateNewDebtRow, error) {
+	row := q.db.QueryRowContext(ctx, createNewDebt,
+		arg.UserID,
+		arg.Name,
+		arg.Amount,
+		arg.RemainingBalance,
+		arg.InterestRate,
+		arg.Description,
+		arg.DueDate,
+		arg.MinimumPayment,
+		arg.NextPaymentDate,
+		arg.EstimatedPayoffDate,
+		arg.AccruedInterest,
+		arg.InterestLastCalculated,
+		arg.TotalInterestPaid,
+	)
+	var i CreateNewDebtRow
+	err := row.Scan(&i.ID, &i.CreatedAt, &i.UpdatedAt)
+	return i, err
+}
+
+const createNewDebtPayment = `-- name: CreateNewDebtPayment :one
+INSERT INTO debtpayments (
+    debt_id,
+    user_id,
+    payment_amount,
+    payment_date,
+    interest_payment,
+    principal_payment
+) VALUES (
+    $1, -- debt_id
+    $2, -- user_id
+    $3, -- payment_amount
+    $4, -- payment_date
+    $5, -- interest_payment
+    $6  -- principal_payment
+)
+RETURNING id, created_at
+`
+
+type CreateNewDebtPaymentParams struct {
+	DebtID           int64
+	UserID           int64
+	PaymentAmount    string
+	PaymentDate      time.Time
+	InterestPayment  string
+	PrincipalPayment string
+}
+
+type CreateNewDebtPaymentRow struct {
+	ID        int64
+	CreatedAt sql.NullTime
+}
+
+func (q *Queries) CreateNewDebtPayment(ctx context.Context, arg CreateNewDebtPaymentParams) (CreateNewDebtPaymentRow, error) {
+	row := q.db.QueryRowContext(ctx, createNewDebtPayment,
+		arg.DebtID,
+		arg.UserID,
+		arg.PaymentAmount,
+		arg.PaymentDate,
+		arg.InterestPayment,
+		arg.PrincipalPayment,
+	)
+	var i CreateNewDebtPaymentRow
+	err := row.Scan(&i.ID, &i.CreatedAt)
+	return i, err
+}
+
 const createNewExpense = `-- name: CreateNewExpense :one
 INSERT INTO expenses (
     user_id, 
@@ -150,6 +249,102 @@ func (q *Queries) CreateNewRecurringExpense(ctx context.Context, arg CreateNewRe
 	return i, err
 }
 
+const getAllOverdueDebts = `-- name: GetAllOverdueDebts :many
+SELECT 
+    COUNT(*) OVER() AS total_count,
+    id, 
+    user_id, 
+    name, 
+    amount, 
+    remaining_balance, 
+    interest_rate, 
+    description, 
+    due_date, 
+    minimum_payment, 
+    created_at, 
+    updated_at, 
+    next_payment_date, 
+    estimated_payoff_date, 
+    accrued_interest, 
+    interest_last_calculated, 
+    last_payment_date, 
+    total_interest_paid
+FROM 
+    debts
+WHERE 
+    remaining_balance > 0  -- Debt is not fully paid
+AND (interest_last_calculated IS NULL OR interest_last_calculated < CURRENT_DATE) -- Interest calculation is overdue
+LIMIT $1 OFFSET $2
+`
+
+type GetAllOverdueDebtsParams struct {
+	Limit  int32
+	Offset int32
+}
+
+type GetAllOverdueDebtsRow struct {
+	TotalCount             int64
+	ID                     int64
+	UserID                 int64
+	Name                   string
+	Amount                 string
+	RemainingBalance       string
+	InterestRate           sql.NullString
+	Description            sql.NullString
+	DueDate                time.Time
+	MinimumPayment         string
+	CreatedAt              sql.NullTime
+	UpdatedAt              sql.NullTime
+	NextPaymentDate        time.Time
+	EstimatedPayoffDate    sql.NullTime
+	AccruedInterest        sql.NullString
+	InterestLastCalculated sql.NullTime
+	LastPaymentDate        sql.NullTime
+	TotalInterestPaid      sql.NullString
+}
+
+func (q *Queries) GetAllOverdueDebts(ctx context.Context, arg GetAllOverdueDebtsParams) ([]GetAllOverdueDebtsRow, error) {
+	rows, err := q.db.QueryContext(ctx, getAllOverdueDebts, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetAllOverdueDebtsRow
+	for rows.Next() {
+		var i GetAllOverdueDebtsRow
+		if err := rows.Scan(
+			&i.TotalCount,
+			&i.ID,
+			&i.UserID,
+			&i.Name,
+			&i.Amount,
+			&i.RemainingBalance,
+			&i.InterestRate,
+			&i.Description,
+			&i.DueDate,
+			&i.MinimumPayment,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.NextPaymentDate,
+			&i.EstimatedPayoffDate,
+			&i.AccruedInterest,
+			&i.InterestLastCalculated,
+			&i.LastPaymentDate,
+			&i.TotalInterestPaid,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getAllRecurringExpensesDueForProcessing = `-- name: GetAllRecurringExpensesDueForProcessing :many
 SELECT
     COUNT(*) OVER() AS total_count,
@@ -226,6 +421,54 @@ func (q *Queries) GetAllRecurringExpensesDueForProcessing(ctx context.Context, a
 	return items, nil
 }
 
+const getDebtByID = `-- name: GetDebtByID :one
+SELECT 
+    id, 
+    user_id, 
+    name, 
+    amount, 
+    remaining_balance, 
+    interest_rate, 
+    description, 
+    due_date, 
+    minimum_payment, 
+    created_at, 
+    updated_at, 
+    next_payment_date, 
+    estimated_payoff_date, 
+    accrued_interest, 
+    interest_last_calculated, 
+    last_payment_date, 
+    total_interest_paid
+FROM debts
+WHERE id = $1
+`
+
+func (q *Queries) GetDebtByID(ctx context.Context, id int64) (Debt, error) {
+	row := q.db.QueryRowContext(ctx, getDebtByID, id)
+	var i Debt
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Name,
+		&i.Amount,
+		&i.RemainingBalance,
+		&i.InterestRate,
+		&i.Description,
+		&i.DueDate,
+		&i.MinimumPayment,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.NextPaymentDate,
+		&i.EstimatedPayoffDate,
+		&i.AccruedInterest,
+		&i.InterestLastCalculated,
+		&i.LastPaymentDate,
+		&i.TotalInterestPaid,
+	)
+	return i, err
+}
+
 const getExpenseByID = `-- name: GetExpenseByID :one
 SELECT 
     id, 
@@ -261,6 +504,47 @@ func (q *Queries) GetExpenseByID(ctx context.Context, arg GetExpenseByIDParams) 
 		&i.IsRecurring,
 		&i.Description,
 		&i.DateOccurred,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getIncomeByID = `-- name: GetIncomeByID :one
+SELECT
+    id,
+    user_id,
+    source,
+    original_currency_code,
+    amount_original,
+    amount,
+    exchange_rate,
+    description,
+    date_received,
+    created_at,
+    updated_at
+FROM income
+WHERE id = $1 AND user_id = $2
+`
+
+type GetIncomeByIDParams struct {
+	ID     int64
+	UserID int64
+}
+
+func (q *Queries) GetIncomeByID(ctx context.Context, arg GetIncomeByIDParams) (Income, error) {
+	row := q.db.QueryRowContext(ctx, getIncomeByID, arg.ID, arg.UserID)
+	var i Income
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Source,
+		&i.OriginalCurrencyCode,
+		&i.AmountOriginal,
+		&i.Amount,
+		&i.ExchangeRate,
+		&i.Description,
+		&i.DateReceived,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -308,6 +592,68 @@ func (q *Queries) GetRecurringExpenseByID(ctx context.Context, arg GetRecurringE
 	return i, err
 }
 
+const updateDebtByID = `-- name: UpdateDebtByID :one
+UPDATE debts
+SET
+    name = $2,                                  -- New name
+    amount = $3,                                -- New amount
+    remaining_balance = $4,                     -- New remaining balance
+    interest_rate = $5,                         -- New interest rate
+    description = $6,                           -- New description
+    due_date = $7,                              -- New due date
+    minimum_payment = $8,                       -- New minimum payment
+    next_payment_date = $9,                     -- New next payment date
+    accrued_interest = $10,                     -- New accrued interest
+    total_interest_paid = $11,                  -- New total interest paid
+    estimated_payoff_date = $12,                -- New estimated payoff date
+    interest_last_calculated = $13,               -- New interest last calculated date
+    last_payment_date = $14                     -- New last payment date
+WHERE
+    id = $1 AND user_id=$15                                   -- ID of the debt to update
+RETURNING updated_at
+`
+
+type UpdateDebtByIDParams struct {
+	ID                     int64
+	Name                   string
+	Amount                 string
+	RemainingBalance       string
+	InterestRate           sql.NullString
+	Description            sql.NullString
+	DueDate                time.Time
+	MinimumPayment         string
+	NextPaymentDate        time.Time
+	AccruedInterest        sql.NullString
+	TotalInterestPaid      sql.NullString
+	EstimatedPayoffDate    sql.NullTime
+	InterestLastCalculated sql.NullTime
+	LastPaymentDate        sql.NullTime
+	UserID                 int64
+}
+
+func (q *Queries) UpdateDebtByID(ctx context.Context, arg UpdateDebtByIDParams) (sql.NullTime, error) {
+	row := q.db.QueryRowContext(ctx, updateDebtByID,
+		arg.ID,
+		arg.Name,
+		arg.Amount,
+		arg.RemainingBalance,
+		arg.InterestRate,
+		arg.Description,
+		arg.DueDate,
+		arg.MinimumPayment,
+		arg.NextPaymentDate,
+		arg.AccruedInterest,
+		arg.TotalInterestPaid,
+		arg.EstimatedPayoffDate,
+		arg.InterestLastCalculated,
+		arg.LastPaymentDate,
+		arg.UserID,
+	)
+	var updated_at sql.NullTime
+	err := row.Scan(&updated_at)
+	return updated_at, err
+}
+
 const updateExpenseByID = `-- name: UpdateExpenseByID :one
 UPDATE expenses SET
     name = $1,
@@ -340,6 +686,50 @@ func (q *Queries) UpdateExpenseByID(ctx context.Context, arg UpdateExpenseByIDPa
 		arg.IsRecurring,
 		arg.Description,
 		arg.DateOccurred,
+		arg.ID,
+		arg.UserID,
+	)
+	var updated_at sql.NullTime
+	err := row.Scan(&updated_at)
+	return updated_at, err
+}
+
+const updateIncomeByID = `-- name: UpdateIncomeByID :one
+UPDATE income
+SET
+    source = $1,
+    original_currency_code = $2,
+    amount_original = $3,
+    amount = $4,
+    exchange_rate = $5,
+    description = $6,
+    date_received = $7
+WHERE
+    id=$8 AND user_id=$9
+RETURNING updated_at
+`
+
+type UpdateIncomeByIDParams struct {
+	Source               string
+	OriginalCurrencyCode string
+	AmountOriginal       string
+	Amount               string
+	ExchangeRate         string
+	Description          sql.NullString
+	DateReceived         time.Time
+	ID                   int64
+	UserID               int64
+}
+
+func (q *Queries) UpdateIncomeByID(ctx context.Context, arg UpdateIncomeByIDParams) (sql.NullTime, error) {
+	row := q.db.QueryRowContext(ctx, updateIncomeByID,
+		arg.Source,
+		arg.OriginalCurrencyCode,
+		arg.AmountOriginal,
+		arg.Amount,
+		arg.ExchangeRate,
+		arg.Description,
+		arg.DateReceived,
 		arg.ID,
 		arg.UserID,
 	)

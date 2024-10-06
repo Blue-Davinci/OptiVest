@@ -73,6 +73,21 @@ func (app *application) trackRecurringExpensesHandler() {
 	app.config.scheduler.trackRecurringExpenses.Start()
 }
 
+// trackOverdueDebtsHandler() is the cronjob method that will track all overdue debts
+func (app *application) trackOverdueDebtsHandler() {
+	app.logger.Info("Starting the overdue debt tracking handler..", zap.String("time", time.Now().String()))
+	updateInterval := "0 0 * * *"
+
+	_, err := app.config.scheduler.trackOverdueDebts.AddFunc(updateInterval, app.trackOverdueDebts)
+	if err != nil {
+		app.logger.Error("Error adding [trackOverdueDebts] to scheduler", zap.Error(err))
+	}
+	// Run the tracking first before starting the cron
+	app.trackOverdueDebts()
+	// start the cron scheduler
+	app.config.scheduler.trackOverdueDebts.Start()
+}
+
 // trackGoalProgressStatus() is the method called by the cronjob to update the progress of all the goals that have expired
 // It will be called every day at midnight to update the progress of the expired goals.
 func (app *application) trackGoalProgressStatus() {
@@ -188,5 +203,64 @@ func (app *application) trackRecurringExpenses() {
 
 		// Move to the next page
 		currentPage = metadata.CurrentPage + 1
+	}
+}
+
+// trackOverdueDebts() is the method called by the cronjob to track all the debts that are overdue
+// Just like the trackRecurringExpenses, we will need to pass a burst and offset. After each burst, wwe recieve the  debts than need to be tracked
+// or rather the debts that need accrued interest recalculation
+// For each debt, recalculate the updated interest, update the accrued interest and remaining balance
+// After that, save the updated debt record back, and send a notification to the user
+// After processing we increment the offset by the burst and repeat the process until we get
+// we are in the last page of the records.
+func (app *application) trackOverdueDebts() {
+	// burst
+	burst := app.config.limit.overdueDebtTrackerBurstLimit
+	currentPage := 1
+	for {
+		//make a filter
+		filter := data.Filters{
+			Page:     currentPage,
+			PageSize: burst,
+		}
+		// get all overdue debt
+		debts, metadata, err := app.models.FinancialTrackingManager.GetAllOverdueDebts(filter)
+		if err != nil {
+			if errors.Is(err, data.ErrGeneralRecordNotFound) {
+				app.logger.Info("No more overdue debts to track", zap.Error(err))
+				break
+			}
+			app.logger.Error("Error tracking overdue debts", zap.Error(err))
+			break
+		}
+		for _, debt := range debts {
+			//app.logger.Info("Processing debt ID:", zap.Int64("debtID", debt.ID))
+			// calculate the updated interest
+			accruedInterest, err := app.calculateInterestPayment(debt)
+			if err != nil {
+				app.logger.Info("Error calculating interest for debt ID:", (zap.Error(err)))
+				continue
+			}
+			// Update the accrued interest and remaining balance
+			debt.AccruedInterest = accruedInterest
+			debt.RemainingBalance = debt.RemainingBalance.Add(accruedInterest) // Add interest to balance
+			debt.InterestLastCalculated = time.Now()                           // Update interest last calculated date
+			// Step 3: Save updated debt back to the database
+			err = app.models.FinancialTrackingManager.UpdateDebtByID(debt.UserID, debt)
+			if err != nil {
+				app.logger.Info("Error updating debt", zap.Error(err))
+				continue
+			}
+			// ToDO: SEND notification
+		}
+		// Check if this is the last page of records
+		if metadata.LastPage == metadata.CurrentPage {
+			app.logger.Info("All overdue debtsprocessed, ending tracking.")
+			break
+		}
+
+		// Move to the next page
+		currentPage = metadata.CurrentPage + 1
+
 	}
 }

@@ -93,10 +93,12 @@ type config struct {
 		trackGoalProgressStatus      *cron.Cron
 		trackExpiredGroupInvitations *cron.Cron
 		trackRecurringExpenses       *cron.Cron
+		trackOverdueDebts            *cron.Cron
 	}
 	limit struct {
 		monthlyGoalProcessingBatchLimit   int
 		recurringExpenseTrackerBurstLimit int
+		overdueDebtTrackerBurstLimit      int
 	}
 }
 
@@ -175,10 +177,10 @@ func main() {
 	flag.StringVar(&cfg.frontend.activationurl, "frontend-activation-url", "http://localhost:5173/verify?token=", "Frontend Activation URL")
 	flag.StringVar(&cfg.frontend.passwordreseturl, "frontend-password-reset-url", "http://localhost:5173/reset/password?token=", "Frontend Password Reset URL")
 	flag.StringVar(&cfg.frontend.callback_url, "frontend-callback-url", "https://adapted-healthy-monitor.ngrok-free.app/v1", "Frontend Callback URL")
-
 	// Limit configuration
 	flag.IntVar(&cfg.limit.monthlyGoalProcessingBatchLimit, "monthly-goal-batch-limit", 100, "Batching Limit for Monthly Goal Processing")
 	flag.IntVar(&cfg.limit.recurringExpenseTrackerBurstLimit, "recurring-expense-burst-limit", 100, "Batch Limit for Recurring Expense Tracker")
+	flag.IntVar(&cfg.limit.overdueDebtTrackerBurstLimit, "overdue-debt-burst-limit", 100, "Batch Limit for Overdue Debt Tracker")
 	// Parse the flags
 	flag.Parse()
 	// Initialize our cronJobs
@@ -186,6 +188,8 @@ func main() {
 	cfg.scheduler.trackGoalProgressStatus = cron.New()
 	cfg.scheduler.trackExpiredGroupInvitations = cron.New()
 	cfg.scheduler.trackRecurringExpenses = cron.New()
+	cfg.scheduler.trackOverdueDebts = cron.New()
+
 	// Create a new version boolean flag with the default value of false.
 	displayVersion := flag.Bool("version", false, "Display version and exit")
 	// If the version flag value is true, then print out the version number and
@@ -267,6 +271,7 @@ func (app *application) startSchedulers() {
 	go app.updateGoalProgressOnExpiredGoalsHandler() // updateGoalProgressOnExpiredGoals
 	go app.trackExpiredGroupInvitationsHandler()     // trackExpiredGroupInvitations
 	go app.trackRecurringExpensesHandler()           // trackRecurringExpenses
+	go app.trackOverdueDebtsHandler()                // trackOverdueDebts
 }
 
 // publishMetrics sets up the expvar variables for the application

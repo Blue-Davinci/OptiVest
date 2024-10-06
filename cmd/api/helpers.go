@@ -351,3 +351,59 @@ func validateURL(input string) error {
 
 	return nil
 }
+
+func (app *application) calculateEstimatedPayoffDate(debt *data.Debt) (time.Time, error) {
+	if debt.MinimumPayment.LessThanOrEqual(decimal.NewFromFloat(0)) {
+		return time.Time{}, errors.New("minimum payment cannot be zero or negative")
+	}
+
+	remainingBalance := debt.Amount
+	interestRatePerMonth := debt.InterestRate.Div(decimal.NewFromInt(12)).Div(decimal.NewFromInt(100)) // Monthly interest
+	months := 0
+
+	// Loop through months and simulate payments until the balance is zero
+	for remainingBalance.GreaterThan(decimal.NewFromFloat(0)) {
+		// Add interest for the current month
+		interest := remainingBalance.Mul(interestRatePerMonth)
+		remainingBalance = remainingBalance.Add(interest)
+
+		// Subtract the minimum payment
+		remainingBalance = remainingBalance.Sub(debt.MinimumPayment)
+
+		months++
+	}
+
+	// Calculate the estimated payoff date
+	estimatedPayoffDate := debt.DueDate.AddDate(0, months, 0) // Add the number of months
+	return estimatedPayoffDate, nil
+}
+
+// calculateInterestPayment calculates the interest payment for a debt
+func (app *application) calculateInterestPayment(debt *data.Debt) (decimal.Decimal, error) {
+	// Ensure debt is not nil
+	if debt == nil {
+		return decimal.Zero, errors.New("debt cannot be nil")
+	}
+
+	// Ensure interest rate is a valid value
+	if debt.InterestRate.LessThan(decimal.NewFromFloat(0)) {
+		return decimal.Zero, errors.New("interest rate cannot be negative")
+	}
+
+	// Calculate the duration in days since the last interest was calculated
+	daysSinceLastCalculation := time.Since(debt.InterestLastCalculated).Hours() / 24
+	if daysSinceLastCalculation < 0 {
+		return decimal.Zero, errors.New("invalid calculation period")
+	}
+
+	// Convert annual interest rate to daily interest rate (assuming 365 days in a year)
+	dailyInterestRate := debt.InterestRate.Div(decimal.NewFromFloat(365))
+
+	// Calculate interest based on remaining balance and the number of days
+	interestPayment := debt.RemainingBalance.Mul(dailyInterestRate).Mul(decimal.NewFromFloat(daysSinceLastCalculation))
+
+	// Update the last calculated interest date to the current time
+	debt.InterestLastCalculated = time.Now()
+
+	return interestPayment, nil
+}

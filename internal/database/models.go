@@ -285,6 +285,37 @@ type Budget struct {
 	UpdatedAt      time.Time
 }
 
+type Debt struct {
+	ID                     int64
+	UserID                 int64
+	Name                   string
+	Amount                 string
+	RemainingBalance       string
+	InterestRate           sql.NullString
+	Description            sql.NullString
+	DueDate                time.Time
+	MinimumPayment         string
+	CreatedAt              sql.NullTime
+	UpdatedAt              sql.NullTime
+	NextPaymentDate        time.Time
+	EstimatedPayoffDate    sql.NullTime
+	AccruedInterest        sql.NullString
+	InterestLastCalculated sql.NullTime
+	LastPaymentDate        sql.NullTime
+	TotalInterestPaid      sql.NullString
+}
+
+type Debtpayment struct {
+	ID               int64
+	DebtID           int64
+	UserID           int64
+	PaymentAmount    string
+	PaymentDate      time.Time
+	InterestPayment  string
+	PrincipalPayment string
+	CreatedAt        sql.NullTime
+}
+
 type Expense struct {
 	ID           int64
 	UserID       int64

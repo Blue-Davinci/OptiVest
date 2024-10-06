@@ -348,6 +348,9 @@ func (m FinancialManagerModel) GetBudgetsForUser(userID int64, searchQuery strin
 	if err != nil {
 		return nil, Metadata{}, err
 	}
+	if len(budgets) == 0 {
+		return nil, Metadata{}, ErrGeneralRecordNotFound
+	}
 	// initialize our total values
 	totalBudgets := 0
 	enrichedBudgets := []*EnrichedBudget{}
@@ -662,6 +665,9 @@ func (m FinancialManagerModel) GetGoalPlansForUser(userID int64, filters Filters
 	if err != nil {
 		return nil, Metadata{}, err
 	}
+	if len(goalPlans) == 0 {
+		return nil, Metadata{}, ErrGeneralRecordNotFound
+	}
 	// initialize our total values
 	totalGoalPlans := 0
 	goalPlanSlice := []*GoalPlan{}
@@ -704,6 +710,9 @@ func (m FinancialManagerModel) GetAndSaveAllGoalsForTracking() ([]*TrackedGoal, 
 		default:
 			return nil, err
 		}
+	}
+	if len(trackedGoals) == 0 {
+		return nil, ErrGeneralRecordNotFound
 	}
 	// initializa a slice of TrackedGoal
 	trackedGoalsSlice := []*TrackedGoal{}
