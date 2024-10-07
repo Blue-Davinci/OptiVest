@@ -8,6 +8,20 @@ import (
 	"github.com/justinas/alice"
 )
 
+func (app *application) wsRoutes() http.Handler {
+	router := chi.NewRouter()
+	router.Use(cors.Handler(cors.Options{
+		AllowedOrigins:   app.config.cors.trustedOrigins,
+		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "PATCH"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
+		ExposedHeaders:   []string{"link"},
+		AllowCredentials: false,
+		MaxAge:           300, // Maximum value not ignored by any of major browsers
+	}))
+	router.Get("/ws", app.wsHandler)
+	return router
+}
+
 // routes() is a method that returns a http.Handler that contains all the routes for the application
 func (app *application) routes() http.Handler {
 	router := chi.NewRouter()

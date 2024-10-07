@@ -1,10 +1,18 @@
 package main
 
 import (
+	"encoding/json"
 	"net/http"
 
+	"github.com/gorilla/websocket"
 	"go.uber.org/zap"
 )
+
+// error response structure for WebSocket clients.
+type wsErrorResponse struct {
+	Error   string `json:"error"`
+	Message string `json:"message"`
+}
 
 func (app *application) logError(r *http.Request, err error) {
 	// Use the PrintError() method to log the error message, and include the current
@@ -94,4 +102,60 @@ func (app *application) invalidCredentialsResponse(w http.ResponseWriter, r *htt
 func (app *application) notFoundResponse(w http.ResponseWriter, r *http.Request) {
 	message := "the requested resource could not be found"
 	app.errorResponse(w, r, http.StatusNotFound, message)
+}
+
+// wsErrorResponse() is a WebSocket method that sends websocket error response.
+func (app *application) wsErrorResponse(conn *websocket.Conn, errorCode int, errorMessage string) {
+	// Create a WebSocket error message in JSON format.
+	errorResponse := wsErrorResponse{
+		Error:   http.StatusText(errorCode),
+		Message: errorMessage,
+	}
+
+	// Marshal the error response into JSON.
+	response, err := json.Marshal(errorResponse)
+	if err != nil {
+		// If JSON marshalling fails, log the error and close the connection.
+		app.logger.Error("Failed to marshal error response", zap.Error(err))
+		conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "Internal Server Error"))
+		conn.Close()
+		return
+	}
+
+	// Send the error response to the WebSocket client.
+	err = conn.WriteMessage(websocket.TextMessage, response)
+	if err != nil {
+		// Log and close the connection if writing fails.
+		app.logger.Error("Failed to send error response", zap.Error(err))
+		conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "Internal Server Error"))
+		conn.Close()
+	}
+}
+
+// wsInvalidAuthenticationResponse() sends an authentication error for WebSocket connection.
+func (app *application) wsInvalidAuthenticationResponse(conn *websocket.Conn) {
+	app.wsErrorResponse(conn, http.StatusUnauthorized, "Invalid authentication credential")
+	conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "Unauthorized"))
+	conn.Close()
+}
+
+// wsWebSocketUpgradeError() sends an error response when upgrading to WebSocket fails.
+func (app *application) wsWebSocketUpgradeError(conn *websocket.Conn) {
+	app.wsErrorResponse(conn, http.StatusInternalServerError, "Failed to upgrade to WebSocket")
+	conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "upgrade error"))
+	conn.Close()
+}
+
+// wsServerErrorRespomse() sends a server error response for WebSocket connection.
+func (app *application) wsServerErrorResponse(conn *websocket.Conn, message string) {
+	app.wsErrorResponse(conn, http.StatusInternalServerError, message)
+	conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "Internal Server Error"))
+	conn.Close()
+}
+
+// wsMaximumConnectionsResponse() sends a maximum connections error for WebSocket connection.
+func (app *application) wsMaxConnectionsResponse(conn *websocket.Conn) {
+	app.wsErrorResponse(conn, http.StatusServiceUnavailable, "Maximum connections reached")
+	conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseTryAgainLater, "Service Unavailable"))
+	conn.Close()
 }

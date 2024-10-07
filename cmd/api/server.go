@@ -58,6 +58,8 @@ func (app *application) server() error {
 		// Call Shutdown() on our server, passing in the context we just made.
 		shutdownChan <- srv.Shutdown(ctx)
 	}()
+	// start our WS server via a go routine
+	go app.serveWS()
 	// start the server printing out our main settings
 	app.logger.Info("starting server", zap.String("addr", srv.Addr), zap.String("env", app.config.env))
 	if err := srv.ListenAndServe(); err != nil {
@@ -85,4 +87,23 @@ func (app *application) stopCronJobs(cronJobs ...*cron.Cron) {
 		<-ctx.Done()
 	}
 
+}
+
+// serveWS() is a server that launches our websocket server
+// our handler is the wsHandler
+func (app *application) serveWS() {
+	app.logger.Info("starting websocket server", zap.Int("addr", app.config.ws.port))
+	server := &http.Server{
+		Addr:         fmt.Sprintf(":%d", app.config.ws.port),
+		Handler:      app.wsRoutes(),
+		IdleTimeout:  time.Minute,
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 0, // no timeout
+	}
+	err := server.ListenAndServe()
+	if err != nil {
+		if !errors.Is(err, http.ErrServerClosed) {
+			app.logger.Error("error starting websocket server", zap.Error(err))
+		}
+	}
 }

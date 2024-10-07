@@ -20,6 +20,7 @@ import (
 	"github.com/Blue-Davinci/OptiVest/internal/mailer"
 	"github.com/Blue-Davinci/OptiVest/internal/vcs"
 	"github.com/go-redis/redis/v8"
+	"github.com/gorilla/websocket"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 	"github.com/robfig/cron/v3"
@@ -47,6 +48,10 @@ type config struct {
 			alphavantage  apikey_details
 			exchangerates apikey_details
 		}
+	}
+	ws struct {
+		port                     int
+		MaxConcurrentConnections int
 	}
 	db struct {
 		dsn          string
@@ -103,13 +108,16 @@ type config struct {
 }
 
 type application struct {
-	config      config
-	logger      *zap.Logger
-	models      data.Models
-	http_client *Optivet_Client
-	mailer      mailer.Mailer
-	wg          sync.WaitGroup
-	RedisDB     *redis.Client
+	config            config
+	logger            *zap.Logger
+	models            data.Models
+	http_client       *Optivet_Client
+	mailer            mailer.Mailer
+	wg                sync.WaitGroup
+	RedisDB           *redis.Client
+	Mutex             sync.Mutex
+	WebSocketUpgrader websocket.Upgrader
+	Clients           map[int64]*websocket.Conn
 }
 
 func main() {
@@ -127,6 +135,9 @@ func main() {
 	// Port & env
 	flag.IntVar(&cfg.port, "port", 4000, "API server port")
 	flag.StringVar(&cfg.env, "env", "development", "Environment (development|staging|production)")
+	// Websocket
+	flag.IntVar(&cfg.ws.port, "ws-port", 4001, "Websocket server port")
+	flag.IntVar(&cfg.ws.MaxConcurrentConnections, "ws-max-concurrent-connections", 100, "Websocket server max concurrent connections")
 	// API configuration
 	flag.StringVar(&cfg.api.name, "api-name", "OptiVest", "API name")
 	flag.StringVar(&cfg.api.author, "api-author", "Blue_Davinci", "API author")
@@ -224,6 +235,12 @@ func main() {
 		http_client: httpClient,
 		mailer:      mailer.New(cfg.smtp.host, cfg.smtp.port, cfg.smtp.username, cfg.smtp.password, cfg.smtp.sender),
 		RedisDB:     rdb,
+		Mutex:       sync.Mutex{},
+		WebSocketUpgrader: websocket.Upgrader{
+			ReadBufferSize:  1024,
+			WriteBufferSize: 1024,
+		},
+		Clients: make(map[int64]*websocket.Conn),
 	}
 	err = app.startupFunction()
 	if err != nil {

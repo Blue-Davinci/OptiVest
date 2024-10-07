@@ -407,3 +407,43 @@ func (app *application) calculateInterestPayment(debt *data.Debt) (decimal.Decim
 
 	return interestPayment, nil
 }
+
+func (app *application) aunthenticatorHelper(r *http.Request) (*data.User, error) {
+	// Retrieve the value of the Authorization header from the request. This will
+	// return the empty string "" if there is no such header found.
+	authorizationHeader := r.Header.Get("Authorization")
+	// If there is no Authorization header found, use the contextSetUser() helper to
+	// add the AnonymousUser to the request context. Then we
+	// call the next handler in the chain and return without executing any of the
+	// code below.
+	if authorizationHeader == "" {
+		return data.AnonymousUser, nil
+	}
+	// Otherwise, we expect the value of the Authorization header to be in the format
+	// "Bearer <token>". We try to split this into its constituent parts, and if the
+	// header isn't in the expected format we return a 401 Unauthorized response
+	// using the invalidAuthenticationTokenResponse() helper
+	headerParts := strings.Split(authorizationHeader, " ")
+	if len(headerParts) != 2 || headerParts[0] != "Bearer" {
+		return nil, errors.New("invalid authentication token format")
+	}
+	// Extract the actual authentication token from the header parts.
+	token := headerParts[1]
+	// Validate the token to make sure it is in a sensible format.
+	v := validator.New()
+	// If the token isn't valid, use the invalidAuthenticationTokenResponse()
+	// helper to send a response, rather than the failedValidationResponse() helper
+	// that we'd normally use.
+	if data.ValidateTokenPlaintext(v, token); !v.Valid() {
+		return nil, errors.New("invalid authentication token")
+	}
+	// Retrieve the details of the user associated with the authentication token,
+	// again calling the invalidAuthenticationTokenResponse() helper if no
+	// matching record was found. IMPORTANT: Notice that we are using
+	// ScopeAuthentication as the first parameter here.
+	user, err := app.models.Users.GetForToken(data.ScopeAuthentication, token, app.config.encryption.key)
+	if err != nil {
+		return nil, err
+	}
+	return user, nil
+}

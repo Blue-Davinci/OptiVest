@@ -20,6 +20,7 @@ type Models struct {
 	FinancialManager         FinancialManagerModel
 	FinancialGroupManager    FinancialGroupManagerModel
 	FinancialTrackingManager FinancialTrackingModel
+	NotificationManager      NotificationManagerModel
 }
 
 func NewModels(db *database.Queries) Models {
@@ -30,5 +31,6 @@ func NewModels(db *database.Queries) Models {
 		FinancialManager:         FinancialManagerModel{DB: db},
 		FinancialGroupManager:    FinancialGroupManagerModel{DB: db},
 		FinancialTrackingManager: FinancialTrackingModel{DB: db},
+		NotificationManager:      NotificationManagerModel{DB: db},
 	}
 }

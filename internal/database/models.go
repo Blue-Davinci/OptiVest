@@ -9,6 +9,8 @@ import (
 	"database/sql/driver"
 	"fmt"
 	"time"
+
+	"github.com/sqlc-dev/pqtype"
 )
 
 type GoalStatus string
@@ -182,6 +184,50 @@ func (ns NullMfaStatusType) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.MfaStatusType), nil
+}
+
+type NotificationStatus string
+
+const (
+	NotificationStatusDelivered NotificationStatus = "delivered"
+	NotificationStatusRead      NotificationStatus = "read"
+	NotificationStatusPending   NotificationStatus = "pending"
+	NotificationStatusExpired   NotificationStatus = "expired"
+)
+
+func (e *NotificationStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = NotificationStatus(s)
+	case string:
+		*e = NotificationStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for NotificationStatus: %T", src)
+	}
+	return nil
+}
+
+type NullNotificationStatus struct {
+	NotificationStatus NotificationStatus
+	Valid              bool // Valid is true if NotificationStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullNotificationStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.NotificationStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.NotificationStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullNotificationStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.NotificationStatus), nil
 }
 
 type RecurrenceIntervalEnum string
@@ -456,6 +502,20 @@ type Income struct {
 	DateReceived         time.Time
 	CreatedAt            sql.NullTime
 	UpdatedAt            sql.NullTime
+}
+
+type Notification struct {
+	ID               int64
+	UserID           int64
+	Message          string
+	NotificationType string
+	Status           NotificationStatus
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+	ReadAt           sql.NullTime
+	ExpiresAt        sql.NullTime
+	Meta             pqtype.NullRawMessage
+	RedisKey         sql.NullString
 }
 
 type RecurringExpense struct {

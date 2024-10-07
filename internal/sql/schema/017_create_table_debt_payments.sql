@@ -7,7 +7,7 @@ CREATE TABLE debtpayments (
     payment_date TIMESTAMP WITH TIME ZONE NOT NULL, 
     interest_payment NUMERIC(12, 2) NOT NULL CHECK (interest_payment >= 0), 
     principal_payment NUMERIC(12, 2) NOT NULL CHECK (principal_payment >= 0), 
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() 
+    created_at TIMESTAMP(0) WITH TIME ZONE DEFAULT NOW() 
 );
 
 -- Indexes for optimized querying
