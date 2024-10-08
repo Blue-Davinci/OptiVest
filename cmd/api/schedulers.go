@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"errors"
 	"time"
 
@@ -12,7 +13,7 @@ import (
 // to track all the goals that have been set by the users and update their progress
 // We use 28-31 to ensure that the cronjob runs at the end of all different months
 func (app *application) trackMonthlyGoalsScheduleHandler() {
-	app.logger.Info("Starting the goal tracking handler..", zap.String("time", time.Now().String()))
+	app.logger.Info("Starting the monthly goal tracking cron job..", zap.String("time", time.Now().String()))
 	trackingInterval := "0 0 28-31 * *"
 
 	_, err := app.config.scheduler.trackMonthlyGoalsCron.AddFunc(trackingInterval, app.trackMonthlyGoals)
@@ -28,7 +29,7 @@ func (app *application) trackMonthlyGoalsScheduleHandler() {
 // updateGoalProgressOnExpiredGoalsHandler() is a cronjob method that sets a cronJob to run at the end of every day
 // to update the progress of all the goals that have expired
 func (app *application) updateGoalProgressOnExpiredGoalsHandler() {
-	app.logger.Info("Starting the goal progress update handler..", zap.String("time", time.Now().String()))
+	app.logger.Info("Starting the goal progress update tracking cron job..", zap.String("time", time.Now().String()))
 	updateInterval := "0 0 * * *"
 
 	_, err := app.config.scheduler.trackGoalProgressStatus.AddFunc(updateInterval, app.trackGoalProgressStatus)
@@ -44,7 +45,7 @@ func (app *application) updateGoalProgressOnExpiredGoalsHandler() {
 // trackExpiredGroupInvitationsHandler() is a cronjob method that sets a cronJob to run at the end of every day
 // to track all the group invitations that have expired
 func (app *application) trackExpiredGroupInvitationsHandler() {
-	app.logger.Info("Starting the group invitation tracking handler..", zap.String("time", time.Now().String()))
+	app.logger.Info("Starting the group invitation tracking cron job..", zap.String("time", time.Now().String()))
 	updateInterval := "0 0 * * *"
 
 	_, err := app.config.scheduler.trackExpiredGroupInvitations.AddFunc(updateInterval, app.trackExpiredGroupInvitations)
@@ -60,7 +61,7 @@ func (app *application) trackExpiredGroupInvitationsHandler() {
 // trackRecurringExpensesHandler() is a cronjob method that sets a cronJob to run at the end of every day
 // to track all the recurring expenses for users
 func (app *application) trackRecurringExpensesHandler() {
-	app.logger.Info("Starting the recurring expenses tracking handler..", zap.String("time", time.Now().String()))
+	app.logger.Info("Starting the recurring expenses tracking cron job..", zap.String("time", time.Now().String()))
 	updateInterval := "0 0 * * *"
 
 	_, err := app.config.scheduler.trackRecurringExpenses.AddFunc(updateInterval, app.trackRecurringExpenses)
@@ -75,7 +76,7 @@ func (app *application) trackRecurringExpensesHandler() {
 
 // trackOverdueDebtsHandler() is the cronjob method that will track all overdue debts
 func (app *application) trackOverdueDebtsHandler() {
-	app.logger.Info("Starting the overdue debt tracking handler..", zap.String("time", time.Now().String()))
+	app.logger.Info("Starting the overdue debt tracking cron job..", zap.String("time", time.Now().String()))
 	updateInterval := "0 0 * * *"
 
 	_, err := app.config.scheduler.trackOverdueDebts.AddFunc(updateInterval, app.trackOverdueDebts)
@@ -88,10 +89,30 @@ func (app *application) trackOverdueDebtsHandler() {
 	app.config.scheduler.trackOverdueDebts.Start()
 }
 
+// trackExpiredNotificationsHandler() is the method called by the cronjob to track all expired notifications
+// Will run every night
+func (app *application) trackExpiredNotificationsHandler() {
+	app.logger.Info("Starting the expired notifications tracking cron job..", zap.String("time", time.Now().String()))
+	updateInterval := "0 0 * * *"
+
+	_, err := app.config.scheduler.trackRecurringExpenses.AddFunc(updateInterval, app.trackExpiredNotifications)
+	if err != nil {
+		app.logger.Error("Error adding [trackRecurringExpenses] to scheduler", zap.Error(err))
+	}
+	// Run the tracking first before starting the cron
+	app.trackExpiredNotifications()
+	// start the cron scheduler
+	app.config.scheduler.trackRecurringExpenses.Start()
+}
+
+// =================================================================================================================
+// Handler Functions
+// ==================================================================================================================
+
 // trackGoalProgressStatus() is the method called by the cronjob to update the progress of all the goals that have expired
 // It will be called every day at midnight to update the progress of the expired goals.
 func (app *application) trackGoalProgressStatus() {
-	app.logger.Info("Tracking goal progress status", zap.String("time", time.Now().String()))
+	app.logger.Info("Starting the goal progress status tracking cron job...", zap.String("time", time.Now().String()))
 	err := app.models.FinancialManager.UpdateGoalProgressOnExpiredGoals()
 	if err != nil {
 		switch {
@@ -109,7 +130,7 @@ func (app *application) trackGoalProgressStatus() {
 // 1. Get all the goals that are due for tracking
 // 2. Update the goals that are due for tracking
 func (app *application) trackMonthlyGoals() {
-	app.logger.Info("Tracking monthly goals", zap.String("time", time.Now().String()))
+	app.logger.Info("Starting the monthly goals tracking cron job...", zap.String("time", time.Now().String()))
 	now := time.Now()
 	if app.isLastDayOfMonth(now) {
 		trackedGoals, err := app.models.FinancialManager.GetAndSaveAllGoalsForTracking()
@@ -126,7 +147,7 @@ func (app *application) trackMonthlyGoals() {
 // trackExpiredGroupInvitations() is the method called by the cronjob to track all the group invitations that have expired
 // It will be called every day at midnight to update the expired group invitations.
 func (app *application) trackExpiredGroupInvitations() {
-	app.logger.Info("Tracking expired group invitations", zap.String("time", time.Now().String()))
+	app.logger.Info("Starting the expired group invitations tracking cron job..", zap.String("time", time.Now().String()))
 	err := app.models.FinancialGroupManager.UpdateExpiredGroupInvitations()
 	if err != nil {
 		app.logger.Error("Error tracking expired group invitations", zap.Error(err))
@@ -262,5 +283,56 @@ func (app *application) trackOverdueDebts() {
 		// Move to the next page
 		currentPage = metadata.CurrentPage + 1
 
+	}
+}
+
+// trackExpiredNotifications() is the method called by the cronjob to track all the notifications that have expired
+// It will be called every day at midnight to update the expired notifications.
+// We will use GetAllExpiredNotifications() to get all expired notifications passing in a filter
+// to provide the limit and offset. We will loop through them, updating the status of each notification
+// to expired saving them using UpdateNotificationReadAtAndStatus()
+func (app *application) trackExpiredNotifications() {
+	app.logger.Info("Tracking expired notifications", zap.String("time", time.Now().String()))
+	// Define burst size and start from the first page
+	burst := app.config.limit.expiredNotificationTrackerBurstLimit
+	currentPage := 1 // Start with page 1
+	for {
+		// Create filter with current page and burst size
+		filter := data.Filters{
+			Page:     currentPage,
+			PageSize: burst,
+		}
+		// Retrieve notifications that need to be tracked for the current page
+		expiredNotifications, metadata, err := app.models.NotificationManager.GetAllExpiredNotifications(filter)
+		if err != nil {
+			// Handle case where no more records are found, break out of the loop
+			if errors.Is(err, data.ErrGeneralRecordNotFound) {
+				app.logger.Info("No more expired notifications to track")
+				break
+			}
+			// Log any other errors and stop further processing
+			app.logger.Error("Error tracking expired notifications", zap.Error(err))
+			break
+		}
+		// Process each expired notification in the batch
+		for _, expiredNotification := range expiredNotifications {
+			// Update the status of the notification to expired
+			err := app.models.NotificationManager.UpdateNotificationReadAtAndStatus(
+				expiredNotification.ID,
+				sql.NullTime{Time: time.Time{}, Valid: false},
+				data.NotificationStatusTypeExpired,
+			)
+			if err != nil {
+				app.logger.Error("Error updating notification status to expired", zap.Error(err))
+				continue
+			}
+		}
+		// Check if this is the last page of records
+		if metadata.LastPage == metadata.CurrentPage {
+			app.logger.Info("All expired notifications processed. Ending tracking.")
+			break
+		}
+		// Move to the next page
+		currentPage = metadata.CurrentPage + 1
 	}
 }

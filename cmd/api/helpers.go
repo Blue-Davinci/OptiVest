@@ -20,6 +20,10 @@ import (
 	"go.uber.org/zap"
 )
 
+var (
+	ErrInvalidAuthentication = errors.New("invalid authentication token format")
+)
+
 // Define an envelope type.
 type envelope map[string]any
 
@@ -425,17 +429,18 @@ func (app *application) aunthenticatorHelper(r *http.Request) (*data.User, error
 	// using the invalidAuthenticationTokenResponse() helper
 	headerParts := strings.Split(authorizationHeader, " ")
 	if len(headerParts) != 2 || headerParts[0] != "Bearer" {
-		return nil, errors.New("invalid authentication token format")
+		return nil, ErrInvalidAuthentication
 	}
 	// Extract the actual authentication token from the header parts.
 	token := headerParts[1]
+	//app.logger.Info("User id Connected", zap.String("Connected ID", token))
 	// Validate the token to make sure it is in a sensible format.
 	v := validator.New()
 	// If the token isn't valid, use the invalidAuthenticationTokenResponse()
 	// helper to send a response, rather than the failedValidationResponse() helper
 	// that we'd normally use.
 	if data.ValidateTokenPlaintext(v, token); !v.Valid() {
-		return nil, errors.New("invalid authentication token")
+		return nil, ErrInvalidAuthentication
 	}
 	// Retrieve the details of the user associated with the authentication token,
 	// again calling the invalidAuthenticationTokenResponse() helper if no
@@ -443,7 +448,12 @@ func (app *application) aunthenticatorHelper(r *http.Request) (*data.User, error
 	// ScopeAuthentication as the first parameter here.
 	user, err := app.models.Users.GetForToken(data.ScopeAuthentication, token, app.config.encryption.key)
 	if err != nil {
-		return nil, err
+		switch {
+		case errors.Is(err, data.ErrGeneralRecordNotFound):
+			return nil, ErrInvalidAuthentication
+		default:
+			return nil, ErrInvalidAuthentication
+		}
 	}
 	return user, nil
 }

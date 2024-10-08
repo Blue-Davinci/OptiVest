@@ -42,9 +42,22 @@ func (app *application) recoverPanic(next http.Handler) http.Handler {
 
 func (app *application) authenticate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Add the "Vary: Authorization" header to the response. This indicates to any
+		// caches that the response may vary based on the value of the Authorization
+		// header in the request.
+		w.Header().Add("Vary", "Authorization")
+		// Retrieve the value of the Authorization header from the request. This will
+		// return the empty string "" if there is no such header found.
 		user, err := app.aunthenticatorHelper(r)
+		if user == data.AnonymousUser {
+			r = app.contextSetUser(r, data.AnonymousUser)
+			next.ServeHTTP(w, r)
+			return
+		}
 		if err != nil {
 			switch {
+			case errors.Is(err, ErrInvalidAuthentication):
+				app.invalidAuthenticationTokenResponse(w, r)
 			case errors.Is(err, data.ErrGeneralRecordNotFound):
 				app.invalidAuthenticationTokenResponse(w, r)
 			default:

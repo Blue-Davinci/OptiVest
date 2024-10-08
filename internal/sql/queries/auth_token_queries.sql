@@ -30,7 +30,9 @@ SELECT
     users.mfa_enabled,
     users.mfa_secret,
     users.mfa_status,
-    users.mfa_last_checked
+    users.mfa_last_checked,
+    users.risk_tolerance,
+    users.time_horizon
 FROM users
 INNER JOIN tokens
 ON users.id = tokens.user_id

@@ -99,11 +99,13 @@ type config struct {
 		trackExpiredGroupInvitations *cron.Cron
 		trackRecurringExpenses       *cron.Cron
 		trackOverdueDebts            *cron.Cron
+		trackExpiredNotifications    *cron.Cron
 	}
 	limit struct {
-		monthlyGoalProcessingBatchLimit   int
-		recurringExpenseTrackerBurstLimit int
-		overdueDebtTrackerBurstLimit      int
+		monthlyGoalProcessingBatchLimit      int
+		recurringExpenseTrackerBurstLimit    int
+		overdueDebtTrackerBurstLimit         int
+		expiredNotificationTrackerBurstLimit int
 	}
 }
 
@@ -192,6 +194,7 @@ func main() {
 	flag.IntVar(&cfg.limit.monthlyGoalProcessingBatchLimit, "monthly-goal-batch-limit", 100, "Batching Limit for Monthly Goal Processing")
 	flag.IntVar(&cfg.limit.recurringExpenseTrackerBurstLimit, "recurring-expense-burst-limit", 100, "Batch Limit for Recurring Expense Tracker")
 	flag.IntVar(&cfg.limit.overdueDebtTrackerBurstLimit, "overdue-debt-burst-limit", 100, "Batch Limit for Overdue Debt Tracker")
+	flag.IntVar(&cfg.limit.expiredNotificationTrackerBurstLimit, "expired-notification-burst-limit", 100, "Batch Limit for Expired Notification Tracker")
 	// Parse the flags
 	flag.Parse()
 	// Initialize our cronJobs
@@ -200,6 +203,7 @@ func main() {
 	cfg.scheduler.trackExpiredGroupInvitations = cron.New()
 	cfg.scheduler.trackRecurringExpenses = cron.New()
 	cfg.scheduler.trackOverdueDebts = cron.New()
+	cfg.scheduler.trackExpiredNotifications = cron.New()
 
 	// Create a new version boolean flag with the default value of false.
 	displayVersion := flag.Bool("version", false, "Display version and exit")
@@ -289,6 +293,7 @@ func (app *application) startSchedulers() {
 	go app.trackExpiredGroupInvitationsHandler()     // trackExpiredGroupInvitations
 	go app.trackRecurringExpensesHandler()           // trackRecurringExpenses
 	go app.trackOverdueDebtsHandler()                // trackOverdueDebts
+	go app.trackExpiredNotificationsHandler()        // trackExpiredNotification
 }
 
 // publishMetrics sets up the expvar variables for the application

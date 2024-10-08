@@ -22,10 +22,9 @@ INSERT INTO users (
     profile_completed,
     dob,
     address,
-    country_code,
-    currency_code
+    country_code
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
 )
 RETURNING id, created_at, updated_at, role_level, last_login, version, mfa_enabled, mfa_secret, mfa_status, mfa_last_checked
 `
@@ -41,7 +40,6 @@ type CreateNewUserParams struct {
 	Dob              time.Time
 	Address          sql.NullString
 	CountryCode      sql.NullString
-	CurrencyCode     sql.NullString
 }
 
 type CreateNewUserRow struct {
@@ -69,7 +67,6 @@ func (q *Queries) CreateNewUser(ctx context.Context, arg CreateNewUserParams) (C
 		arg.Dob,
 		arg.Address,
 		arg.CountryCode,
-		arg.CurrencyCode,
 	)
 	var i CreateNewUserRow
 	err := row.Scan(
@@ -110,7 +107,9 @@ SELECT
     mfa_enabled,
     mfa_secret,
     mfa_status,
-    mfa_last_checked
+    mfa_last_checked,
+    risk_tolerance,
+    time_horizon
 FROM users
 WHERE email = $1
 `
@@ -141,6 +140,8 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.MfaSecret,
 		&i.MfaStatus,
 		&i.MfaLastChecked,
+		&i.RiskTolerance,
+		&i.TimeHorizon,
 	)
 	return i, err
 }
@@ -167,8 +168,10 @@ SET
     mfa_enabled = $15,
     mfa_secret = $16,
     mfa_status = $17,
-    mfa_last_checked = $18
-WHERE id = $19 AND version = $20
+    mfa_last_checked = $18,
+    risk_tolerance = $19,
+    time_horizon = $20
+WHERE id = $21 AND version = $22
 RETURNING updated_at, version
 `
 
@@ -191,6 +194,8 @@ type UpdateUserParams struct {
 	MfaSecret        sql.NullString
 	MfaStatus        NullMfaStatusType
 	MfaLastChecked   sql.NullTime
+	RiskTolerance    NullRiskToleranceType
+	TimeHorizon      NullTimeHorizonType
 	ID               int64
 	Version          int32
 }
@@ -220,6 +225,8 @@ func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (UpdateU
 		arg.MfaSecret,
 		arg.MfaStatus,
 		arg.MfaLastChecked,
+		arg.RiskTolerance,
+		arg.TimeHorizon,
 		arg.ID,
 		arg.Version,
 	)

@@ -38,5 +38,5 @@ DROP INDEX IF EXISTS idx_notifications_user_id;
 DROP INDEX IF EXISTS idx_notifications_status;
 DROP INDEX IF EXISTS idx_notifications_expires_at;
 DROP TRIGGER IF EXISTS trigger_update_goals_tracking_timestamp ON notifications;
-DROP TYPE IF EXISTS notification_status;
 DROP TABLE IF EXISTS notifications;
+DROP TYPE IF EXISTS notification_status;

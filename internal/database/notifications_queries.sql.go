@@ -57,6 +57,83 @@ func (q *Queries) CreateNewNotification(ctx context.Context, arg CreateNewNotifi
 	return i, err
 }
 
+const getAllExpiredNotifications = `-- name: GetAllExpiredNotifications :many
+SELECT
+    COUNT(*) OVER() AS total_count,
+    id,
+    user_id,
+    message,
+    notification_type,
+    status,
+    created_at,
+    updated_at,
+    read_at,
+    expires_at,
+    meta,
+    redis_key
+FROM notifications
+WHERE expires_at < NOW()
+AND status = 'pending'
+ORDER BY created_at DESC
+LIMIT $1 OFFSET $2
+`
+
+type GetAllExpiredNotificationsParams struct {
+	Limit  int32
+	Offset int32
+}
+
+type GetAllExpiredNotificationsRow struct {
+	TotalCount       int64
+	ID               int64
+	UserID           int64
+	Message          string
+	NotificationType string
+	Status           NotificationStatus
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+	ReadAt           sql.NullTime
+	ExpiresAt        sql.NullTime
+	Meta             pqtype.NullRawMessage
+	RedisKey         sql.NullString
+}
+
+func (q *Queries) GetAllExpiredNotifications(ctx context.Context, arg GetAllExpiredNotificationsParams) ([]GetAllExpiredNotificationsRow, error) {
+	rows, err := q.db.QueryContext(ctx, getAllExpiredNotifications, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetAllExpiredNotificationsRow
+	for rows.Next() {
+		var i GetAllExpiredNotificationsRow
+		if err := rows.Scan(
+			&i.TotalCount,
+			&i.ID,
+			&i.UserID,
+			&i.Message,
+			&i.NotificationType,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.ReadAt,
+			&i.ExpiresAt,
+			&i.Meta,
+			&i.RedisKey,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getUnreadNotifications = `-- name: GetUnreadNotifications :many
 SELECT
     id,

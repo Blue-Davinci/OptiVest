@@ -141,9 +141,14 @@ func (app *application) wsInvalidAuthenticationResponse(conn *websocket.Conn) {
 
 // wsWebSocketUpgradeError() sends an error response when upgrading to WebSocket fails.
 func (app *application) wsWebSocketUpgradeError(conn *websocket.Conn) {
-	app.wsErrorResponse(conn, http.StatusInternalServerError, "Failed to upgrade to WebSocket")
-	conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "upgrade error"))
-	conn.Close()
+	// Only try to write to the connection if it's not nil
+	if conn != nil {
+		app.wsErrorResponse(conn, http.StatusInternalServerError, "Failed to upgrade to WebSocket")
+		conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "upgrade error"))
+		conn.Close()
+	} else {
+		app.logger.Error("No WebSocket connection to respond to")
+	}
 }
 
 // wsServerErrorRespomse() sends a server error response for WebSocket connection.

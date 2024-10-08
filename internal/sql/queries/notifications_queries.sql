@@ -33,3 +33,23 @@ SELECT
     redis_key
 FROM notifications
 WHERE user_id = $1 AND status = 'pending' AND expires_at > NOW();
+
+-- name: GetAllExpiredNotifications :many
+SELECT
+    COUNT(*) OVER() AS total_count,
+    id,
+    user_id,
+    message,
+    notification_type,
+    status,
+    created_at,
+    updated_at,
+    read_at,
+    expires_at,
+    meta,
+    redis_key
+FROM notifications
+WHERE expires_at < NOW()
+AND status = 'pending'
+ORDER BY created_at DESC
+LIMIT $1 OFFSET $2;

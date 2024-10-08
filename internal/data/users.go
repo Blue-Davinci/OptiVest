@@ -32,34 +32,46 @@ const (
 	RedisMFALoginPendingPrefix = "mfa_login_pending"
 )
 
+const (
+	RiskToleranceTypeLow    = database.RiskToleranceTypeLow
+	RiskToleranceTypeMedium = database.RiskToleranceTypeMedium
+	RiskToleranceTypeHigh   = database.RiskToleranceTypeHigh
+
+	TimeHorizonTypeShort  = database.TimeHorizonTypeShort
+	TimeHorizonTypeMedium = database.TimeHorizonTypeMedium
+	TimeHorizonTypeLong   = database.TimeHorizonTypeLong
+)
+
 type UserModel struct {
 	DB *database.Queries
 }
 
 // User represents a user in the system.
 type User struct {
-	ID               int64                  `json:"id"`                 // Unique user ID
-	FirstName        string                 `json:"first_name"`         // First name
-	LastName         string                 `json:"last_name"`          // Last name
-	Email            string                 `json:"email"`              // Case-insensitive email, must be unique
-	ProfileAvatarURL string                 `json:"profile_avatar_url"` // URL to user's profile picture
-	Password         password               `json:"-"`                  // Securely stored password hash (bcrypt)
-	UserRole         string                 `json:"user_role"`          // User Role
-	PhoneNumber      string                 `json:"phone_number"`       // Phone number for multi-factor authentication (MFA)
-	Activated        bool                   `json:"activated"`          // Account activation status (email confirmation, etc.)
-	Version          int32                  `json:"version"`            // Record versioning for optimistic locking
-	CreatedAt        time.Time              `json:"created_at"`         // Timestamp of account creation
-	UpdatedAt        time.Time              `json:"updated_at"`         // Timestamp for last update (e.g., profile changes)
-	LastLogin        time.Time              `json:"last_login"`         // Track the user's last login time
-	ProfileCompleted bool                   `json:"profile_completed"`  // Whether the user completed full profile
-	DOB              time.Time              `json:"dob"`                // Date of Birth (for financial regulations)
-	Address          string                 `json:"address,omitempty"`  // Optional address for KYC requirements
-	CountryCode      string                 `json:"country_code"`       // Two-letter ISO country code for region-specific financial services
-	CurrencyCode     string                 `json:"currency_code"`      // Default currency (ISO 4217) for transactions and accounts
-	MFAEnabled       bool                   `json:"mfa_enabled"`        // Multi-factor authentication (MFA) enabled
-	MFASecret        string                 `json:"mfa_secret"`         // Secret key for TOTP-based MFA
-	MFAStatus        database.MfaStatusType `json:"mfa_status"`         // Status of MFA (pending, accepted, rejected)
-	MFALastChecked   *time.Time             `json:"mfa_last_checked"`   // Timestamp of the last MFA check, can be NULL
+	ID               int64                          `json:"id"`                 // Unique user ID
+	FirstName        string                         `json:"first_name"`         // First name
+	LastName         string                         `json:"last_name"`          // Last name
+	Email            string                         `json:"email"`              // Case-insensitive email, must be unique
+	ProfileAvatarURL string                         `json:"profile_avatar_url"` // URL to user's profile picture
+	Password         password                       `json:"-"`                  // Securely stored password hash (bcrypt)
+	UserRole         string                         `json:"user_role"`          // User Role
+	PhoneNumber      string                         `json:"phone_number"`       // Phone number for multi-factor authentication (MFA)
+	Activated        bool                           `json:"activated"`          // Account activation status (email confirmation, etc.)
+	Version          int32                          `json:"version"`            // Record versioning for optimistic locking
+	CreatedAt        time.Time                      `json:"created_at"`         // Timestamp of account creation
+	UpdatedAt        time.Time                      `json:"updated_at"`         // Timestamp for last update (e.g., profile changes)
+	LastLogin        time.Time                      `json:"last_login"`         // Track the user's last login time
+	ProfileCompleted bool                           `json:"profile_completed"`  // Whether the user completed full profile
+	DOB              time.Time                      `json:"dob"`                // Date of Birth (for financial regulations)
+	Address          string                         `json:"address,omitempty"`  // Optional address for KYC requirements
+	CountryCode      string                         `json:"country_code"`       // Two-letter ISO country code for region-specific financial services
+	CurrencyCode     string                         `json:"currency_code"`      // Default currency (ISO 4217) for transactions and accounts
+	MFAEnabled       bool                           `json:"mfa_enabled"`        // Multi-factor authentication (MFA) enabled
+	MFASecret        string                         `json:"mfa_secret"`         // Secret key for TOTP-based MFA
+	MFAStatus        database.MfaStatusType         `json:"mfa_status"`         // Status of MFA (pending, accepted, rejected)
+	MFALastChecked   *time.Time                     `json:"mfa_last_checked"`   // Timestamp of the last MFA check, can be NULL
+	RiskTolerance    database.NullRiskToleranceType `json:"risk_tolerance"`     // Risk Tolerance Level, low, medium, high
+	TimeHorizon      database.NullTimeHorizonType   `json:"time_horizon"`       // Time Horizon Level, short, medium, long
 }
 
 // Define a custom ErrDuplicateEmail error.
@@ -167,6 +179,34 @@ func ValidateUser(v *validator.Validator, user *User) {
 	}
 }
 
+// MapRiskToleranceTypeToConstant() maps a string representation of a risk tolerance level
+func (m UserModel) MapRiskToleranceTypeToConstant(riskTolerance string) database.RiskToleranceType {
+	switch riskTolerance {
+	case "low":
+		return RiskToleranceTypeLow
+	case "medium":
+		return RiskToleranceTypeMedium
+	case "high":
+		return RiskToleranceTypeHigh
+	default:
+		return RiskToleranceTypeMedium
+	}
+}
+
+// MapTimeHorizonTypeToConstant() maps a string representation of a time horizon level
+func (m UserModel) MapTimeHorizonTypeToConstant(timeHorizon string) database.TimeHorizonType {
+	switch timeHorizon {
+	case "short":
+		return TimeHorizonTypeShort
+	case "medium":
+		return TimeHorizonTypeMedium
+	case "long":
+		return TimeHorizonTypeLong
+	default:
+		return TimeHorizonTypeMedium
+	}
+}
+
 // CreateNewUser() creates a new user in the database. The function takes a pointer to a User struct
 // and an encryption key as input. We decrypt the key, use it to encrypt necessary items before we save
 // it back to the DB.
@@ -195,7 +235,6 @@ func (m UserModel) CreateNewUser(user *User, encryption_key string) error {
 		Dob:              user.DOB,
 		Address:          sql.NullString{String: user.Address, Valid: user.Address != ""},
 		CountryCode:      sql.NullString{String: user.CountryCode, Valid: user.CountryCode != ""},
-		CurrencyCode:     sql.NullString{String: user.CurrencyCode, Valid: user.CurrencyCode != ""},
 	})
 	// check for any error and if it is a constraint violation
 	if err != nil {
@@ -327,6 +366,8 @@ func (m UserModel) UpdateUser(user *User, encryption_key string) error {
 		MfaSecret:        sql.NullString{String: user.MFASecret, Valid: user.MFASecret != ""},
 		MfaStatus:        database.NullMfaStatusType{MfaStatusType: database.MfaStatusTypeAccepted, Valid: true},
 		MfaLastChecked:   sql.NullTime{Time: *user.MFALastChecked, Valid: user.MFALastChecked != nil},
+		RiskTolerance:    user.RiskTolerance,
+		TimeHorizon:      user.TimeHorizon,
 		ID:               user.ID,
 		Version:          int32(user.Version),
 	})
@@ -388,6 +429,8 @@ func populateUser(userRow interface{}, decryptedNumber string) *User {
 			MFASecret:        user.MfaSecret.String,
 			MFAStatus:        user.MfaStatus.MfaStatusType,
 			MFALastChecked:   &user.MfaLastChecked.Time,
+			RiskTolerance:    user.RiskTolerance,
+			TimeHorizon:      user.TimeHorizon,
 		}
 
 	// Default case: Returns nil if the input type does not match any supported types.

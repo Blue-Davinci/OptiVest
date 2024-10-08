@@ -274,6 +274,92 @@ func (ns NullRecurrenceIntervalEnum) Value() (driver.Value, error) {
 	return string(ns.RecurrenceIntervalEnum), nil
 }
 
+type RiskToleranceType string
+
+const (
+	RiskToleranceTypeLow    RiskToleranceType = "low"
+	RiskToleranceTypeMedium RiskToleranceType = "medium"
+	RiskToleranceTypeHigh   RiskToleranceType = "high"
+)
+
+func (e *RiskToleranceType) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = RiskToleranceType(s)
+	case string:
+		*e = RiskToleranceType(s)
+	default:
+		return fmt.Errorf("unsupported scan type for RiskToleranceType: %T", src)
+	}
+	return nil
+}
+
+type NullRiskToleranceType struct {
+	RiskToleranceType RiskToleranceType
+	Valid             bool // Valid is true if RiskToleranceType is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullRiskToleranceType) Scan(value interface{}) error {
+	if value == nil {
+		ns.RiskToleranceType, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.RiskToleranceType.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullRiskToleranceType) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.RiskToleranceType), nil
+}
+
+type TimeHorizonType string
+
+const (
+	TimeHorizonTypeShort  TimeHorizonType = "short"
+	TimeHorizonTypeMedium TimeHorizonType = "medium"
+	TimeHorizonTypeLong   TimeHorizonType = "long"
+)
+
+func (e *TimeHorizonType) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = TimeHorizonType(s)
+	case string:
+		*e = TimeHorizonType(s)
+	default:
+		return fmt.Errorf("unsupported scan type for TimeHorizonType: %T", src)
+	}
+	return nil
+}
+
+type NullTimeHorizonType struct {
+	TimeHorizonType TimeHorizonType
+	Valid           bool // Valid is true if TimeHorizonType is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullTimeHorizonType) Scan(value interface{}) error {
+	if value == nil {
+		ns.TimeHorizonType, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.TimeHorizonType.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullTimeHorizonType) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.TimeHorizonType), nil
+}
+
 type TrackingTypeEnum string
 
 const (
@@ -532,6 +618,21 @@ type RecurringExpense struct {
 	UpdatedAt          sql.NullTime
 }
 
+type StockInvestment struct {
+	ID                     int64
+	UserID                 int64
+	StockSymbol            string
+	Quantity               string
+	PurchasePrice          string
+	CurrentValue           string
+	Sector                 sql.NullString
+	PurchaseDate           time.Time
+	DividendYield          sql.NullString
+	DividendYieldUpdatedAt sql.NullTime
+	CreatedAt              sql.NullTime
+	UpdatedAt              sql.NullTime
+}
+
 type Token struct {
 	Hash   []byte
 	UserID int64
@@ -562,4 +663,6 @@ type User struct {
 	MfaSecret        sql.NullString
 	MfaStatus        NullMfaStatusType
 	MfaLastChecked   sql.NullTime
+	RiskTolerance    NullRiskToleranceType
+	TimeHorizon      NullTimeHorizonType
 }

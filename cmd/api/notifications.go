@@ -26,7 +26,8 @@ func (app *application) wsHandler(w http.ResponseWriter, r *http.Request) {
 	conn, err := app.WebSocketUpgrader.Upgrade(w, r, nil)
 	if err != nil {
 		app.logger.Error("WebSocket upgrade error", zap.Error(err))
-		app.wsWebSocketUpgradeError(conn)
+		// Call the error response function without the connection
+		app.wsWebSocketUpgradeError(nil) // Pass nil since the connection upgrade failed
 		return
 	}
 	// Check if we have reached the maximum number of connections
@@ -36,7 +37,7 @@ func (app *application) wsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	// Authenticate the user
 	user, err := app.authenticateWSUser(r)
-	if err != nil {
+	if err != nil || user == nil {
 		app.wsInvalidAuthenticationResponse(conn)
 		return
 	}
@@ -310,7 +311,9 @@ func (app *application) publishNotification(userID int64, notificationContent da
 			data.NotificationStatusTypeDelivered,
 		)
 		if err != nil {
-			return fmt.Errorf("error updating notification status: %v", err)
+			message := err.Error()
+			app.logger.Info("Failed to update the notification status", zap.String("Message:", message))
+			//return fmt.Errorf("error updating notification status: %v", err)
 		}
 		return app.RedisDB.Publish(context.Background(), channel, notificationData).Err()
 	} else {
@@ -320,9 +323,15 @@ func (app *application) publishNotification(userID int64, notificationContent da
 			return fmt.Errorf("error marshalling notification content to JSON: %v", err)
 		}
 		// user is offline, save to REDIS
-		err = app.RedisDB.HSet(ctx, pendingKey, strconv.FormatInt(notificationContent.NotificationID, 10), notificationData, data.DefaultRedisNotificationTTLDuration).Err()
+		err = app.RedisDB.HSet(ctx, pendingKey, strconv.FormatInt(notificationContent.NotificationID, 10), notificationData).Err()
 		if err != nil {
 			return fmt.Errorf("error saving notification to REDIS: %v", err)
+		}
+
+		// Set the TTL for the pending notification
+		err = app.RedisDB.Expire(ctx, pendingKey, data.DefaultRedisNotificationTTLDuration).Err()
+		if err != nil {
+			return fmt.Errorf("error setting TTL for pending notification: %v", err)
 		}
 		// update notification to pending
 		err = app.models.NotificationManager.UpdateNotificationReadAtAndStatus(
@@ -347,16 +356,21 @@ func (app *application) authenticateWSUser(r *http.Request) (*data.User, error) 
 	if err != nil {
 		return nil, err
 	}
+	if user == data.AnonymousUser {
+		app.logger.Info("Anonymous user detected")
+		return nil, data.ErrGeneralRecordNotFound
+	}
+	//app.logger.Info("Obtained a user with this ID", zap.Int64("Connected ID", user.ID))
 	return user, nil
 }
 
 func (app *application) simulateGoalCompletionNotifications() {
 	pendingKey := fmt.Sprintf("%s:%d", data.RedisNotManPendingNotificationKey, 1)
 	for {
-		time.Sleep(13 * time.Second) // Simulate goal completion
+		time.Sleep(5 * time.Second) // Simulate goal completion
 		// send notification vial pubishNotification
 		notificationContent := data.NotificationContent{
-			NotificationID: 2,
+			NotificationID: 1,
 			Message:        "Congratulations! You have completed your goal.",
 			Meta: data.NotificationMeta{
 				Url:      "https://example.com/goals/1",

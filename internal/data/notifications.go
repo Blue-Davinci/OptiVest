@@ -148,9 +148,64 @@ func (m NotificationManagerModel) GetUnreadNotifications(userID int64) ([]*Notif
 	return notifications, nil
 }
 
+// GetAllExpiredNotifications() gets all the expired notifications for a user i.e
+// all notifications that are marked as pending and also whose expired at time
+// is less than the now.
+// We take in a filter and return a slice of notifications and an error if there was an issue.
+func (m NotificationManagerModel) GetAllExpiredNotifications(filters Filters) ([]*Notification, Metadata, error) {
+	ctx, cancel := contextGenerator(context.Background(), DefualtNotManContextTimeout)
+	defer cancel()
+	// Get all the expired notifications from the database
+	notificationsRows, err := m.DB.GetAllExpiredNotifications(ctx, database.GetAllExpiredNotificationsParams{
+		Limit:  int32(filters.limit()),
+		Offset: int32(filters.offset()),
+	})
+	if err != nil {
+		switch {
+		case err == sql.ErrNoRows:
+			return nil, Metadata{}, ErrGeneralRecordNotFound
+		default:
+			return nil, Metadata{}, err
+		}
+	}
+	// check for empty notifications and return
+	if len(notificationsRows) == 0 {
+		fmt.Println("No notifications found")
+		return nil, Metadata{}, ErrGeneralRecordNotFound
+	}
+
+	// create a slice of notifications
+	notifications := []*Notification{}
+	fmt.Println("First notification ID: ", notificationsRows[0].ID)
+	totalNotifications := 0
+	// loop through using the populate function to fill in the notification struct
+	for _, notification := range notificationsRows {
+		totalNotifications = int(notification.TotalCount)
+		notifications = append(notifications, populateNotification(notification))
+	}
+	// make metadata struct
+	metadata := calculateMetadata(totalNotifications, filters.Page, filters.PageSize)
+	// return the notifications if there was no error
+	return notifications, metadata, nil
+}
+
 func populateNotification(notificationRow interface{}) *Notification {
 	switch notification := notificationRow.(type) {
 	case database.Notification:
+		return &Notification{
+			ID:               notification.ID,
+			UserID:           notification.UserID,
+			Message:          notification.Message,
+			NotificationType: notification.NotificationType,
+			Status:           notification.Status,
+			CreatedAt:        notification.CreatedAt,
+			UpdatedAt:        notification.UpdatedAt,
+			ReadAt:           &notification.ReadAt.Time,
+			ExpiresAt:        &notification.ExpiresAt.Time,
+			Meta:             notification.Meta.RawMessage,
+			RedisKey:         &notification.RedisKey.String,
+		}
+	case database.GetAllExpiredNotificationsRow:
 		return &Notification{
 			ID:               notification.ID,
 			UserID:           notification.UserID,

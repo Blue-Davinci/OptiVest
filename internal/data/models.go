@@ -14,23 +14,25 @@ var (
 )
 
 type Models struct {
-	Users                    UserModel
-	Tokens                   TokenModel
-	ApiManager               ApiManagerModel
-	FinancialManager         FinancialManagerModel
-	FinancialGroupManager    FinancialGroupManagerModel
-	FinancialTrackingManager FinancialTrackingModel
-	NotificationManager      NotificationManagerModel
+	Users                      UserModel
+	Tokens                     TokenModel
+	ApiManager                 ApiManagerModel
+	FinancialManager           FinancialManagerModel
+	FinancialGroupManager      FinancialGroupManagerModel
+	FinancialTrackingManager   FinancialTrackingModel
+	NotificationManager        NotificationManagerModel
+	InvestmentPortfolioManager InvestmentPortfolioModel
 }
 
 func NewModels(db *database.Queries) Models {
 	return Models{
-		Users:                    UserModel{DB: db},
-		Tokens:                   TokenModel{DB: db},
-		ApiManager:               ApiManagerModel{DB: db},
-		FinancialManager:         FinancialManagerModel{DB: db},
-		FinancialGroupManager:    FinancialGroupManagerModel{DB: db},
-		FinancialTrackingManager: FinancialTrackingModel{DB: db},
-		NotificationManager:      NotificationManagerModel{DB: db},
+		Users:                      UserModel{DB: db},
+		Tokens:                     TokenModel{DB: db},
+		ApiManager:                 ApiManagerModel{DB: db},
+		FinancialManager:           FinancialManagerModel{DB: db},
+		FinancialGroupManager:      FinancialGroupManagerModel{DB: db},
+		FinancialTrackingManager:   FinancialTrackingModel{DB: db},
+		NotificationManager:        NotificationManagerModel{DB: db},
+		InvestmentPortfolioManager: InvestmentPortfolioModel{DB: db},
 	}
 }
