@@ -457,3 +457,97 @@ func (app *application) aunthenticatorHelper(r *http.Request) (*data.User, error
 	}
 	return user, nil
 }
+
+// investmentTransactionValidatorHelper() is a helper validation function for the investment transaction handler
+// We take in a user ID and a *transaction struct. We extract the investmentID, from there we get the investment type
+// Depending on that investment type i.e (stock,bond,alternative), we check if that ID exists for that user
+// in the respective table
+// If it does not exist, we add an error to the validator
+func (app *application) investmentTransactionValidatorHelper(v *validator.Validator, transaction *data.InvestmentTransaction) interface{} {
+	var investment interface{}
+	// check if the investment exists
+	switch transaction.InvestmentType {
+	case data.InvPortInvestmentTypeStock:
+		stock, err := app.models.InvestmentPortfolioManager.GetStockByStockID(transaction.InvestmentID)
+		if err != nil {
+			v.AddError("investment_id", "stock investment does not exist")
+		}
+		investment = stock
+	case data.InvPortInvestmentTypeBond:
+		bond, err := app.models.InvestmentPortfolioManager.GetBondByBondID(transaction.InvestmentID)
+		if err != nil {
+			v.AddError("investment_id", "bond investment does not exist")
+		}
+		investment = bond
+	case data.InvPortInvestmentTypeAlternative:
+		alternative, err := app.models.InvestmentPortfolioManager.GetAlternativeInvestmentByAlternativeID(transaction.InvestmentID)
+		if err != nil {
+			v.AddError("investment_id", "alternative investment does not exist")
+		}
+		investment = alternative
+	default:
+		v.AddError("investment_type", "invalid investment type")
+		investment = nil
+	}
+	return investment
+}
+
+// updateInvestmentTransactionHelper() This will update the relevant table record when there is a new transaction
+// when a buy or sell is made, we update the quantity and the current value of the investment
+// we need to recieve the type of transaction and an interface which we need to cast to the correct type
+// Then all we update is the quantity, if transaction type is sell, we substract the quantity
+// if transaction type is buy, we add the quantity. Each unique investment type will have its own
+// case for this function in terms of updates i.e stock, bond and alternative
+func (app *application) updateInvestmentTransactionHelper(userID int64, transactionType string, transactionQuantity decimal.Decimal, investment interface{}) error {
+	switch transactionType {
+	case "buy":
+		switch t := investment.(type) {
+		case *data.StockInvestment:
+			t.Quantity = t.Quantity.Add(transactionQuantity)
+			// update passing the fully updated struct
+			err := app.models.InvestmentPortfolioManager.UpdateStockInvestment(userID, t)
+			if err != nil {
+				return err
+			}
+		case *data.BondInvestment:
+			t.Quantity = t.Quantity.Add(transactionQuantity)
+			// update passing the fully updated struct
+			err := app.models.InvestmentPortfolioManager.UpdateBondInvestment(userID, t)
+			if err != nil {
+				return err
+			}
+		case *data.AlternativeInvestment:
+			t.Quantity = t.Quantity.Add(transactionQuantity)
+			// update passing the fully updated struct
+			err := app.models.InvestmentPortfolioManager.UpdateAlternativeInvestment(userID, t)
+			if err != nil {
+				return err
+			}
+		}
+	case "sell":
+		switch t := investment.(type) {
+		case *data.StockInvestment:
+			t.Quantity = t.Quantity.Sub(transactionQuantity)
+			// update passing the fully updated struct
+			err := app.models.InvestmentPortfolioManager.UpdateStockInvestment(userID, t)
+			if err != nil {
+				return err
+			}
+		case *data.BondInvestment:
+			t.Quantity = t.Quantity.Sub(transactionQuantity)
+			// update passing the fully updated struct
+			err := app.models.InvestmentPortfolioManager.UpdateBondInvestment(userID, t)
+			if err != nil {
+				return err
+			}
+		case *data.AlternativeInvestment:
+			t.Quantity = t.Quantity.Sub(transactionQuantity)
+			// update passing the fully updated struct
+			err := app.models.InvestmentPortfolioManager.UpdateAlternativeInvestment(userID, t)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}

@@ -1,11 +1,11 @@
 -- +goose Up
 CREATE TABLE bond_investments (
     id BIGSERIAL PRIMARY KEY,                          -- Unique bond investment ID
-    user_id BIGSERIAL REFERENCES Users(id) ON DELETE CASCADE,  -- Reference to the user, cascade on delete
+    user_id BIGSERIAL NOT NULL REFERENCES Users(id) ON DELETE CASCADE,  -- Reference to the user, cascade on delete
     bond_symbol VARCHAR(10) NOT NULL,                  -- Bond symbol, cannot be null
-    quantity INT CHECK (quantity > 0),                 -- Quantity must be a positive integer
-    purchase_price DECIMAL(15, 2) CHECK (purchase_price >= 0), -- Purchase price cannot be negative
-    current_value DECIMAL(15, 2) CHECK (current_value >= 0),   -- Current value cannot be negative
+    quantity DECIMAL(15, 2) NOT NULL CHECK (quantity > 0),                 -- Quantity must be a positive integer
+    purchase_price DECIMAL(15, 2) NOT NULL CHECK (purchase_price >= 0), -- Purchase price cannot be negative
+    current_value DECIMAL(15, 2) NOT NULL CHECK (current_value >= 0),   -- Current value cannot be negative
     coupon_rate DECIMAL(5, 2) CHECK (current_value >= 0),        -- Coupon rate should be a non-negative percentage
     maturity_date DATE NOT NULL,                       -- Maturity date for the bond, must be specified
     purchase_date DATE NOT NULL,                       -- Purchase date is mandatory

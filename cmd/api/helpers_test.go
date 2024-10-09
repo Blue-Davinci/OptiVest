@@ -24,7 +24,7 @@ func Test_application_isProfileComplete(t *testing.T) {
 				user: &data.User{
 					FirstName:    "John",
 					LastName:     "Doe",
-					Email:        "john.doe@example.com",
+					Email:        "john1.doe@example.com",
 					PhoneNumber:  "1234567890",
 					DOB:          time.Date(1990, time.January, 1, 0, 0, 0, 0, time.UTC),
 					Address:      "123 Main St",

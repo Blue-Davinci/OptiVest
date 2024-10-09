@@ -56,6 +56,49 @@ func (ns NullGoalStatus) Value() (driver.Value, error) {
 	return string(ns.GoalStatus), nil
 }
 
+type InvestmentTypeEnum string
+
+const (
+	InvestmentTypeEnumStock       InvestmentTypeEnum = "Stock"
+	InvestmentTypeEnumBond        InvestmentTypeEnum = "Bond"
+	InvestmentTypeEnumAlternative InvestmentTypeEnum = "Alternative"
+)
+
+func (e *InvestmentTypeEnum) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = InvestmentTypeEnum(s)
+	case string:
+		*e = InvestmentTypeEnum(s)
+	default:
+		return fmt.Errorf("unsupported scan type for InvestmentTypeEnum: %T", src)
+	}
+	return nil
+}
+
+type NullInvestmentTypeEnum struct {
+	InvestmentTypeEnum InvestmentTypeEnum
+	Valid              bool // Valid is true if InvestmentTypeEnum is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullInvestmentTypeEnum) Scan(value interface{}) error {
+	if value == nil {
+		ns.InvestmentTypeEnum, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.InvestmentTypeEnum.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullInvestmentTypeEnum) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.InvestmentTypeEnum), nil
+}
+
 type InvitationStatusType string
 
 const (
@@ -403,6 +446,80 @@ func (ns NullTrackingTypeEnum) Value() (driver.Value, error) {
 	return string(ns.TrackingTypeEnum), nil
 }
 
+type TransactionTypeEnum string
+
+const (
+	TransactionTypeEnumBuy   TransactionTypeEnum = "buy"
+	TransactionTypeEnumSell  TransactionTypeEnum = "sell"
+	TransactionTypeEnumOther TransactionTypeEnum = "other"
+)
+
+func (e *TransactionTypeEnum) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = TransactionTypeEnum(s)
+	case string:
+		*e = TransactionTypeEnum(s)
+	default:
+		return fmt.Errorf("unsupported scan type for TransactionTypeEnum: %T", src)
+	}
+	return nil
+}
+
+type NullTransactionTypeEnum struct {
+	TransactionTypeEnum TransactionTypeEnum
+	Valid               bool // Valid is true if TransactionTypeEnum is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullTransactionTypeEnum) Scan(value interface{}) error {
+	if value == nil {
+		ns.TransactionTypeEnum, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.TransactionTypeEnum.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullTransactionTypeEnum) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.TransactionTypeEnum), nil
+}
+
+type AlternativeInvestment struct {
+	ID                 int64
+	UserID             int64
+	InvestmentType     string
+	InvestmentName     sql.NullString
+	IsBusiness         bool
+	Quantity           sql.NullString
+	AnnualRevenue      sql.NullString
+	AcquiredAt         time.Time
+	ProfitMargin       sql.NullString
+	Valuation          string
+	ValuationUpdatedAt sql.NullTime
+	Location           sql.NullString
+	CreatedAt          sql.NullTime
+	UpdatedAt          sql.NullTime
+}
+
+type BondInvestment struct {
+	ID            int64
+	UserID        int64
+	BondSymbol    string
+	Quantity      string
+	PurchasePrice string
+	CurrentValue  string
+	CouponRate    sql.NullString
+	MaturityDate  time.Time
+	PurchaseDate  time.Time
+	CreatedAt     sql.NullTime
+	UpdatedAt     sql.NullTime
+}
+
 type Budget struct {
 	ID             int64
 	UserID         int64
@@ -588,6 +705,19 @@ type Income struct {
 	DateReceived         time.Time
 	CreatedAt            sql.NullTime
 	UpdatedAt            sql.NullTime
+}
+
+type InvestmentTransaction struct {
+	ID                int64
+	UserID            int64
+	InvestmentType    InvestmentTypeEnum
+	InvestmentID      int64
+	TransactionType   TransactionTypeEnum
+	TransactionDate   time.Time
+	TransactionAmount string
+	Quantity          string
+	CreatedAt         sql.NullTime
+	UpdatedAt         sql.NullTime
 }
 
 type Notification struct {

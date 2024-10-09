@@ -11,6 +11,159 @@ import (
 	"time"
 )
 
+const createNewAlternativeInvestment = `-- name: CreateNewAlternativeInvestment :one
+INSERT INTO alternative_investments (
+    user_id,
+    investment_type,
+    investment_name,
+    is_business,
+    quantity,
+    annual_revenue,
+    acquired_at,
+    profit_margin,
+    valuation,
+    location
+) 
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+RETURNING id, valuation_updated_at,created_at, updated_at
+`
+
+type CreateNewAlternativeInvestmentParams struct {
+	UserID         int64
+	InvestmentType string
+	InvestmentName sql.NullString
+	IsBusiness     bool
+	Quantity       sql.NullString
+	AnnualRevenue  sql.NullString
+	AcquiredAt     time.Time
+	ProfitMargin   sql.NullString
+	Valuation      string
+	Location       sql.NullString
+}
+
+type CreateNewAlternativeInvestmentRow struct {
+	ID                 int64
+	ValuationUpdatedAt sql.NullTime
+	CreatedAt          sql.NullTime
+	UpdatedAt          sql.NullTime
+}
+
+func (q *Queries) CreateNewAlternativeInvestment(ctx context.Context, arg CreateNewAlternativeInvestmentParams) (CreateNewAlternativeInvestmentRow, error) {
+	row := q.db.QueryRowContext(ctx, createNewAlternativeInvestment,
+		arg.UserID,
+		arg.InvestmentType,
+		arg.InvestmentName,
+		arg.IsBusiness,
+		arg.Quantity,
+		arg.AnnualRevenue,
+		arg.AcquiredAt,
+		arg.ProfitMargin,
+		arg.Valuation,
+		arg.Location,
+	)
+	var i CreateNewAlternativeInvestmentRow
+	err := row.Scan(
+		&i.ID,
+		&i.ValuationUpdatedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const createNewBondInvestment = `-- name: CreateNewBondInvestment :one
+INSERT INTO bond_investments (
+    user_id, 
+    bond_symbol, 
+    quantity, 
+    purchase_price, 
+    current_value, 
+    coupon_rate, 
+    maturity_date, 
+    purchase_date
+) 
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8            
+) RETURNING id, created_at, updated_at
+`
+
+type CreateNewBondInvestmentParams struct {
+	UserID        int64
+	BondSymbol    string
+	Quantity      string
+	PurchasePrice string
+	CurrentValue  string
+	CouponRate    sql.NullString
+	MaturityDate  time.Time
+	PurchaseDate  time.Time
+}
+
+type CreateNewBondInvestmentRow struct {
+	ID        int64
+	CreatedAt sql.NullTime
+	UpdatedAt sql.NullTime
+}
+
+func (q *Queries) CreateNewBondInvestment(ctx context.Context, arg CreateNewBondInvestmentParams) (CreateNewBondInvestmentRow, error) {
+	row := q.db.QueryRowContext(ctx, createNewBondInvestment,
+		arg.UserID,
+		arg.BondSymbol,
+		arg.Quantity,
+		arg.PurchasePrice,
+		arg.CurrentValue,
+		arg.CouponRate,
+		arg.MaturityDate,
+		arg.PurchaseDate,
+	)
+	var i CreateNewBondInvestmentRow
+	err := row.Scan(&i.ID, &i.CreatedAt, &i.UpdatedAt)
+	return i, err
+}
+
+const createNewInvestmentTransaction = `-- name: CreateNewInvestmentTransaction :one
+INSERT INTO investment_transactions (
+    user_id,
+    investment_type,
+    investment_id,
+    transaction_type,
+    transaction_date,
+    transaction_amount,
+    quantity
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING id, created_at, updated_at
+`
+
+type CreateNewInvestmentTransactionParams struct {
+	UserID            int64
+	InvestmentType    InvestmentTypeEnum
+	InvestmentID      int64
+	TransactionType   TransactionTypeEnum
+	TransactionDate   time.Time
+	TransactionAmount string
+	Quantity          string
+}
+
+type CreateNewInvestmentTransactionRow struct {
+	ID        int64
+	CreatedAt sql.NullTime
+	UpdatedAt sql.NullTime
+}
+
+func (q *Queries) CreateNewInvestmentTransaction(ctx context.Context, arg CreateNewInvestmentTransactionParams) (CreateNewInvestmentTransactionRow, error) {
+	row := q.db.QueryRowContext(ctx, createNewInvestmentTransaction,
+		arg.UserID,
+		arg.InvestmentType,
+		arg.InvestmentID,
+		arg.TransactionType,
+		arg.TransactionDate,
+		arg.TransactionAmount,
+		arg.Quantity,
+	)
+	var i CreateNewInvestmentTransactionRow
+	err := row.Scan(&i.ID, &i.CreatedAt, &i.UpdatedAt)
+	return i, err
+}
+
 const createNewStockInvestment = `-- name: CreateNewStockInvestment :one
 INSERT INTO
     stock_investments (
@@ -61,6 +214,156 @@ func (q *Queries) CreateNewStockInvestment(ctx context.Context, arg CreateNewSto
 	err := row.Scan(
 		&i.ID,
 		&i.DividendYieldUpdatedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const deleteAlternativeInvestmentByID = `-- name: DeleteAlternativeInvestmentByID :one
+DELETE FROM alternative_investments
+WHERE id = $1 AND user_id = $2
+RETURNING id
+`
+
+type DeleteAlternativeInvestmentByIDParams struct {
+	ID     int64
+	UserID int64
+}
+
+func (q *Queries) DeleteAlternativeInvestmentByID(ctx context.Context, arg DeleteAlternativeInvestmentByIDParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, deleteAlternativeInvestmentByID, arg.ID, arg.UserID)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const deleteBondInvestmentByID = `-- name: DeleteBondInvestmentByID :one
+DELETE FROM bond_investments
+WHERE id = $1 AND user_id = $2
+RETURNING id
+`
+
+type DeleteBondInvestmentByIDParams struct {
+	ID     int64
+	UserID int64
+}
+
+func (q *Queries) DeleteBondInvestmentByID(ctx context.Context, arg DeleteBondInvestmentByIDParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, deleteBondInvestmentByID, arg.ID, arg.UserID)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const deleteInvestmentTransactionByID = `-- name: DeleteInvestmentTransactionByID :one
+DELETE FROM investment_transactions
+WHERE id = $1 AND user_id = $2
+RETURNING id
+`
+
+type DeleteInvestmentTransactionByIDParams struct {
+	ID     int64
+	UserID int64
+}
+
+func (q *Queries) DeleteInvestmentTransactionByID(ctx context.Context, arg DeleteInvestmentTransactionByIDParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, deleteInvestmentTransactionByID, arg.ID, arg.UserID)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const deleteStockInvestmentByID = `-- name: DeleteStockInvestmentByID :one
+DELETE FROM stock_investments
+WHERE id = $1 AND user_id = $2
+RETURNING id
+`
+
+type DeleteStockInvestmentByIDParams struct {
+	ID     int64
+	UserID int64
+}
+
+func (q *Queries) DeleteStockInvestmentByID(ctx context.Context, arg DeleteStockInvestmentByIDParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, deleteStockInvestmentByID, arg.ID, arg.UserID)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const getAlternativeInvestmentByAlternativeID = `-- name: GetAlternativeInvestmentByAlternativeID :one
+SELECT
+    id,
+    user_id,
+    investment_type,
+    investment_name,
+    is_business,
+    quantity,
+    annual_revenue,
+    acquired_at,
+    profit_margin,
+    valuation,
+    valuation_updated_at,
+    location,
+    created_at,
+    updated_at
+FROM alternative_investments
+WHERE id = $1
+`
+
+func (q *Queries) GetAlternativeInvestmentByAlternativeID(ctx context.Context, id int64) (AlternativeInvestment, error) {
+	row := q.db.QueryRowContext(ctx, getAlternativeInvestmentByAlternativeID, id)
+	var i AlternativeInvestment
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.InvestmentType,
+		&i.InvestmentName,
+		&i.IsBusiness,
+		&i.Quantity,
+		&i.AnnualRevenue,
+		&i.AcquiredAt,
+		&i.ProfitMargin,
+		&i.Valuation,
+		&i.ValuationUpdatedAt,
+		&i.Location,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getBondByBondID = `-- name: GetBondByBondID :one
+SELECT
+    id,
+    user_id,
+    bond_symbol,
+    quantity,
+    purchase_price,
+    current_value,
+    coupon_rate,
+    maturity_date,
+    purchase_date,
+    created_at,
+    updated_at
+FROM bond_investments
+WHERE id = $1
+`
+
+func (q *Queries) GetBondByBondID(ctx context.Context, id int64) (BondInvestment, error) {
+	row := q.db.QueryRowContext(ctx, getBondByBondID, id)
+	var i BondInvestment
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.BondSymbol,
+		&i.Quantity,
+		&i.PurchasePrice,
+		&i.CurrentValue,
+		&i.CouponRate,
+		&i.MaturityDate,
+		&i.PurchaseDate,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -147,6 +450,105 @@ func (q *Queries) GetStockInvestmentByUserIDAndStockSymbol(ctx context.Context, 
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const updateAlternativeInvestment = `-- name: UpdateAlternativeInvestment :one
+UPDATE alternative_investments
+SET
+    investment_type = $1,
+    investment_name = $2,
+    is_business = $3,
+    quantity = $4,
+    annual_revenue = $5,
+    acquired_at = $6,
+    profit_margin = $7,
+    valuation = $8,
+    valuation_updated_at = $9,
+    location = $10
+WHERE id = $11
+AND user_id = $12
+RETURNING valuation_updated_at, updated_at
+`
+
+type UpdateAlternativeInvestmentParams struct {
+	InvestmentType     string
+	InvestmentName     sql.NullString
+	IsBusiness         bool
+	Quantity           sql.NullString
+	AnnualRevenue      sql.NullString
+	AcquiredAt         time.Time
+	ProfitMargin       sql.NullString
+	Valuation          string
+	ValuationUpdatedAt sql.NullTime
+	Location           sql.NullString
+	ID                 int64
+	UserID             int64
+}
+
+type UpdateAlternativeInvestmentRow struct {
+	ValuationUpdatedAt sql.NullTime
+	UpdatedAt          sql.NullTime
+}
+
+func (q *Queries) UpdateAlternativeInvestment(ctx context.Context, arg UpdateAlternativeInvestmentParams) (UpdateAlternativeInvestmentRow, error) {
+	row := q.db.QueryRowContext(ctx, updateAlternativeInvestment,
+		arg.InvestmentType,
+		arg.InvestmentName,
+		arg.IsBusiness,
+		arg.Quantity,
+		arg.AnnualRevenue,
+		arg.AcquiredAt,
+		arg.ProfitMargin,
+		arg.Valuation,
+		arg.ValuationUpdatedAt,
+		arg.Location,
+		arg.ID,
+		arg.UserID,
+	)
+	var i UpdateAlternativeInvestmentRow
+	err := row.Scan(&i.ValuationUpdatedAt, &i.UpdatedAt)
+	return i, err
+}
+
+const updateBondInvestment = `-- name: UpdateBondInvestment :one
+UPDATE bond_investments
+SET
+    quantity = $1,
+    purchase_price = $2,
+    current_value = $3,
+    coupon_rate = $4,
+    maturity_date = $5,
+    purchase_date = $6
+WHERE id = $7
+AND user_id = $8
+RETURNING updated_at
+`
+
+type UpdateBondInvestmentParams struct {
+	Quantity      string
+	PurchasePrice string
+	CurrentValue  string
+	CouponRate    sql.NullString
+	MaturityDate  time.Time
+	PurchaseDate  time.Time
+	ID            int64
+	UserID        int64
+}
+
+func (q *Queries) UpdateBondInvestment(ctx context.Context, arg UpdateBondInvestmentParams) (sql.NullTime, error) {
+	row := q.db.QueryRowContext(ctx, updateBondInvestment,
+		arg.Quantity,
+		arg.PurchasePrice,
+		arg.CurrentValue,
+		arg.CouponRate,
+		arg.MaturityDate,
+		arg.PurchaseDate,
+		arg.ID,
+		arg.UserID,
+	)
+	var updated_at sql.NullTime
+	err := row.Scan(&updated_at)
+	return updated_at, err
 }
 
 const updateStockInvestment = `-- name: UpdateStockInvestment :one

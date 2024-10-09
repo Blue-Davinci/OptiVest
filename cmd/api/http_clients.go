@@ -68,6 +68,7 @@ func GETRequest[T any](c *Optivet_Client, url string, headers map[string]string)
 	if err != nil {
 		return result, err
 	}
+	//fmt.Printf("Response: %v", result)
 
 	return result, nil
 }

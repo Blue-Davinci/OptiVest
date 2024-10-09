@@ -44,7 +44,7 @@ type config struct {
 		name            string
 		author          string
 		defaultcurrency string
-		apikeys         struct {
+		apikeys         struct { // api keys
 			alphavantage  apikey_details
 			exchangerates apikey_details
 		}
@@ -262,11 +262,16 @@ func main() {
 }
 
 func (app *application) startupFunction() error {
+	datatata, err := app.getTimeSeriesDataForSymbol("IBM")
+	if err != nil {
+		return err
+	}
+	fmt.Println(datatata)
 	// first we need to check if the currency is in REDIS, if it is
 	// we skip requesting the data from the API
 	// if it is not we request the data from the API and save it to REDIS
 	// If the currency cannot be found it will return ErrFailedToGetCurrency
-	err := app.verifyCurrencyInRedis(app.config.api.defaultcurrency)
+	err = app.verifyCurrencyInRedis(app.config.api.defaultcurrency)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrFailedToGetCurrency):

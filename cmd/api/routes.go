@@ -160,7 +160,20 @@ func (app *application) debtRoutes() chi.Router {
 
 func (app *application) investmentPortfolioRoutes() chi.Router {
 	investmentPortfolioRoutes := chi.NewRouter()
+	// stocks
 	investmentPortfolioRoutes.Post("/stocks", app.createNewStockInvestmentHandler)
 	investmentPortfolioRoutes.Patch("/stocks/{stockID}", app.updateStockInvestmentHandler)
+	investmentPortfolioRoutes.Delete("/stocks/{stockID}", app.deleteStockInvestmentByIDHandler)
+	// bonds
+	investmentPortfolioRoutes.Post("/bonds", app.createNewBondInvestmentHandler)
+	investmentPortfolioRoutes.Patch("/bonds/{bondID}", app.updateBondInvestmentHandler)
+	investmentPortfolioRoutes.Delete("/bonds/{bondID}", app.deleteBondInvestmentByIDHandler)
+	// alternative investments
+	investmentPortfolioRoutes.Post("/alternative", app.createNewAlternativeInvestmentHandler)
+	investmentPortfolioRoutes.Patch("/alternative/{alternativeID}", app.updateAlternativeInvestmentHandler)
+	investmentPortfolioRoutes.Delete("/alternative/{alternativeID}", app.deleteAlternativeInvestmentByIDHandler)
+	// investment transactiona
+	investmentPortfolioRoutes.Post("/transactions", app.createNewInvestmentTransactionHandler)
+	investmentPortfolioRoutes.Delete("/transactions/{transactionID}", app.deleteInvestmentTransactionByIDHandler)
 	return investmentPortfolioRoutes
 }
