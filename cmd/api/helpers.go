@@ -22,6 +22,7 @@ import (
 
 var (
 	ErrInvalidAuthentication = errors.New("invalid authentication token format")
+	ErrNoDataFoundInRedis    = errors.New("no data found in Redis")
 )
 
 // Define an envelope type.
@@ -210,61 +211,6 @@ func (app *application) getAndSaveAvailableCurrencies() error {
 	return nil
 }
 
-// saveAndUpdateSurplus() this method will be responsible for saving and updating the surplus
-// of a user's nudget. It will be called after a budget has been created or updated as well as
-// when a goal is added or updated.
-// When called we get the new total surplus amount from the caller.
-//
-//	we check if the the data.RedisFinManSurplusPrefix:userid:budgetid key exists in Redis.
-//
-// if it does, we update the surplus amount and return nil error.
-// Otherwise, we save the surplus amount to Redis and return nil as an error.
-func (app *application) saveAndUpdateSurplus(userID, budgetID int64, surplus decimal.Decimal) error {
-	// Generate Redis key for budget surplus
-	budgetSurpluskey := fmt.Sprintf("%s:%d", data.RedisFinManSurplusPrefix, userID)
-	key := app.returnFormattedRedisKeys(budgetSurpluskey, budgetID)
-
-	// Use HSet to update or insert the surplus value
-	err := app.RedisDB.HSet(context.Background(), key, "surplus", surplus.String()).Err()
-	if err != nil {
-		return err
-	}
-
-	// Set a TTL of 24 hours for the surplus key
-	err = app.RedisDB.Expire(context.Background(), key, 24*time.Hour).Err()
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-// getSurplus() retrieves the surplus for a budget from Redis. If the surplus does not exist,
-// it returns a zero value and nil error. If there are any other issues, it returns an error.
-func (app *application) getSurplus(userID, budgetID int64) (decimal.Decimal, error) {
-	// Generate Redis key for budget surplus
-	budgetSurplusKey := fmt.Sprintf("%s:%d", data.RedisFinManSurplusPrefix, userID)
-	key := app.returnFormattedRedisKeys(budgetSurplusKey, budgetID)
-
-	// Retrieve the surplus from Redis
-	surplusStr, err := app.RedisDB.HGet(context.Background(), key, "surplus").Result()
-	if err != nil {
-		// Handle error: return 0 and error if key does not exist or other issues
-		if err == redis.Nil {
-			return decimal.Decimal{}, nil // Key does not exist, return zero value
-		}
-		return decimal.Decimal{}, err // Return any other errors
-	}
-
-	// Convert the surplus string to decimal.Decimal
-	surplus, err := decimal.NewFromString(surplusStr)
-	if err != nil {
-		return decimal.Decimal{}, err // Return error if conversion fails
-	}
-
-	return surplus, nil // Return the retrieved surplus
-}
-
 // The readString() helper returns a string value from the query string, or the provided
 // default value if no matching key could be found.
 func (app *application) readString(qs url.Values, key string, defaultValue string) string {
@@ -305,40 +251,6 @@ func (app *application) readInt(qs url.Values, key string, defaultValue int, v *
 func (app *application) isLastDayOfMonth(t time.Time) bool {
 	nextDay := t.AddDate(0, 0, 1) // Add one day
 	return nextDay.Day() == 1     // If the next day is the first day of the month
-}
-
-// cacheData caches any data structure with a given key and TTL
-func (app *application) cacheSerializedData(key string, data interface{}, ttl time.Duration) error {
-	serializedData, err := json.Marshal(data)
-	if err != nil {
-		return err
-	}
-
-	err = app.RedisDB.Set(context.Background(), key, serializedData, ttl).Err()
-	if err != nil {
-		return err
-	}
-	app.logger.Info("saving data to cache", zap.String("key", key))
-	return nil
-}
-
-// getCachedData retrieves cached data for a given key and deserializes it into the provided target
-func (app *application) getSerializedCachedData(key string, target interface{}) (bool, error) {
-	cachedData, err := app.RedisDB.Get(context.Background(), key).Bytes()
-	if err != nil {
-		if err == redis.Nil {
-			return false, nil
-		}
-		return false, err
-	}
-
-	err = json.Unmarshal(cachedData, target)
-	if err != nil {
-		return false, err
-	}
-
-	app.logger.Info("retrieved cached data", zap.String("key", key))
-	return true, nil
 }
 
 // validateURL() checks if the input string is a valid URL
@@ -549,5 +461,41 @@ func (app *application) updateInvestmentTransactionHelper(userID int64, transact
 			}
 		}
 	}
+	return nil
+}
+
+// Generic method to get data from Redis and unmarshal into the desired type
+func getFromCache[T any](ctx context.Context, rdb *redis.Client, key string) (*T, error) {
+	cachedData, err := rdb.Get(ctx, key).Result()
+	if err == redis.Nil {
+		return nil, ErrNoDataFoundInRedis // Data not found
+	} else if err != nil {
+		return nil, err // Some other error
+	}
+
+	var result T
+	err = json.Unmarshal([]byte(cachedData), &result)
+	if err != nil {
+		return nil, err // Error unmarshalling data
+	}
+
+	return &result, nil
+}
+
+// setToCache() is a Generic method to cache data in Redis with a TTL
+func setToCache[T any](ctx context.Context, rdb *redis.Client, key string, value *T, ttl time.Duration) error {
+	// Marshal the value into JSON
+	data, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+
+	// Set the value in Redis with TTL
+	// 0 ttl means no expiration
+	err = rdb.Set(ctx, key, data, ttl).Err()
+	if err != nil {
+		return err
+	}
+
 	return nil
 }

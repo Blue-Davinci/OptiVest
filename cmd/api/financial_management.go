@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -753,8 +754,17 @@ func (app *application) getGoalPlansForUserHandler(w http.ResponseWriter, r *htt
 	unifiedGoalPlans := &data.UnifiedGoalPlanMetadata{}
 
 	// Attempt to retrieve cached data
-	cached, err := app.getSerializedCachedData(key, unifiedGoalPlans)
-	if cached && err == nil {
+	cached, err := getFromCache[*data.UnifiedGoalPlanMetadata](context.Background(), app.RedisDB, key)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrNoDataFoundInRedis):
+			// Do nothing
+		default:
+			app.serverErrorResponse(w, r, err)
+			return
+		}
+	}
+	if cached != nil {
 		// Return cached data if available
 		err = app.writeJSON(w, http.StatusOK, envelope{"goal_plans": unifiedGoalPlans}, nil)
 		if err != nil {
@@ -777,7 +787,7 @@ func (app *application) getGoalPlansForUserHandler(w http.ResponseWriter, r *htt
 	}
 
 	// Cache the goal plans in REDIS
-	err = app.cacheSerializedData(key, unifiedGoalPlans, 12*time.Hour)
+	err = setToCache(context.Background(), app.RedisDB, key, unifiedGoalPlans, 12*time.Hour)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return

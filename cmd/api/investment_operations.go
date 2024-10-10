@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"math"
 	"time"
@@ -10,31 +12,263 @@ import (
 	"go.uber.org/zap"
 )
 
-// getTimeSeriesDataForSymbol is a helper function that fetches historical data for a given stock symbol
+// ==========================================================================================================
+// Bond Investment Calculations
+// ==========================================================================================================
+func (app *application) performAndLogBondCalculations(symbol, startDatestring string, faceValue, couponRate decimal.Decimal, yearsToMaturity int, riskFreeRate decimal.Decimal) error {
+	// Fetch bond data using the getBondInvestmentDataHandler
+	bondData, err := app.getBondInvestmentDataHandler(symbol, startDatestring)
+	if err != nil {
+		return fmt.Errorf("failed to get bond data: %v", err)
+	}
+
+	// Filter bond time series data for the last N years
+	filteredData := bondData.FilterTimeSeriesBetweenYears(time.Now().Year() - yearsToMaturity)
+
+	// If no data, return an error
+	if len(filteredData) == 0 {
+		return fmt.Errorf("no bond data available for calculations")
+	}
+
+	// Use the latest bond price (the last observation value in filtered data)
+	latestPriceStr := filteredData[len(filteredData)-1].Value
+	currentPrice, err := decimal.NewFromString(latestPriceStr)
+	if err != nil {
+		return fmt.Errorf("invalid bond price in data: %v", err)
+	}
+	// make a bond
+	bond := data.Bond{
+		FaceValue:       faceValue,
+		CouponRate:      couponRate,
+		CurrentPrice:    currentPrice,
+		YearsToMaturity: yearsToMaturity,
+	}
+	app.logger.Info("=============================================================================================")
+	// Perform Yield to Maturity (YTM) Calculation
+	ytm := calculateYTM(bond.FaceValue, bond.CurrentPrice, bond.CouponRate, bond.YearsToMaturity)
+	app.logger.Info("Yield to Maturity (YTM)", zap.String("symbol", symbol), zap.String("ytm", ytm.String()))
+
+	// Perform Current Yield Calculation
+	currentYield := calculateCurrentYield(bond.CouponRate, bond.FaceValue, bond.CurrentPrice)
+	app.logger.Info("Current Yield", zap.String("symbol", symbol), zap.String("current_yield", currentYield.String()))
+
+	// Calculate Macaulay Duration
+	macaulayDuration := bond.CalculateMacaulayDuration(ytm)
+	app.logger.Info("Macaulay Duration", zap.String("symbol", symbol), zap.String("duration", macaulayDuration.String()))
+
+	// Calculate Convexity
+	convexity := bond.CalculateConvexity(ytm)
+	app.logger.Info("Convexity", zap.String("symbol", symbol), zap.String("convexity", convexity.String()))
+
+	// Calculate Bond Returns
+	bondReturns := bondData.CalculateBondReturns()
+	if len(bondReturns) == 0 {
+		return fmt.Errorf("no valid bond returns to calculate")
+	}
+	app.logger.Info("Bond Returns Calculated", zap.Int("num_returns", len(bondReturns)))
+
+	// Calculate Anual Bond Returns
+	annualReturn := calculateAnnualReturn(bond.CouponRate, bond.FaceValue, bond.CurrentPrice)
+	app.logger.Info("Annual Return", zap.String("symbol", symbol), zap.String("annual_return", annualReturn.String()))
+
+	// Calculate Volatility
+	bondVolatility := calculateBondVolatility(bondReturns)
+	app.logger.Info("Bond Volatility", zap.String("symbol", symbol), zap.String("volatility", bondVolatility.String()))
+
+	// log the Sharpe and Sortino ratios :
+	sharpe := sharpeRatio(bondReturns, riskFreeRate)
+	sortino := sortinoRatio(bondReturns, riskFreeRate)
+	app.logger.Info("Sharpe Ratio", zap.String("symbol", symbol), zap.String("sharpe_ratio", sharpe.String()))
+	app.logger.Info("Sortino Ratio", zap.String("symbol", symbol), zap.String("sortino_ratio", sortino.String()))
+	app.logger.Info("=============================================================================================")
+	return nil
+}
+
+// getBondInvestmentDataHandler() is a helper function that fetches historical data for a given bond symbol
 // We will get a symbol and use the client to fetch the historical data for that symbol via ALPHA VANTAGE API
 // We use app.http_client as our main client that expects an *Optivet_Client, url, headers if any
 // We expect back a TimeSeriesMonthlyResponse struct and an error
-func (app *application) getTimeSeriesDataForSymbol(symbol string) (*data.TimeSeriesDailyResponse, error) {
-	// Create a new TimeSeriesMonthlyRequest with the symbol
+func (app *application) getBondInvestmentDataHandler(symbol, startDatestring string) (*data.BondResponse, error) {
+	redisKey := fmt.Sprintf("%s:%s", data.RedisBondTimeSeriesPrefix, symbol)
+	ctx := context.Background()
+	ttl := 24 * time.Hour
+	timeSeriesUrl := fmt.Sprintf("%s%s%s%s%s%s%s%s",
+		data.FRED_BASE_URL,
+		data.FRED_SERIES_ID,
+		symbol,
+		data.FRED_REALTIME_START,
+		startDatestring,
+		data.FRED_API_KEY,
+		app.config.api.apikeys.fred.key,
+		data.FRED_FILE_TYPE_JSON)
+
+	app.logger.Info("Fred Compiled URL", zap.String("url", timeSeriesUrl))
+	// check if it was cached
+	cachedResponse, err := getFromCache[data.BondResponse](ctx, app.RedisDB, redisKey)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrNoDataFoundInRedis):
+			//return nil, ErrNoDataFoundInRedis
+		default:
+			return nil, fmt.Errorf("error retrieving data from Redis: %v", err)
+		}
+	}
+	if cachedResponse != nil {
+		// Data found in cache, perform and log the calculations
+		app.logger.Info("Bond Data found in cache", zap.String("symbol", symbol))
+		return cachedResponse, nil
+	}
+	// if no cache was found, get the data
+	bondTimeSeriesResponse, err := GETRequest[data.BondResponse](app.http_client, timeSeriesUrl, nil)
+	if err != nil {
+		return nil, err
+	}
+	// check if we got data
+	if len(bondTimeSeriesResponse.Observations) == 0 {
+		return nil, fmt.Errorf("no time series data found for symbol: %s", symbol)
+	}
+	// Cache the data using the updated setToCache method
+	err = setToCache(ctx, app.RedisDB, redisKey, &bondTimeSeriesResponse, ttl)
+	if err != nil {
+		app.logger.Error("Failed to cache time series data in Redis", zap.Error(err))
+	}
+	// print out the filetype
+	app.logger.Info("Bond File Type", zap.String("filetype", bondTimeSeriesResponse.FileType))
+	// just return
+	return &bondTimeSeriesResponse, nil
+}
+
+// calculateYieldToMaturity() calculates the yield to maturity for a given bond
+func calculateYTM(faceValue, currentPrice, couponRate decimal.Decimal, yearsToMaturity int) decimal.Decimal {
+	guess := decimal.NewFromFloat(0.05) // initial guess for YTM
+	precision := decimal.NewFromFloat(0.0001)
+	maxIterations := 100
+	for i := 0; i < maxIterations; i++ {
+		bondPrice := calculateBondPrice(faceValue, couponRate, guess, yearsToMaturity)
+		error := bondPrice.Sub(currentPrice)
+		if error.Abs().LessThan(precision) {
+			break
+		}
+		// Adjust the guess using Newton's method
+		guess = guess.Sub(error.Div(calculateBondPriceDerivative(faceValue, couponRate, guess, yearsToMaturity)))
+	}
+	return guess
+}
+
+// Function to calculate bond price based on a guess for YTM
+func calculateBondPrice(faceValue, couponRate, ytm decimal.Decimal, yearsToMaturity int) decimal.Decimal {
+	couponPayment := couponRate.Mul(faceValue)
+	bondPrice := decimal.NewFromFloat(0.0)
+
+	for t := 1; t <= yearsToMaturity; t++ {
+		discountFactor := decimal.NewFromFloat(1.0).Div((decimal.NewFromFloat(1.0).Add(ytm)).Pow(decimal.NewFromInt(int64(t))))
+		bondPrice = bondPrice.Add(couponPayment.Mul(discountFactor))
+	}
+
+	finalDiscountFactor := decimal.NewFromFloat(1.0).Div((decimal.NewFromFloat(1.0).Add(ytm)).Pow(decimal.NewFromInt(int64(yearsToMaturity))))
+	bondPrice = bondPrice.Add(faceValue.Mul(finalDiscountFactor))
+
+	return bondPrice
+}
+
+// Function to calculate the derivative of bond price with respect to YTM
+func calculateBondPriceDerivative(faceValue, couponRate, ytm decimal.Decimal, yearsToMaturity int) decimal.Decimal {
+	couponPayment := couponRate.Mul(faceValue)
+	derivative := decimal.NewFromFloat(0.0)
+
+	for t := 1; t <= yearsToMaturity; t++ {
+		discountFactor := decimal.NewFromFloat(1.0).Div((decimal.NewFromFloat(1.0).Add(ytm)).Pow(decimal.NewFromInt(int64(t + 1))))
+		derivative = derivative.Sub(couponPayment.Mul(decimal.NewFromInt(int64(t)).Mul(discountFactor)))
+	}
+
+	finalDiscountFactor := decimal.NewFromFloat(1.0).Div((decimal.NewFromFloat(1.0).Add(ytm)).Pow(decimal.NewFromInt(int64(yearsToMaturity + 1))))
+	derivative = derivative.Sub(faceValue.Mul(decimal.NewFromInt(int64(yearsToMaturity)).Mul(finalDiscountFactor)))
+
+	return derivative
+}
+
+// calculateCurrentYield() calculates the current yield for a given bond
+func calculateCurrentYield(couponRate, faceValue, currentPrice decimal.Decimal) decimal.Decimal {
+	couponPayment := couponRate.Mul(faceValue)
+	currentYield := couponPayment.Div(currentPrice)
+	return currentYield
+}
+
+// Function to calculate the annual return for a bond
+func calculateAnnualReturn(couponRate, faceValue, currentPrice decimal.Decimal) decimal.Decimal {
+	return couponRate.Mul(faceValue).Div(currentPrice) // Coupon return
+}
+
+// Function to calculate the annual return for a bond
+func calculateBondVolatility(bondReturns []decimal.Decimal) decimal.Decimal {
+	return calculateStandardDeviation(bondReturns) // Reuse from stock calculations
+}
+
+// ==========================================================================================================
+//  Stock Investment Calculations
+// ==========================================================================================================
+
+// getStockInvestmentDataHandler() is a helper function that fetches historical data for a given stock symbol
+// We will get a symbol and use the client to fetch the historical data for that symbol via ALPHA VANTAGE API
+// We use app.http_client as our main client that expects an *Optivet_Client, url, headers if any
+// We expect back a TimeSeriesMonthlyResponse struct and an error
+func (app *application) getStockInvestmentDataHandler(symbol string, riskFreeRate decimal.Decimal) (*data.TimeSeriesDailyResponse, error) {
+	redisKey := fmt.Sprintf("%s:%s", data.RedisStockTimeSeriesPrefix, symbol)
+	ctx := context.Background()
+	ttl := 24 * time.Hour
+
+	// Try to get the cached data from Redis
+	cachedResponse, err := getFromCache[data.TimeSeriesDailyResponse](ctx, app.RedisDB, redisKey)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrNoDataFoundInRedis):
+			//return nil, ErrNoDataFoundInRedis
+		default:
+			return nil, fmt.Errorf("error retrieving data from Redis: %v", err)
+		}
+	}
+
+	if cachedResponse != nil {
+		// Data found in cache, perform and log the calculations
+		app.logger.Info(" Stock Data found in cache", zap.String("symbol", symbol))
+		app.performAndLogCalculations(cachedResponse, riskFreeRate)
+		return cachedResponse, nil
+	}
+
+	// If no cached data is found, make the API call
 	timeSeriesURL := fmt.Sprintf("%s%s&apikey=4X2SW379QZJPKZZC", data.ALPHA_VANTAGE_TIME_SERIES_URL, symbol)
 	app.logger.Info("Time Series URL", zap.String("url", timeSeriesURL))
 
-	// send request via GETRequest: func GETRequest[T any](c *Optivet_Client, url string, headers map[string]string) (T, error) {}
 	timeSeriesResponse, err := GETRequest[data.TimeSeriesDailyResponse](app.http_client, timeSeriesURL, nil)
 	if err != nil {
 		return nil, err
 	}
-	// check if the response is not empty
+	// Check if the response is not empty
 	if len(timeSeriesResponse.DailyTimeSeries) == 0 {
 		return nil, fmt.Errorf("no time series data found for symbol: %s", symbol)
 	}
-	returns := app.getAverageDailyReturn(&timeSeriesResponse, time.Now().Year()-4)
+	// Cache the data using the updated setToCache method
+	err = setToCache(ctx, app.RedisDB, redisKey, &timeSeriesResponse, ttl)
+	if err != nil {
+		app.logger.Error("Failed to cache time series data in Redis", zap.Error(err))
+	}
+
+	// Perform and log the calculations
+	app.performAndLogCalculations(&timeSeriesResponse, riskFreeRate)
+
+	return &timeSeriesResponse, nil
+}
+
+// Perform and log calculations like returns, Sharpe ratio, and Sortino ratio
+func (app *application) performAndLogCalculations(timeSeriesResponse *data.TimeSeriesDailyResponse, riskFreeRate decimal.Decimal) {
+	returns := app.getAverageDailyReturn(timeSeriesResponse, time.Now().Year()-4)
+
+	// Log the results
 	app.logger.Info("===================================================================================")
 	app.logger.Info("Returns", zap.String("returns", returns[0].String()))
-	app.logger.Info("Sharpe", zap.String("sharpe_ratio", sharpeRatio(returns, decimal.NewFromFloat(0.02)).String()))
-	app.logger.Info("Sortino", zap.String("sortino_ratio", sortinoRatio(returns, decimal.NewFromFloat(0.02)).String()))
+	app.logger.Info("Sharpe Ratio", zap.String("sharpe_ratio", sharpeRatio(returns, riskFreeRate).String()))
+	app.logger.Info("Sortino Ratio", zap.String("sortino_ratio", sortinoRatio(returns, riskFreeRate).String()))
 	app.logger.Info("===================================================================================")
-	return &timeSeriesResponse, nil
 }
 
 // getAverageDailyReturn is a helper function that calculates the average daily return for a given stock symbol
@@ -161,4 +395,217 @@ func sortinoRatio(returns []decimal.Decimal, riskFreeRate decimal.Decimal) decim
 
 	// (avgReturn - riskFreeRate) / downsideVolatility
 	return avgReturn.Sub(riskFreeRate).Div(downsideVolatility)
+}
+
+// ==========================================================================================================
+// Sentiment Analysis Calculations
+// ==========================================================================================================
+
+func (app *application) performAndLogSentimentCalculations() error {
+	sentimentData, err := app.getSentimentAnalysis("AAPL")
+	if err != nil {
+		return fmt.Errorf("failed to get sentiment data: %v", err)
+	}
+	// Calclate Average Sentiment
+	averageSentiment := sentimentData.CalculateAverageSentiment()
+	app.logger.Info("Average Sentiment", zap.String("average_sentiment", averageSentiment.String()))
+
+	// Find Most Frequent Sentiment Label
+	mostFrequentLabel := sentimentData.FindMostFrequentSentimentLabel()
+	app.logger.Info("Most Frequent Sentiment Label", zap.String("sentiment_label", mostFrequentLabel))
+
+	// Calculate Weighted Relevance
+	weightedRelevance := sentimentData.CalculateWeightedRelevance()
+	app.logger.Info("Weighted Relevance", zap.String("weighted_relevance", weightedRelevance.String()))
+
+	// Ticker Sentiment Score
+	tickerSentimentScore := sentimentData.GetTickerSentiment("AAPL")
+	app.logger.Info("Ticker Sentiment Score", zap.String("ticker_sentiment_score", tickerSentimentScore.String()))
+
+	// Most relevant topc
+	mostRelevantTopic := sentimentData.FindMostRelevantTopic()
+	app.logger.Info("Most Relevant Topic", zap.String("most_relevant_topic", mostRelevantTopic))
+
+	return nil
+}
+
+// getSentimentAnalysis() is a helper function that fetches sentiment analysis data for a given stock symbol
+func (app *application) getSentimentAnalysis(symbol string) (*data.SentimentData, error) {
+	redisKey := fmt.Sprintf("%s:%s", data.RedisSentimentPrefix, symbol)
+	ctx := context.Background()
+	ttl := 24 * time.Hour
+
+	sentimentURL := fmt.Sprintf("%s%s%s%s%s%s",
+		data.ALPHA_VANTAGE_BASE_URL,
+		data.ALPHA_VANTAGE_SENTIMENT_FUNCTION,
+		data.ALPHA_VANTAGE_TICKER,
+		symbol,
+		data.ALPHA_VANTAGE_API_KEY,
+		app.config.api.apikeys.alphavantage.key,
+	)
+	app.logger.Info("=============================================================================================")
+	app.logger.Info("Sentiment URL", zap.String("url", sentimentURL))
+
+	// check if it was cached
+	cachedResponse, err := getFromCache[data.SentimentData](ctx, app.RedisDB, redisKey)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrNoDataFoundInRedis):
+			//return nil, ErrNoDataFoundInRedis
+		default:
+			app.logger.Error("Error retrieving data from Redis", zap.Error(err))
+		}
+	}
+	if cachedResponse != nil {
+		// Data found in cache, perform and log the calculations
+		app.logger.Info("Sentiment Data found in cache", zap.String("symbol", symbol))
+		return cachedResponse, nil
+	}
+
+	// if no cache was found, get the data
+	sentimentResponse, err := GETRequest[data.SentimentData](app.http_client, sentimentURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	// check if we got data
+	if len(sentimentResponse.Feed) == 0 {
+		return nil, fmt.Errorf("no sentiment data found for symbol: %s", symbol)
+	}
+
+	// Cache the data using the updated setToCache method
+	err = setToCache(ctx, app.RedisDB, redisKey, &sentimentResponse, ttl)
+	if err != nil {
+		app.logger.Error("Failed to cache sentiment data in Redis", zap.Error(err))
+	}
+
+	// print out the filetype
+	app.logger.Info("Sentiment Amount", zap.Any("filetype", sentimentResponse.Items))
+	app.logger.Info("=============================================================================================")
+	// just return
+	return &sentimentResponse, nil
+}
+
+// ==========================================================================================================
+// RISK
+// ==========================================================================================================
+// calculateRiskMetrics() is a helper function that calculates risk metrics for a given stock symbol
+func (app *application) getRiskMetrics(timeHorizon string) (decimal.Decimal, error) {
+	//
+	redisKey := data.RedisTreasuryYieldRiskRatePrefix
+	ctx := context.Background()
+	ttl := 24 * time.Hour
+	//https://www.alphavantage.co/query?function=TREASURY_YIELD&interval=daily&maturity=10year&apikey=NYRXRLGLWY29115K
+	treasuryYieldURL := fmt.Sprintf("%s%s%s%s%s%s",
+		data.ALPHA_VANTAGE_BASE_URL,
+		data.ALPHA_VANTAGE_TREASURY_YIELD_FUNCTION,
+		data.ALPHA_VANTAGE_DAILY_INTERVAL,
+		data.ALPHA_VANTAGE_MATURITY,
+		data.ALPHA_VANTAGE_API_KEY,
+		app.config.api.apikeys.alphavantage.key,
+	)
+	app.logger.Info("Treasury Yield URL", zap.String("url", treasuryYieldURL))
+	// check if cached
+	cachedResponse, err := getFromCache[data.TreasuryYieldData](ctx, app.RedisDB, redisKey)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrNoDataFoundInRedis):
+			//return nil, ErrNoDataFoundInRedis
+		default:
+			app.logger.Error("Error retrieving data from Redis", zap.Error(err))
+			return decimal.NewFromInt(0), err
+		}
+	}
+	if cachedResponse != nil {
+		// Data found in cache, perform and log the calculations
+		app.logger.Info("Treasury Yield Data found in cache")
+		app.getRiskFactor(cachedResponse, timeHorizon)
+		return decimal.NewFromInt(0), nil
+	}
+	// if no cache was found, get the data
+	treasuryYieldResponse, err := GETRequest[data.TreasuryYieldData](app.http_client, treasuryYieldURL, nil)
+	if err != nil {
+		return decimal.NewFromInt(0), err
+	}
+	// check if we got data
+	if len(treasuryYieldResponse.Data) == 0 {
+		return decimal.NewFromInt(0), fmt.Errorf("no treasury yield data found")
+	}
+	// Cache the data using the updated setToCache method
+	err = setToCache(ctx, app.RedisDB, redisKey, &treasuryYieldResponse, ttl)
+	if err != nil {
+		app.logger.Error("Failed to cache treasury yield data in Redis", zap.Error(err))
+	}
+	// print out the name
+	app.logger.Info("Treasury Yield Name", zap.String("name", treasuryYieldResponse.Name))
+	app.getRiskFactor(&treasuryYieldResponse, timeHorizon)
+	return decimal.NewFromInt(0), nil
+}
+
+func (app *application) getRiskFactor(data *data.TreasuryYieldData, timeHorizone string) {
+	latestRisk, err := data.GetLatestYield()
+	if err != nil {
+		app.logger.Error("Failed to get latest risk rate", zap.Error(err))
+		return
+	}
+	averageRisk, err := data.CalculateAverageYield(180)
+	if err != nil {
+		app.logger.Error("Failed to calculate average risk rate", zap.Error(err))
+		return
+	}
+	app.logger.Info("Latest Value:", zap.String("latest_risk", latestRisk.String()))
+	app.logger.Info("Average Value:", zap.String("average_risk", averageRisk.String()))
+	app.logger.Info("Time Horizon:", zap.String("time_horizon", timeHorizone))
+}
+
+// ==========================================================================================================
+// Sector Analysis
+// ==========================================================================================================
+
+// getSectorPerformance() is a helper function that fetches sector performance data
+// We only require the sector as the input and return a decimal.Decimal and an error
+// of the sector performance
+func (app *application) getSectorPerformance(sector string) (decimal.Decimal, error) {
+	redisKey := data.RedisSectorPerformancePrefix
+	ctx := context.Background()
+	ttl := 5 * time.Minute
+
+	sectorPerformanceURL := fmt.Sprintf("%s%s%s",
+		data.FMP_BASE_URL,
+		data.FMP_API_KEY,
+		app.config.api.apikeys.fmp.key,
+	)
+	app.logger.Info("Sector Performance URL", zap.String("url", sectorPerformanceURL))
+	// check if cached
+	cachedResponse, err := getFromCache[data.SectorAnalysisData](ctx, app.RedisDB, redisKey)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrNoDataFoundInRedis):
+			//return nil, ErrNoDataFoundInRedis
+		default:
+			app.logger.Error("Error retrieving data from Redis", zap.Error(err))
+			return decimal.NewFromInt(0), err
+		}
+	}
+	if cachedResponse != nil {
+		// Data found in cache, perform and log the calculations
+		app.logger.Info("Sector Performance Data found in cache")
+		//app.getSectorPerformanceFactor(cachedResponse, sector)
+		return decimal.NewFromInt(0), nil
+	}
+	// if no cache was found, get the data
+	sectorPerformanceResponse, err := GETRequest[data.SectorAnalysisData](app.http_client, sectorPerformanceURL, nil)
+	if err != nil {
+		return decimal.NewFromInt(0), err
+	}
+	// check if we got data
+	if len(sectorPerformanceResponse) == 0 {
+		return decimal.NewFromInt(0), fmt.Errorf("no sector performance data found")
+	}
+	// Cache the data using the updated setToCache method
+	err = setToCache(ctx, app.RedisDB, redisKey, &sectorPerformanceResponse, ttl)
+	if err != nil {
+		app.logger.Error("Failed to cache sector performance data in Redis", zap.Error(err))
+	}
+	// return sectorPerformanceResponse.GetSectorChange()
+	return sectorPerformanceResponse.GetSectorChange(sector)
 }

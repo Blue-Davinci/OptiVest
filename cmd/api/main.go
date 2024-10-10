@@ -24,6 +24,7 @@ import (
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 	"github.com/robfig/cron/v3"
+	"github.com/shopspring/decimal"
 	"go.uber.org/zap"
 )
 
@@ -47,6 +48,8 @@ type config struct {
 		apikeys         struct { // api keys
 			alphavantage  apikey_details
 			exchangerates apikey_details
+			fred          apikey_details
+			fmp           apikey_details
 		}
 	}
 	ws struct {
@@ -147,10 +150,16 @@ func main() {
 	// API keys
 	// alpha vantage
 	flag.StringVar(&cfg.api.apikeys.alphavantage.key, "api-key-alphavantage", os.Getenv("OPTIVEST_ALPHAVANTAGE_API_KEY"), "Alpha Vantage API key")
-	flag.StringVar(&cfg.api.apikeys.alphavantage.url, "api-url-alphavantage", "https://www.alphavantage.co/query", "Alpha Vantage API URL")
+	flag.StringVar(&cfg.api.apikeys.alphavantage.url, "api-url-alphavantage", "https://www.alphavantage.co/query?", "Alpha Vantage API URL")
 	// exchange rates
 	flag.StringVar(&cfg.api.apikeys.exchangerates.key, "api-key-exchangerates", os.Getenv("OPTIVEST_EXCHANGERATE_API_KEY"), "Exchange-Rate API Key")
 	flag.StringVar(&cfg.api.apikeys.exchangerates.url, "api-url-exchangerates", "https://v6.exchangerate-api.com/v6", "Exchange-Rate API URL")
+	// fred
+	flag.StringVar(&cfg.api.apikeys.fred.key, "api-key-fred", os.Getenv("OPTIVEST_FRED_API_KEY"), "FRED API Key")
+	flag.StringVar(&cfg.api.apikeys.fred.url, "api-url-fred", "https://api.stlouisfed.org/fred/series/observations?", "FRED API URL")
+	// fmp
+	flag.StringVar(&cfg.api.apikeys.fmp.key, "api-key-fmp", os.Getenv("OPTIVEST_FINANCIALMODELINGPREP_API_KEY"), "FMP API Key")
+	flag.StringVar(&cfg.api.apikeys.fmp.url, "api-url-fmp", "https://financialmodelingprep.com/api/v3", "FMP API URL")
 	// Rate limiter flags
 	flag.Float64Var(&cfg.limiter.rps, "limiter-rps", 5, "Rate limiter maximum requests per second")
 	flag.IntVar(&cfg.limiter.burst, "limiter-burst", 10, "Rate limiter maximum burst")
@@ -262,11 +271,40 @@ func main() {
 }
 
 func (app *application) startupFunction() error {
-	datatata, err := app.getTimeSeriesDataForSymbol("IBM")
+	sectorPerformance, err := app.getSectorPerformance("Technology")
 	if err != nil {
 		return err
 	}
-	fmt.Println(datatata)
+	app.logger.Info(" ---- Sector Performance", zap.Any("sectorPerformance", sectorPerformance))
+	riskFreeRate, err := app.getRiskMetrics("long-term")
+	if err != nil {
+		return err
+	}
+	_, err = app.getRiskMetrics("short-term")
+	if err != nil {
+		return err
+	}
+	err = app.performAndLogSentimentCalculations()
+	if err != nil {
+		return err
+	}
+	_, err = app.getStockInvestmentDataHandler("IBM", riskFreeRate)
+	if err != nil {
+		return err
+	}
+	symbol := "DGS10"                          // Bond symbol (10-year treasury bond)
+	startDateString := "2020-01-01"            // Start date for bond data
+	faceValue := decimal.NewFromFloat(1000.00) // Face value: $1000
+	couponRate := decimal.NewFromFloat(0.05)   // Coupon rate: 5%
+	yearsToMaturity := 10                      // Years to maturity: 10
+
+	err = app.performAndLogBondCalculations(symbol, startDateString, faceValue, couponRate, yearsToMaturity, riskFreeRate)
+	if err != nil {
+		fmt.Println("Error performing bond calculations:", err)
+	} else {
+		fmt.Println("Bond calculations completed successfully.")
+	}
+	//fmt.Println("Recieved Bond Data: ", dataaa)
 	// first we need to check if the currency is in REDIS, if it is
 	// we skip requesting the data from the API
 	// if it is not we request the data from the API and save it to REDIS

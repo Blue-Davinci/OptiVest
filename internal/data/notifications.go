@@ -133,7 +133,7 @@ func (m NotificationManagerModel) GetUnreadNotifications(userID int64) ([]*Notif
 	}
 	// check for empty notifications and return
 	if len(notificationsRows) == 0 {
-		fmt.Println("No notifications found for user: ", userID)
+		//fmt.Println("No notifications found for user: ", userID)
 		return nil, ErrGeneralRecordNotFound
 	}
 
@@ -170,7 +170,7 @@ func (m NotificationManagerModel) GetAllExpiredNotifications(filters Filters) ([
 	}
 	// check for empty notifications and return
 	if len(notificationsRows) == 0 {
-		fmt.Println("No notifications found")
+		//fmt.Println("No notifications found")
 		return nil, Metadata{}, ErrGeneralRecordNotFound
 	}
 
