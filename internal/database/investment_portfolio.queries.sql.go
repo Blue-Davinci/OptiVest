@@ -8,6 +8,7 @@ package database
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"time"
 )
 
@@ -290,6 +291,83 @@ func (q *Queries) DeleteStockInvestmentByID(ctx context.Context, arg DeleteStock
 	var id int64
 	err := row.Scan(&id)
 	return id, err
+}
+
+const getAllInvestmentsByUserID = `-- name: GetAllInvestmentsByUserID :many
+SELECT 
+    'stock' AS investment_type,
+    jsonb_agg(
+        jsonb_build_object(
+            'stock_symbol', s.stock_symbol,
+            'quantity', s.quantity,
+            'purchase_price', s.purchase_price,
+            'sector', s.sector,
+            'dividend_yield', s.dividend_yield
+        )
+    ) AS investments
+FROM stock_investments s
+WHERE s.user_id = $1
+
+UNION ALL
+
+SELECT 
+    'bond' AS investment_type,
+    jsonb_agg(
+        jsonb_build_object(
+            'bond_symbol', b.bond_symbol,
+            'quantity', b.quantity,
+            'purchase_price', b.purchase_price,
+            'coupon_rate', b.coupon_rate,
+            'maturity_date', b.maturity_date
+        )
+    ) AS investments
+FROM bond_investments b
+WHERE b.user_id = $1
+
+UNION ALL
+
+SELECT 
+    'alternative' AS investment_type,
+    jsonb_agg(
+        jsonb_build_object(
+            'investment_type', a.investment_type,
+            'investment_name', a.investment_name,
+            'quantity', a.quantity,
+            'valuation', a.valuation,
+            'annual_revenue', a.annual_revenue,
+            'profit_margin', a.profit_margin
+        )
+    ) AS investments
+FROM alternative_investments a
+WHERE a.user_id = $1
+`
+
+type GetAllInvestmentsByUserIDRow struct {
+	InvestmentType string
+	Investments    json.RawMessage
+}
+
+func (q *Queries) GetAllInvestmentsByUserID(ctx context.Context, userID int64) ([]GetAllInvestmentsByUserIDRow, error) {
+	rows, err := q.db.QueryContext(ctx, getAllInvestmentsByUserID, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetAllInvestmentsByUserIDRow
+	for rows.Next() {
+		var i GetAllInvestmentsByUserIDRow
+		if err := rows.Scan(&i.InvestmentType, &i.Investments); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const getAlternativeInvestmentByAlternativeID = `-- name: GetAlternativeInvestmentByAlternativeID :one

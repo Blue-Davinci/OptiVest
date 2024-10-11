@@ -3,8 +3,11 @@ package data
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/Blue-Davinci/OptiVest/internal/database"
@@ -12,8 +15,36 @@ import (
 	"github.com/shopspring/decimal"
 )
 
+type CustomTime1 struct {
+	time.Time
+}
+
+func (ct *CustomTime1) ToTime() time.Time {
+	return ct.Time
+}
+
+func (ct *CustomTime1) UnmarshalJSON(b []byte) error {
+	str := strings.Trim(string(b), `"`)
+	// Try parsing in different formats
+	layouts := []string{
+		"2006-01-02T15:04:05Z07:00", // ISO 8601 with time
+		"2006-01-02",                // Date only
+	}
+
+	var err error
+	for _, layout := range layouts {
+		var t time.Time
+		if t, err = time.Parse(layout, str); err == nil {
+			ct.Time = t
+			return nil
+		}
+	}
+	return fmt.Errorf("unable to parse date: %s", str)
+}
+
 const (
 	DefaultInvPortContextTimeout = 5 * time.Second
+	BondDefaultStartDate         = "2021-01-01"
 )
 
 var (
@@ -34,6 +65,55 @@ const (
 
 type InvestmentPortfolioModel struct {
 	DB *database.Queries
+}
+
+// Composite struct to hold all investment types
+type InvestmentAnalysis struct {
+	StockAnalysis       []StockAnalysis       `json:"stock_analysis"`
+	BondAnalysis        []BondAnalysis        `json:"bond_analysis"`
+	AlternativeAnalysis []AlternativeAnalysis `json:"alternative_analysis"`
+}
+
+// Stock Analysis
+type StockAnalysis struct {
+	StockSymbol       string            `json:"stock_symbol"`
+	Quantity          decimal.Decimal   `json:"quantity"`
+	PurchasePrice     decimal.Decimal   `json:"purchase_price"`
+	Sector            string            `json:"sector"`
+	DividendYield     decimal.Decimal   `json:"dividend_yield"`
+	Returns           []decimal.Decimal `json:"returns,omitempty"`
+	SharpeRatio       decimal.Decimal   `json:"sharpe_ratio,omitempty"`
+	SortinoRatio      decimal.Decimal   `json:"sortino_ratio,omitempty"`
+	SentimentLabel    string            `json:"sentiment_label,omitempty"`
+	SectorPerformance decimal.Decimal   `json:"sector_performance,omitempty"`
+}
+
+// Bond Analysis
+type BondAnalysis struct {
+	BondSymbol       string            `json:"bond_symbol"`
+	Quantity         decimal.Decimal   `json:"quantity"`
+	PurchasePrice    decimal.Decimal   `json:"purchase_price"`
+	CouponRate       decimal.Decimal   `json:"coupon_rate"`
+	MaturityDate     CustomTime1       `json:"maturity_date"`
+	YTM              decimal.Decimal   `json:"ytm"`
+	CurrentYield     decimal.Decimal   `json:"current_yield"`
+	MacaulayDuration decimal.Decimal   `json:"macaulay_duration"`
+	Convexity        decimal.Decimal   `json:"convexity"`
+	BondReturns      []decimal.Decimal `json:"returns,omitempty"`
+	AnnualReturn     decimal.Decimal   `json:"annual_return"`
+	BondVolatility   decimal.Decimal   `json:"bond_volatility"`
+	SharpeRatio      decimal.Decimal   `json:"sharpe_ratio,omitempty"`
+	SortinoRatio     decimal.Decimal   `json:"sortino_ratio,omitempty"`
+}
+
+// Alternative Analysis
+type AlternativeAnalysis struct {
+	InvestmentType string          `json:"investment_type"`
+	InvestmentName string          `json:"investment_name"`
+	Quantity       decimal.Decimal `json:"quantity"`
+	Valuation      decimal.Decimal `json:"valuation"`
+	AnnualRevenue  decimal.Decimal `json:"annual_revenue"`
+	ProfitMargin   decimal.Decimal `json:"profit_margin"`
 }
 
 // StockInvestment represents a stock investment made by a user.
@@ -193,7 +273,7 @@ func (m InvestmentPortfolioModel) MapInvestmentTypeToConstant(investmentType str
 // CreateNewStockInvestment() creates a new stock investment in the database.
 // We take in a user id, and a pointer to a stock investment.
 // We return an error if there was an issue creating the stock investment.
-func (m *InvestmentPortfolioModel) CreateNewStockInvestment(userID int64, stockInvestment *StockInvestment) error {
+func (m InvestmentPortfolioModel) CreateNewStockInvestment(userID int64, stockInvestment *StockInvestment) error {
 	ctx, cancel := contextGenerator(context.Background(), DefaultInvPortContextTimeout)
 	defer cancel()
 	// Create a new stock investment in the database.
@@ -223,7 +303,7 @@ func (m *InvestmentPortfolioModel) CreateNewStockInvestment(userID int64, stockI
 // UpdateStockInvestment() updates a stock investment in the database.
 // We take in a pointer to a stock investment.
 // We return an error if there was an issue updating the stock investment.
-func (m *InvestmentPortfolioModel) UpdateStockInvestment(userID int64, stockInvestment *StockInvestment) error {
+func (m InvestmentPortfolioModel) UpdateStockInvestment(userID int64, stockInvestment *StockInvestment) error {
 	ctx, cancel := contextGenerator(context.Background(), DefaultInvPortContextTimeout)
 	defer cancel()
 	// Update the stock investment in the database.
@@ -256,7 +336,7 @@ func (m *InvestmentPortfolioModel) UpdateStockInvestment(userID int64, stockInve
 // GetStockByStockID() retrieves a stock investment by stock id.
 // We take in a stock id.
 // We return a pointer to a stock investment and an error if there was an issue retrieving the stock investment.
-func (m *InvestmentPortfolioModel) GetStockByStockID(stockID int64) (*StockInvestment, error) {
+func (m InvestmentPortfolioModel) GetStockByStockID(stockID int64) (*StockInvestment, error) {
 	ctx, cancel := contextGenerator(context.Background(), DefaultInvPortContextTimeout)
 	defer cancel()
 	// Retrieve the stock investment from the database.
@@ -278,7 +358,7 @@ func (m *InvestmentPortfolioModel) GetStockByStockID(stockID int64) (*StockInves
 // GetStockInvestmentByUserIDAndStockSymbol() retrieves a stock investment by user id and stock symbol.
 // We take in a user id and a stock symbol.
 // We return a pointer to a stock investment and an error if there was an issue retrieving the stock investment.
-func (m *InvestmentPortfolioModel) GetStockInvestmentByUserIDAndStockSymbol(userID int64, stockSymbol string) (*StockInvestment, error) {
+func (m InvestmentPortfolioModel) GetStockInvestmentByUserIDAndStockSymbol(userID int64, stockSymbol string) (*StockInvestment, error) {
 	ctx, cancel := contextGenerator(context.Background(), DefaultInvPortContextTimeout)
 	defer cancel()
 	// Retrieve the stock investment from the database.
@@ -298,7 +378,7 @@ func (m *InvestmentPortfolioModel) GetStockInvestmentByUserIDAndStockSymbol(user
 // DeleteStockInvestmentByID() deletes a stock investment.
 // We take in a userID and a stock ID.
 // We return the stock ID of the deleted stock investment and an error if there was an issue deleting the stock investment.
-func (m *InvestmentPortfolioModel) DeleteStockInvestmentByID(userID, stockID int64) (int64, error) {
+func (m InvestmentPortfolioModel) DeleteStockInvestmentByID(userID, stockID int64) (int64, error) {
 	ctx, cancel := contextGenerator(context.Background(), DefaultInvPortContextTimeout)
 	defer cancel()
 	// Delete the stock investment from the database.
@@ -321,7 +401,7 @@ func (m *InvestmentPortfolioModel) DeleteStockInvestmentByID(userID, stockID int
 // CreateNewBondInvestment() creates a new bond investment in the database.
 // We take in a user id, and a pointer to a bond investment.
 // We return an error if there was an issue creating the bond investment.
-func (m *InvestmentPortfolioModel) CreateNewBondInvestment(userID int64, bondInvestment *BondInvestment) error {
+func (m InvestmentPortfolioModel) CreateNewBondInvestment(userID int64, bondInvestment *BondInvestment) error {
 	ctx, cancel := contextGenerator(context.Background(), DefaultInvPortContextTimeout)
 	defer cancel()
 	// Create a new bond investment in the database.
@@ -351,7 +431,7 @@ func (m *InvestmentPortfolioModel) CreateNewBondInvestment(userID int64, bondInv
 // DeleteInvestmentTransactionByID() deletes an investment transaction.
 // We take in a userID and a transaction ID.
 // We return the transaction ID of the deleted investment transaction and an error if there was an issue deleting the investment transaction.
-func (m *InvestmentPortfolioModel) DeleteInvestmentTransactionByID(userID, transactionID int64) (int64, error) {
+func (m InvestmentPortfolioModel) DeleteInvestmentTransactionByID(userID, transactionID int64) (int64, error) {
 	ctx, cancel := contextGenerator(context.Background(), DefaultInvPortContextTimeout)
 	defer cancel()
 	// Delete the investment transaction from the database.
@@ -374,7 +454,7 @@ func (m *InvestmentPortfolioModel) DeleteInvestmentTransactionByID(userID, trans
 // UpdateBondInvestment() updates a bond investment in the database.
 // We take in a pointer to a bond investment and a User ID.
 // We return an error if there was an issue updating the bond investment.
-func (m *InvestmentPortfolioModel) UpdateBondInvestment(userID int64, bondInvestment *BondInvestment) error {
+func (m InvestmentPortfolioModel) UpdateBondInvestment(userID int64, bondInvestment *BondInvestment) error {
 	ctx, cancel := contextGenerator(context.Background(), DefaultInvPortContextTimeout)
 	defer cancel()
 	// Update the bond investment in the database.
@@ -405,7 +485,7 @@ func (m *InvestmentPortfolioModel) UpdateBondInvestment(userID int64, bondInvest
 // DeleteBondInvestmentByID() deletes a bond investment.
 // We take in a userID and a bond ID.
 // We return the bond ID of the deleted bond investment and an error if there was an issue deleting the bond investment.
-func (m *InvestmentPortfolioModel) DeleteBondInvestmentByID(userID, bondID int64) (int64, error) {
+func (m InvestmentPortfolioModel) DeleteBondInvestmentByID(userID, bondID int64) (int64, error) {
 	ctx, cancel := contextGenerator(context.Background(), DefaultInvPortContextTimeout)
 	defer cancel()
 	// Delete the bond investment from the database.
@@ -428,7 +508,7 @@ func (m *InvestmentPortfolioModel) DeleteBondInvestmentByID(userID, bondID int64
 // GetBondByBondID() retrieves a bond investment by bond id.
 // We take in a bond id.
 // We return a pointer to a bond investment and an error if there was an issue retrieving the bond investment.
-func (m *InvestmentPortfolioModel) GetBondByBondID(bondID int64) (*BondInvestment, error) {
+func (m InvestmentPortfolioModel) GetBondByBondID(bondID int64) (*BondInvestment, error) {
 	ctx, cancel := contextGenerator(context.Background(), DefaultInvPortContextTimeout)
 	defer cancel()
 	// Retrieve the bond investment from the database.
@@ -450,7 +530,7 @@ func (m *InvestmentPortfolioModel) GetBondByBondID(bondID int64) (*BondInvestmen
 // CreateNewAlternativeInvestment() creates a new alternative investment in the database.
 // We take in a user id, and a pointer to an alternative investment.
 // We return an error if there was an issue creating the alternative investment.
-func (m *InvestmentPortfolioModel) CreateNewAlternativeInvestment(userID int64, alternativeInvestment *AlternativeInvestment) error {
+func (m InvestmentPortfolioModel) CreateNewAlternativeInvestment(userID int64, alternativeInvestment *AlternativeInvestment) error {
 	ctx, cancel := contextGenerator(context.Background(), DefaultInvPortContextTimeout)
 	defer cancel()
 	// Create a new alternative investment in the database.
@@ -481,7 +561,7 @@ func (m *InvestmentPortfolioModel) CreateNewAlternativeInvestment(userID int64, 
 // UpdateAlternativeInvestment() updates an alternative investment in the database.
 // We take in a pointer to an alternative investment and a User ID.
 // We return an error if there was an issue updating the alternative investment.
-func (m *InvestmentPortfolioModel) UpdateAlternativeInvestment(userID int64, alternativeInvestment *AlternativeInvestment) error {
+func (m InvestmentPortfolioModel) UpdateAlternativeInvestment(userID int64, alternativeInvestment *AlternativeInvestment) error {
 	ctx, cancel := contextGenerator(context.Background(), DefaultInvPortContextTimeout)
 	defer cancel()
 	// Update the alternative investment in the database.
@@ -517,7 +597,7 @@ func (m *InvestmentPortfolioModel) UpdateAlternativeInvestment(userID int64, alt
 // DeleteAlternativeInvestmentByID() deletes an alternative investment.
 // We take in a userID and an alternative ID.
 // We return the alternative ID of the deleted alternative investment and an error if there was an issue deleting the alternative investment.
-func (m *InvestmentPortfolioModel) DeleteAlternativeInvestmentByID(userID, alternativeID int64) (int64, error) {
+func (m InvestmentPortfolioModel) DeleteAlternativeInvestmentByID(userID, alternativeID int64) (int64, error) {
 	ctx, cancel := contextGenerator(context.Background(), DefaultInvPortContextTimeout)
 	defer cancel()
 	// Delete the alternative investment from the database.
@@ -540,7 +620,7 @@ func (m *InvestmentPortfolioModel) DeleteAlternativeInvestmentByID(userID, alter
 // GetAlternativeInvestmentByAlternativeID() retrieves an alternative investment by alternative id.
 // We take in an alternative id.
 // We return a pointer to an alternative investment and an error if there was an issue retrieving the alternative investment.
-func (m *InvestmentPortfolioModel) GetAlternativeInvestmentByAlternativeID(alternativeID int64) (*AlternativeInvestment, error) {
+func (m InvestmentPortfolioModel) GetAlternativeInvestmentByAlternativeID(alternativeID int64) (*AlternativeInvestment, error) {
 	ctx, cancel := contextGenerator(context.Background(), DefaultInvPortContextTimeout)
 	defer cancel()
 	// Retrieve the alternative investment from the database.
@@ -562,7 +642,7 @@ func (m *InvestmentPortfolioModel) GetAlternativeInvestmentByAlternativeID(alter
 // CreateNewInvestmentTransaction() creates a new investment transaction in the database.
 // We take in a user id, a transaction type, and a pointer to an investment transaction.
 // We return an error if there was an issue creating the investment transaction.
-func (m *InvestmentPortfolioModel) CreateNewInvestmentTransaction(userID int64, investmentTransaction *InvestmentTransaction) error {
+func (m InvestmentPortfolioModel) CreateNewInvestmentTransaction(userID int64, investmentTransaction *InvestmentTransaction) error {
 	ctx, cancel := contextGenerator(context.Background(), DefaultInvPortContextTimeout)
 	defer cancel()
 	// Create a new investment transaction in the database.
@@ -585,6 +665,74 @@ func (m *InvestmentPortfolioModel) CreateNewInvestmentTransaction(userID int64, 
 	investmentTransaction.UpdatedAt = newTransactionInfo.UpdatedAt.Time
 	// Return nil if there was no error.
 	return nil
+}
+
+// =======================================================================================================
+//  Investment Analysis
+// =======================================================================================================
+
+// GetAllInvestmentsByUserID() retrieves a subset of all data relating to a user's investments.
+// We take in a user ID and return a InvestmentAnalysis struct that will incorporate all investment types.
+// Each recieved investment has a column called investment_type, which will be used to determine the type of investment.
+// The investment_type will be a Stock, Bond or Alternative.
+// We return an error if there was an issue retrieving the investment data.
+func (m InvestmentPortfolioModel) GetAllInvestmentsByUserID(userID int64) (*InvestmentAnalysis, error) {
+	ctx, cancel := contextGenerator(context.Background(), DefaultInvPortContextTimeout)
+	defer cancel()
+
+	// Retrieve all investments from the database.
+	investmentsData, err := m.DB.GetAllInvestmentsByUserID(ctx, userID)
+	if err != nil {
+		switch {
+		case err == sql.ErrNoRows:
+			return nil, ErrGeneralRecordNotFound
+		default:
+			return nil, err
+		}
+	}
+
+	// Check if the result is empty.
+	if len(investmentsData) == 0 {
+		return nil, ErrGeneralRecordNotFound
+	}
+
+	// Create a new InvestmentAnalysis struct to hold the information.
+	investmentAnalysis := &InvestmentAnalysis{}
+
+	// Iterate through each investment and unmarshal based on its type.
+	for _, investment := range investmentsData {
+		switch investment.InvestmentType {
+		case "stock":
+			// Unmarshal stock investment data.
+			var stock []StockAnalysis
+			err := json.Unmarshal(investment.Investments, &stock)
+			if err != nil {
+				return nil, err
+			}
+			investmentAnalysis.StockAnalysis = append(investmentAnalysis.StockAnalysis, stock...)
+
+		case "bond":
+			// Unmarshal bond investment data.
+			var bond []BondAnalysis
+			err := json.Unmarshal(investment.Investments, &bond)
+			if err != nil {
+				return nil, err
+			}
+			investmentAnalysis.BondAnalysis = append(investmentAnalysis.BondAnalysis, bond...)
+
+		case "alternative":
+			// Unmarshal alternative investment data.
+			var alternative []AlternativeAnalysis
+			err := json.Unmarshal(investment.Investments, &alternative)
+			if err != nil {
+				return nil, err
+			}
+			investmentAnalysis.AlternativeAnalysis = append(investmentAnalysis.AlternativeAnalysis, alternative...)
+		}
+	}
+
+	// Return the InvestmentAnalysis struct and nil if there was no error.
+	return investmentAnalysis, nil
 }
 
 // populateAlternativeInvestment() populates an alternative investment struct with information from the database.

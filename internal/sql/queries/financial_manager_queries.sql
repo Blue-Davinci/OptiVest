@@ -178,6 +178,18 @@ SET
 WHERE id = $8 AND user_id = $9
 RETURNING updated_at;
 
+-- name: GetGoalsForUserInvestmentHelper :many
+SELECT
+    name,
+    current_amount,
+    target_amount,
+    monthly_contribution,
+    start_date,
+    end_date
+FROM goals
+WHERE user_id = $1
+AND status = 'ongoing';
+
 -- name: GetAndSaveAllGoalsForTracking :many
 -- Insert tracked goals that haven't been tracked for more than 1 month
 INSERT INTO goal_tracking (user_id, goal_id, contributed_amount, tracking_type)

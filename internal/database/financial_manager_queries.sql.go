@@ -616,6 +616,58 @@ func (q *Queries) GetGoalPlansForUser(ctx context.Context, arg GetGoalPlansForUs
 	return items, nil
 }
 
+const getGoalsForUserInvestmentHelper = `-- name: GetGoalsForUserInvestmentHelper :many
+SELECT
+    name,
+    current_amount,
+    target_amount,
+    monthly_contribution,
+    start_date,
+    end_date
+FROM goals
+WHERE user_id = $1
+AND status = 'ongoing'
+`
+
+type GetGoalsForUserInvestmentHelperRow struct {
+	Name                string
+	CurrentAmount       sql.NullString
+	TargetAmount        string
+	MonthlyContribution string
+	StartDate           time.Time
+	EndDate             time.Time
+}
+
+func (q *Queries) GetGoalsForUserInvestmentHelper(ctx context.Context, userID int64) ([]GetGoalsForUserInvestmentHelperRow, error) {
+	rows, err := q.db.QueryContext(ctx, getGoalsForUserInvestmentHelper, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetGoalsForUserInvestmentHelperRow
+	for rows.Next() {
+		var i GetGoalsForUserInvestmentHelperRow
+		if err := rows.Scan(
+			&i.Name,
+			&i.CurrentAmount,
+			&i.TargetAmount,
+			&i.MonthlyContribution,
+			&i.StartDate,
+			&i.EndDate,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updateBudgetById = `-- name: UpdateBudgetById :one
 UPDATE budgets
 SET 

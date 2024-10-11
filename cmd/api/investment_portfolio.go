@@ -665,3 +665,153 @@ func (app *application) deleteInvestmentTransactionByIDHandler(w http.ResponseWr
 		app.serverErrorResponse(w, r, err)
 	}
 }
+
+// investmentPrtfolioAnalysisHandler() is a handler responsible for the analysis of the investment portfolio
+// we will recieve a user ID. We will proceed to get the following data:
+// 1. User Goals - goals that a user has set
+// 2. Investment data - all the investments the user has made which include stocks, bonds & alternatives
+// 3. For each of the above investments, we will get additional statistics using investment operations i.e
+// Stocks will return the sharpe rations, annula, daily averages etc. Bonds will return items like YTM etc.
+// After collecting all stats, we include the risk factors, user time horizon and risk factors,
+// we will pass the data to our AI engine for processing
+func (app *application) investmentPrtfolioAnalysisHandler(w http.ResponseWriter, r *http.Request) {
+	//  retrieve user ID from context
+	user := app.contextGetUser(r)
+	// start by getting our goals
+	goals, err := app.models.FinancialManager.GetGoalsForUserInvestmentHelper(user.ID)
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrGeneralRecordNotFound):
+			// ignore to proceed with other check
+		default:
+			app.serverErrorResponse(w, r, err)
+			return
+		}
+	}
+	// check all investments
+	investmentAnalysis, err := app.models.InvestmentPortfolioManager.GetAllInvestmentsByUserID(user.ID)
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrGeneralRecordNotFound):
+			// ignore to proceed with other check
+		default:
+			app.serverErrorResponse(w, r, err)
+			return
+		}
+	}
+	err = app.performInvestmentPortfolioAnalysis(investmentAnalysis, user)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+	}
+	// build LLm
+	analyzedLLMResponse, err := app.buildLLMRequest(user, goals, investmentAnalysis)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+	}
+	// get analyzed LLM response
+
+	// output this infor
+	err = app.writeJSON(w, http.StatusOK,
+		envelope{"goals": goals, "investment_analysis": investmentAnalysis, "llm_analysis": analyzedLLMResponse},
+		nil)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+	}
+
+}
+
+func (app *application) performInvestmentPortfolioAnalysis(investmentAnalysis *data.InvestmentAnalysis, user *data.User) error {
+	// Check if the user's time horizon is set; if not, default to short term
+	if string(user.TimeHorizon.TimeHorizonType) == "" {
+		user.TimeHorizon = app.models.Users.MapTimeHorizonTypeToConstant("short")
+	}
+
+	// Get Risk-Free Rate by using the user's time horizon
+	riskFreeRate, err := app.getRiskMetrics(string(user.TimeHorizon.TimeHorizonType))
+	if err != nil {
+		return err
+	}
+
+	if len(investmentAnalysis.StockAnalysis) != 0 {
+		// Loop through each stock in the investment analysis
+		for i := range investmentAnalysis.StockAnalysis {
+			stock := &investmentAnalysis.StockAnalysis[i] // Get a pointer to the stock analysis
+
+			// Update the stock analysis
+			if err := app.updateStockAnalysis(stock, riskFreeRate); err != nil {
+				return err
+			}
+		}
+	}
+	// Loop through each bond in the investment analysis using performAndLogBondCalculations
+	if len(investmentAnalysis.BondAnalysis) != 0 {
+		for i := range investmentAnalysis.BondAnalysis {
+			bond := &investmentAnalysis.BondAnalysis[i] // Get a pointer to the bond analysis
+
+			// Update the bond analysis
+			if err := app.updateBondAnalysis(bond, riskFreeRate); err != nil {
+				return err
+			}
+		}
+	}
+
+	// there is nocurrent implementation for alternative investments
+	// ToDo: Implement alternative investment analysis
+	app.logger.Info("Investment portfolio analysis completed successfully.")
+	return nil
+}
+
+// updateBondAnalysis updates the BondAnalysis data with performance metrics.
+func (app *application) updateBondAnalysis(bond *data.BondAnalysis, riskFreeRate decimal.Decimal) error {
+	defaultFaceValue := decimal.NewFromFloat(1000.0)
+	// calculate years to maturity by subtracting the current date from the maturity date to int
+	yearsToMaturity := app.calculateYearsToMaturity(bond.MaturityDate)
+	// Get bond investment data
+	bondAnalysisStatistics, err := app.performAndLogBondCalculations(
+		bond.BondSymbol,
+		data.BondDefaultStartDate,
+		defaultFaceValue,
+		bond.CouponRate,
+		yearsToMaturity,
+		riskFreeRate,
+	)
+	if err != nil {
+		return err
+	}
+
+	// Fill in the bond analysis data
+	bond.YTM = bondAnalysisStatistics.YTM
+	bond.CurrentYield = bondAnalysisStatistics.CurrentYield
+	bond.MacaulayDuration = bondAnalysisStatistics.MacaulayDuration
+	bond.Convexity = bondAnalysisStatistics.Convexity
+	bond.BondReturns = bondAnalysisStatistics.BondReturns[:5]
+	bond.AnnualReturn = bondAnalysisStatistics.AnnualReturn
+	bond.BondVolatility = bondAnalysisStatistics.BondVolatility
+	bond.SharpeRatio = bondAnalysisStatistics.SharpeRatio
+	bond.SortinoRatio = bondAnalysisStatistics.SortinoRatio
+
+	return nil
+}
+
+// updateStockAnalysis updates the StockAnalysis data with performance metrics.
+func (app *application) updateStockAnalysis(stock *data.StockAnalysis, riskFreeRate decimal.Decimal) error {
+	// Get sector performance
+	sectorPerformance, err := app.getSectorPerformance(stock.Sector)
+	if err != nil {
+		return err
+	}
+
+	// Get stock investment data
+	stockAnalysisStatistics, err := app.getStockInvestmentDataHandler(stock.StockSymbol, riskFreeRate)
+	if err != nil {
+		return err
+	}
+
+	// Fill in the stock analysis data
+	stock.Returns = stockAnalysisStatistics.Returns[:5]
+	stock.SharpeRatio = stockAnalysisStatistics.SharpeRatio
+	stock.SortinoRatio = stockAnalysisStatistics.SortinoRatio
+	stock.SectorPerformance = sectorPerformance
+
+	return nil
+}

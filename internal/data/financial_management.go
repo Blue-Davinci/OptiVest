@@ -109,6 +109,22 @@ type Goals struct {
 	UpdatedAt           time.Time           `json:"updated_at"`
 }
 
+// iInvestment Goal will hold an array of goals that will be used
+// in our final LLM request to track user goals
+type InvestmentGoal struct {
+	Goals []InvestmentGoalHelper `json:"goals"`
+}
+
+// Investment Goal Helper struct
+type InvestmentGoalHelper struct {
+	Name                string          `json:"name"`
+	CurrentAmount       decimal.Decimal `json:"current_amount"`
+	TargetAmount        decimal.Decimal `json:"target_amount"`
+	MonthlyContribution decimal.Decimal `json:"monthly_contribution"`
+	StartDate           time.Time       `json:"start_date"`
+	EndDate             time.Time       `json:"end_date"`
+}
+
 // Goal_Summary struct represents a summary of a goal
 type Goal_Summary struct {
 	Id                  int64           `json:"id"`
@@ -556,6 +572,43 @@ func (m FinancialManagerModel) GetGoalByID(userID, goalID int64) (*Goals, error)
 	return idGoals, nil
 }
 
+// GetGoalsForUserInvestmentHelper() is an investment helper method, and will be used to retieve
+// a sample subset of a users goals for investment purposes
+// These items are: name, current amount, target amount, monthly contribution, start date and the end date
+// We will return a *InvestmentGoal struct and an error if the operation fails.
+func (m FinancialManagerModel) GetGoalsForUserInvestmentHelper(userID int64) (*InvestmentGoal, error) {
+	ctx, cancel := contextGenerator(context.Background(), DefaultFinManDBContextTimeout)
+	defer cancel()
+	goals, err := m.DB.GetGoalsForUserInvestmentHelper(ctx, userID)
+	if err != nil {
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return nil, ErrGeneralRecordNotFound
+		default:
+			return nil, err
+		}
+	}
+	// check if empty result
+	if len(goals) == 0 {
+		return nil, ErrGeneralRecordNotFound
+	}
+	// initialize goal of helpers
+	investmentGoalHelperSlice := []InvestmentGoalHelper{}
+	// Process each goal appending it to the slice
+	for _, row := range goals {
+		// populate the InvestmentGoalHelper struct using populateInvestmentGoalHelper
+		investmentGoal := populateInvestmentGoalHelper(row)
+		// append the investment goal to the slice
+		investmentGoalHelperSlice = append(investmentGoalHelperSlice, *investmentGoal)
+	}
+	// create a new InvestmentGoal struct
+	investmentGoal := &InvestmentGoal{
+		Goals: investmentGoalHelperSlice,
+	}
+	// everything went well
+	return investmentGoal, nil
+}
+
 // ============================================================================================================
 // Goal Tracking
 // ============================================================================================================
@@ -865,6 +918,22 @@ func populateGoal(goalRow interface{}) *Goals {
 			Status:              goal.Status,
 			CreatedAt:           goal.CreatedAt,
 			UpdatedAt:           goal.UpdatedAt,
+		}
+	default:
+		return nil
+	}
+}
+
+func populateInvestmentGoalHelper(goalRow interface{}) *InvestmentGoalHelper {
+	switch goal := goalRow.(type) {
+	case database.GetGoalsForUserInvestmentHelperRow:
+		return &InvestmentGoalHelper{
+			Name:                goal.Name,
+			CurrentAmount:       decimal.RequireFromString(goal.CurrentAmount.String),
+			TargetAmount:        decimal.RequireFromString(goal.TargetAmount),
+			MonthlyContribution: decimal.RequireFromString(goal.MonthlyContribution),
+			StartDate:           goal.StartDate,
+			EndDate:             goal.EndDate,
 		}
 	default:
 		return nil

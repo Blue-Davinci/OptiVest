@@ -12,14 +12,26 @@ import (
 	"go.uber.org/zap"
 )
 
+type BondAnalysisStatistics struct {
+	YTM              decimal.Decimal
+	CurrentYield     decimal.Decimal
+	MacaulayDuration decimal.Decimal
+	Convexity        decimal.Decimal
+	BondReturns      []decimal.Decimal
+	AnnualReturn     decimal.Decimal
+	BondVolatility   decimal.Decimal
+	SharpeRatio      decimal.Decimal
+	SortinoRatio     decimal.Decimal
+}
+
 // ==========================================================================================================
 // Bond Investment Calculations
 // ==========================================================================================================
-func (app *application) performAndLogBondCalculations(symbol, startDatestring string, faceValue, couponRate decimal.Decimal, yearsToMaturity int, riskFreeRate decimal.Decimal) error {
+func (app *application) performAndLogBondCalculations(symbol, startDatestring string, faceValue, couponRate decimal.Decimal, yearsToMaturity int, riskFreeRate decimal.Decimal) (*BondAnalysisStatistics, error) {
 	// Fetch bond data using the getBondInvestmentDataHandler
 	bondData, err := app.getBondInvestmentDataHandler(symbol, startDatestring)
 	if err != nil {
-		return fmt.Errorf("failed to get bond data: %v", err)
+		return nil, fmt.Errorf("failed to get bond data: %v", err)
 	}
 
 	// Filter bond time series data for the last N years
@@ -27,14 +39,14 @@ func (app *application) performAndLogBondCalculations(symbol, startDatestring st
 
 	// If no data, return an error
 	if len(filteredData) == 0 {
-		return fmt.Errorf("no bond data available for calculations")
+		return nil, fmt.Errorf("no bond data available for calculations")
 	}
 
 	// Use the latest bond price (the last observation value in filtered data)
 	latestPriceStr := filteredData[len(filteredData)-1].Value
 	currentPrice, err := decimal.NewFromString(latestPriceStr)
 	if err != nil {
-		return fmt.Errorf("invalid bond price in data: %v", err)
+		return nil, fmt.Errorf("invalid bond price in data: %v", err)
 	}
 	// make a bond
 	bond := data.Bond{
@@ -63,7 +75,7 @@ func (app *application) performAndLogBondCalculations(symbol, startDatestring st
 	// Calculate Bond Returns
 	bondReturns := bondData.CalculateBondReturns()
 	if len(bondReturns) == 0 {
-		return fmt.Errorf("no valid bond returns to calculate")
+		return nil, fmt.Errorf("no valid bond returns to calculate")
 	}
 	app.logger.Info("Bond Returns Calculated", zap.Int("num_returns", len(bondReturns)))
 
@@ -81,7 +93,19 @@ func (app *application) performAndLogBondCalculations(symbol, startDatestring st
 	app.logger.Info("Sharpe Ratio", zap.String("symbol", symbol), zap.String("sharpe_ratio", sharpe.String()))
 	app.logger.Info("Sortino Ratio", zap.String("symbol", symbol), zap.String("sortino_ratio", sortino.String()))
 	app.logger.Info("=============================================================================================")
-	return nil
+	// fill in our bond analysis
+	newBondAnalysisStatistics := &BondAnalysisStatistics{
+		YTM:              ytm,
+		CurrentYield:     currentYield,
+		MacaulayDuration: macaulayDuration,
+		Convexity:        convexity,
+		BondReturns:      bondReturns,
+		AnnualReturn:     annualReturn,
+		BondVolatility:   bondVolatility,
+		SharpeRatio:      sharpe,
+		SortinoRatio:     sortino,
+	}
+	return newBondAnalysisStatistics, nil
 }
 
 // getBondInvestmentDataHandler() is a helper function that fetches historical data for a given bond symbol
@@ -205,14 +229,21 @@ func calculateBondVolatility(bondReturns []decimal.Decimal) decimal.Decimal {
 }
 
 // ==========================================================================================================
-//  Stock Investment Calculations
+//
+//	Stock Investment Calculations
+//
 // ==========================================================================================================
+type StockAnalysisStatistics struct {
+	Returns      []decimal.Decimal // returns []
+	SharpeRatio  decimal.Decimal   // sharpe ratio
+	SortinoRatio decimal.Decimal   // sortino ratio
+}
 
 // getStockInvestmentDataHandler() is a helper function that fetches historical data for a given stock symbol
 // We will get a symbol and use the client to fetch the historical data for that symbol via ALPHA VANTAGE API
 // We use app.http_client as our main client that expects an *Optivet_Client, url, headers if any
 // We expect back a TimeSeriesMonthlyResponse struct and an error
-func (app *application) getStockInvestmentDataHandler(symbol string, riskFreeRate decimal.Decimal) (*data.TimeSeriesDailyResponse, error) {
+func (app *application) getStockInvestmentDataHandler(symbol string, riskFreeRate decimal.Decimal) (*StockAnalysisStatistics, error) {
 	redisKey := fmt.Sprintf("%s:%s", data.RedisStockTimeSeriesPrefix, symbol)
 	ctx := context.Background()
 	ttl := 24 * time.Hour
@@ -232,7 +263,14 @@ func (app *application) getStockInvestmentDataHandler(symbol string, riskFreeRat
 		// Data found in cache, perform and log the calculations
 		app.logger.Info(" Stock Data found in cache", zap.String("symbol", symbol))
 		app.performAndLogCalculations(cachedResponse, riskFreeRate)
-		return cachedResponse, nil
+		returns, sharpe_ratio, sortino_ratio := app.performAndLogCalculations(cachedResponse, riskFreeRate)
+		newStockAnalysisStatistics := StockAnalysisStatistics{
+			Returns:      returns,
+			SharpeRatio:  sharpe_ratio,
+			SortinoRatio: sortino_ratio,
+		}
+
+		return &newStockAnalysisStatistics, nil
 	}
 
 	// If no cached data is found, make the API call
@@ -254,21 +292,26 @@ func (app *application) getStockInvestmentDataHandler(symbol string, riskFreeRat
 	}
 
 	// Perform and log the calculations
-	app.performAndLogCalculations(&timeSeriesResponse, riskFreeRate)
+	returns, sharpe_ratio, sortino_ratio := app.performAndLogCalculations(&timeSeriesResponse, riskFreeRate)
+	newStockAnalysisStatistics := StockAnalysisStatistics{
+		Returns:      returns,
+		SharpeRatio:  sharpe_ratio,
+		SortinoRatio: sortino_ratio,
+	}
 
-	return &timeSeriesResponse, nil
+	return &newStockAnalysisStatistics, nil
 }
 
 // Perform and log calculations like returns, Sharpe ratio, and Sortino ratio
-func (app *application) performAndLogCalculations(timeSeriesResponse *data.TimeSeriesDailyResponse, riskFreeRate decimal.Decimal) {
+func (app *application) performAndLogCalculations(timeSeriesResponse *data.TimeSeriesDailyResponse, riskFreeRate decimal.Decimal) (
+	[]decimal.Decimal, // returns []
+	decimal.Decimal, // sharpe ratio
+	decimal.Decimal, // sortino ratio
+) {
 	returns := app.getAverageDailyReturn(timeSeriesResponse, time.Now().Year()-4)
-
-	// Log the results
-	app.logger.Info("===================================================================================")
-	app.logger.Info("Returns", zap.String("returns", returns[0].String()))
-	app.logger.Info("Sharpe Ratio", zap.String("sharpe_ratio", sharpeRatio(returns, riskFreeRate).String()))
-	app.logger.Info("Sortino Ratio", zap.String("sortino_ratio", sortinoRatio(returns, riskFreeRate).String()))
-	app.logger.Info("===================================================================================")
+	sharpeRatio := sharpeRatio(returns, riskFreeRate)
+	sortinoRatio := sortinoRatio(returns, riskFreeRate)
+	return returns, sharpeRatio, sortinoRatio
 }
 
 // getAverageDailyReturn is a helper function that calculates the average daily return for a given stock symbol
@@ -589,8 +632,12 @@ func (app *application) getSectorPerformance(sector string) (decimal.Decimal, er
 	if cachedResponse != nil {
 		// Data found in cache, perform and log the calculations
 		app.logger.Info("Sector Performance Data found in cache")
+		sectorScore, err := cachedResponse.GetSectorChange(sector)
+		if err != nil {
+			return decimal.NewFromInt(0), err
+		}
 		//app.getSectorPerformanceFactor(cachedResponse, sector)
-		return decimal.NewFromInt(0), nil
+		return sectorScore, nil
 	}
 	// if no cache was found, get the data
 	sectorPerformanceResponse, err := GETRequest[data.SectorAnalysisData](app.http_client, sectorPerformanceURL, nil)
@@ -606,6 +653,12 @@ func (app *application) getSectorPerformance(sector string) (decimal.Decimal, er
 	if err != nil {
 		app.logger.Error("Failed to cache sector performance data in Redis", zap.Error(err))
 	}
+
+	sectorScore, err := sectorPerformanceResponse.GetSectorChange(sector)
+	if err != nil {
+		return decimal.NewFromInt(0), err
+	}
+	app.logger.Info("Sector Obtained and Sector Performance", zap.String("Sector recieved", sector), zap.String("Sector Value", sectorScore.String()))
 	// return sectorPerformanceResponse.GetSectorChange()
-	return sectorPerformanceResponse.GetSectorChange(sector)
+	return sectorScore, nil
 }

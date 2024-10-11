@@ -191,3 +191,53 @@ RETURNING id, created_at, updated_at;
 DELETE FROM investment_transactions
 WHERE id = $1 AND user_id = $2
 RETURNING id;
+
+-- name: GetAllInvestmentsByUserID :many
+-- name: GetAllInvestmentsByUserID :many
+SELECT 
+    'stock' AS investment_type,
+    jsonb_agg(
+        jsonb_build_object(
+            'stock_symbol', s.stock_symbol,
+            'quantity', s.quantity,
+            'purchase_price', s.purchase_price,
+            'sector', s.sector,
+            'dividend_yield', s.dividend_yield
+        )
+    ) AS investments
+FROM stock_investments s
+WHERE s.user_id = $1
+
+UNION ALL
+
+SELECT 
+    'bond' AS investment_type,
+    jsonb_agg(
+        jsonb_build_object(
+            'bond_symbol', b.bond_symbol,
+            'quantity', b.quantity,
+            'purchase_price', b.purchase_price,
+            'coupon_rate', b.coupon_rate,
+            'maturity_date', b.maturity_date
+        )
+    ) AS investments
+FROM bond_investments b
+WHERE b.user_id = $1
+
+UNION ALL
+
+SELECT 
+    'alternative' AS investment_type,
+    jsonb_agg(
+        jsonb_build_object(
+            'investment_type', a.investment_type,
+            'investment_name', a.investment_name,
+            'quantity', a.quantity,
+            'valuation', a.valuation,
+            'annual_revenue', a.annual_revenue,
+            'profit_margin', a.profit_margin
+        )
+    ) AS investments
+FROM alternative_investments a
+WHERE a.user_id = $1;
+

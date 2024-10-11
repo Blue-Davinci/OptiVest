@@ -50,6 +50,7 @@ type config struct {
 			exchangerates apikey_details
 			fred          apikey_details
 			fmp           apikey_details
+			sambanova     apikey_details
 		}
 	}
 	ws struct {
@@ -160,6 +161,9 @@ func main() {
 	// fmp
 	flag.StringVar(&cfg.api.apikeys.fmp.key, "api-key-fmp", os.Getenv("OPTIVEST_FINANCIALMODELINGPREP_API_KEY"), "FMP API Key")
 	flag.StringVar(&cfg.api.apikeys.fmp.url, "api-url-fmp", "https://financialmodelingprep.com/api/v3", "FMP API URL")
+	// sambanova
+	flag.StringVar(&cfg.api.apikeys.sambanova.key, "api-key-sambanova", os.Getenv("OPTIVEST_SAMBA_NOVA_LLM_API_KEY"), "Sambanova API Key")
+	flag.StringVar(&cfg.api.apikeys.sambanova.url, "api-url-sambanova", "https://fast-api.snova.ai/v1/chat/completions", "Sambanova API URL")
 	// Rate limiter flags
 	flag.Float64Var(&cfg.limiter.rps, "limiter-rps", 5, "Rate limiter maximum requests per second")
 	flag.IntVar(&cfg.limiter.burst, "limiter-burst", 10, "Rate limiter maximum burst")
@@ -298,7 +302,7 @@ func (app *application) startupFunction() error {
 	couponRate := decimal.NewFromFloat(0.05)   // Coupon rate: 5%
 	yearsToMaturity := 10                      // Years to maturity: 10
 
-	err = app.performAndLogBondCalculations(symbol, startDateString, faceValue, couponRate, yearsToMaturity, riskFreeRate)
+	_, err = app.performAndLogBondCalculations(symbol, startDateString, faceValue, couponRate, yearsToMaturity, riskFreeRate)
 	if err != nil {
 		fmt.Println("Error performing bond calculations:", err)
 	} else {

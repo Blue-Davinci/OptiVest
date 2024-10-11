@@ -499,3 +499,9 @@ func setToCache[T any](ctx context.Context, rdb *redis.Client, key string, value
 
 	return nil
 }
+
+// calculateYearsToMaturity() calculates the number of years to maturity for a bond
+func (app *application) calculateYearsToMaturity(bondMD data.CustomTime1) int {
+	yearsToMaturity := int(time.Until(bondMD.ToTime()).Hours() / (24 * 365))
+	return yearsToMaturity
+}

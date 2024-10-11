@@ -175,5 +175,8 @@ func (app *application) investmentPortfolioRoutes() chi.Router {
 	// investment transactiona
 	investmentPortfolioRoutes.Post("/transactions", app.createNewInvestmentTransactionHandler)
 	investmentPortfolioRoutes.Delete("/transactions/{transactionID}", app.deleteInvestmentTransactionByIDHandler)
+
+	// Analysis
+	investmentPortfolioRoutes.Get("/analysis", app.investmentPrtfolioAnalysisHandler)
 	return investmentPortfolioRoutes
 }

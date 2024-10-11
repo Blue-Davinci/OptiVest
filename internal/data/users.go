@@ -194,16 +194,16 @@ func (m UserModel) MapRiskToleranceTypeToConstant(riskTolerance string) database
 }
 
 // MapTimeHorizonTypeToConstant() maps a string representation of a time horizon level
-func (m UserModel) MapTimeHorizonTypeToConstant(timeHorizon string) database.TimeHorizonType {
+func (m UserModel) MapTimeHorizonTypeToConstant(timeHorizon string) database.NullTimeHorizonType {
 	switch timeHorizon {
 	case "short":
-		return TimeHorizonTypeShort
+		return database.NullTimeHorizonType{TimeHorizonType: TimeHorizonTypeShort, Valid: true}
 	case "medium":
-		return TimeHorizonTypeMedium
+		return database.NullTimeHorizonType{TimeHorizonType: TimeHorizonTypeMedium, Valid: true}
 	case "long":
-		return TimeHorizonTypeLong
+		return database.NullTimeHorizonType{TimeHorizonType: TimeHorizonTypeLong, Valid: true}
 	default:
-		return TimeHorizonTypeMedium
+		return database.NullTimeHorizonType{TimeHorizonType: TimeHorizonTypeShort, Valid: true}
 	}
 }
 
