@@ -3,13 +3,17 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
+	"github.com/Blue-Davinci/OptiVest/internal/data"
 	"github.com/hashicorp/go-retryablehttp"
+	"github.com/microcosm-cc/bluemonday"
 	"go.uber.org/zap"
 )
 
@@ -124,6 +128,9 @@ func POSTRequest[T any](c *Optivet_Client, url string, headers map[string]string
 
 	return result, nil
 }
+
+// LLMRequest() sends a POST request to the specified URL with the provided headers and body
+// and reads the response in chunks to accumulate the full response
 func (app *application) LLMRequest(url string, headers map[string]string, body string) (string, error) {
 	// Convert the body to bytes directly without marshaling again
 	jsonBody := []byte(body)
@@ -199,4 +206,54 @@ func (app *application) LLMRequest(url string, headers map[string]string, body s
 	}
 
 	return fullResponse, nil
+}
+
+func (app *application) scraperGetRSSFeeds(retryMax, clientTimeout int, url string, sanitizer *bluemonday.Policy) (*data.RSSFeed, error) {
+	// create a retrayable client with our own settings
+	retryClient := NewClient(
+		time.Duration(clientTimeout)*time.Second,
+		retryMax,
+	)
+	ResponseContextTimeout := 30 * time.Second
+
+	// Create a new request with context for timeout
+	req, err := retryablehttp.NewRequest("GET", url, nil)
+	if err != nil {
+		//fmt.Println("++++++>>>>>>>> err: ", err)
+		return nil, err
+	}
+	// Create a context with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), ResponseContextTimeout)
+	defer cancel() // Ensure the context is cancelled to free resources
+	req = req.WithContext(ctx)
+
+	// Perform the request with retries
+	resp, err := retryClient.httpClient.Do(req)
+	if err != nil {
+		fmt.Println("++++++Client Rec err: ", err)
+		switch {
+		case strings.Contains(err.Error(), "context deadline exceeded"):
+			return nil, data.ErrContextDeadline
+		default:
+			return nil, err
+		}
+	}
+	defer resp.Body.Close()
+	// Initialize a new RSSFeed struct
+	rssFeed := &data.RSSFeed{}
+	// Decode the response using RssFeedDecoder() expecting an RSSFeed struct
+	err = app.RssFeedDecoderDecider(url, rssFeed, sanitizer, resp)
+	if err != nil {
+		fmt.Println("++++++>Dec Dec err: ", err)
+		switch {
+		case strings.Contains(err.Error(), "context deadline exceeded"):
+			return nil, data.ErrContextDeadline
+		case strings.Contains(err.Error(), "feed type"):
+			return &data.RSSFeed{RetryMax: int32(retryMax), StatusCode: int32(resp.StatusCode)}, data.ErrUnableToDetectFeedType
+		default:
+			return nil, err
+		}
+	}
+
+	return rssFeed, nil
 }

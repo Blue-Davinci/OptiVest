@@ -23,8 +23,8 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
+	"github.com/microcosm-cc/bluemonday"
 	"github.com/robfig/cron/v3"
-	"github.com/shopspring/decimal"
 	"go.uber.org/zap"
 )
 
@@ -72,6 +72,18 @@ type config struct {
 		timeout  time.Duration
 		retrymax int
 	}
+	sanitization struct {
+		sanitizer *bluemonday.Policy
+		usestrict bool
+	}
+	scraper struct {
+		nooffeedstofetch int
+		fetchinterval    int
+		scraperclient    struct {
+			retrymax int
+			timeout  int
+		}
+	}
 	smtp struct {
 		host     string
 		port     int
@@ -104,6 +116,7 @@ type config struct {
 		trackRecurringExpenses       *cron.Cron
 		trackOverdueDebts            *cron.Cron
 		trackExpiredNotifications    *cron.Cron
+		rssFeedScraper               *cron.Cron
 	}
 	limit struct {
 		monthlyGoalProcessingBatchLimit      int
@@ -180,6 +193,8 @@ func main() {
 	// HTTP client configuration
 	flag.DurationVar(&cfg.http_client.timeout, "http-client-timeout", 10*time.Second, "HTTP client timeout")
 	flag.IntVar(&cfg.http_client.retrymax, "http-client-retrymax", 3, "HTTP client maximum retries")
+	// Sanitization
+	flag.BoolVar(&cfg.sanitization.usestrict, "sanitization-strict", false, "Use strict sanitization")
 	// Encryption key
 	flag.StringVar(&cfg.encryption.key, "encryption-key", os.Getenv("OPTIVEST_DATA_ENCRYPTION_KEY"), "Encryption key")
 	// CORS configuration
@@ -191,6 +206,11 @@ func main() {
 		cfg.cors.trustedOrigins = strings.Fields(val)
 		return nil
 	})
+	// Scraper settings
+	flag.IntVar(&cfg.scraper.nooffeedstofetch, "scraper-routines", 5, "Number of feeds to fetch concurrently")
+	flag.IntVar(&cfg.scraper.fetchinterval, "scraper-interval", 40, "Interval in seconds before the next bunch of feeds are fetched")
+	flag.IntVar(&cfg.scraper.scraperclient.retrymax, "scraper-retry-max", 3, "Maximum number of retries for HTTP requests")
+	flag.IntVar(&cfg.scraper.scraperclient.timeout, "scraper-timeout", 15, "HTTP client timeout in seconds")
 	// SMTP configuration
 	flag.StringVar(&cfg.smtp.host, "smtp-host", os.Getenv("OPTIVEST_SMTP_HOST"), "SMTP server hostname")
 	flag.IntVar(&cfg.smtp.port, "smtp-port", 587, "SMTP server port")
@@ -217,6 +237,14 @@ func main() {
 	cfg.scheduler.trackRecurringExpenses = cron.New()
 	cfg.scheduler.trackOverdueDebts = cron.New()
 	cfg.scheduler.trackExpiredNotifications = cron.New()
+	cfg.scheduler.rssFeedScraper = cron.New()
+	// if the usestrict flag is set to true, then use the StrictPolicy() method to create a new Policy object.
+	// Otherwise, use the UGCPolicy() method to create a new Policy object.
+	if cfg.sanitization.usestrict {
+		cfg.sanitization.sanitizer = bluemonday.StrictPolicy()
+	} else {
+		cfg.sanitization.sanitizer = bluemonday.UGCPolicy()
+	}
 
 	// Create a new version boolean flag with the default value of false.
 	displayVersion := flag.Bool("version", false, "Display version and exit")
@@ -275,45 +303,12 @@ func main() {
 }
 
 func (app *application) startupFunction() error {
-	sectorPerformance, err := app.getSectorPerformance("Technology")
-	if err != nil {
-		return err
-	}
-	app.logger.Info(" ---- Sector Performance", zap.Any("sectorPerformance", sectorPerformance))
-	riskFreeRate, err := app.getRiskMetrics("long-term")
-	if err != nil {
-		return err
-	}
-	_, err = app.getRiskMetrics("short-term")
-	if err != nil {
-		return err
-	}
-	err = app.performAndLogSentimentCalculations()
-	if err != nil {
-		return err
-	}
-	_, err = app.getStockInvestmentDataHandler("IBM", riskFreeRate)
-	if err != nil {
-		return err
-	}
-	symbol := "DGS10"                          // Bond symbol (10-year treasury bond)
-	startDateString := "2020-01-01"            // Start date for bond data
-	faceValue := decimal.NewFromFloat(1000.00) // Face value: $1000
-	couponRate := decimal.NewFromFloat(0.05)   // Coupon rate: 5%
-	yearsToMaturity := 10                      // Years to maturity: 10
-
-	_, err = app.performAndLogBondCalculations(symbol, startDateString, faceValue, couponRate, yearsToMaturity, riskFreeRate)
-	if err != nil {
-		fmt.Println("Error performing bond calculations:", err)
-	} else {
-		fmt.Println("Bond calculations completed successfully.")
-	}
 	//fmt.Println("Recieved Bond Data: ", dataaa)
 	// first we need to check if the currency is in REDIS, if it is
 	// we skip requesting the data from the API
 	// if it is not we request the data from the API and save it to REDIS
 	// If the currency cannot be found it will return ErrFailedToGetCurrency
-	err = app.verifyCurrencyInRedis(app.config.api.defaultcurrency)
+	err := app.verifyCurrencyInRedis(app.config.api.defaultcurrency)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrFailedToGetCurrency):
@@ -341,6 +336,7 @@ func (app *application) startSchedulers() {
 	go app.trackRecurringExpensesHandler()           // trackRecurringExpenses
 	go app.trackOverdueDebtsHandler()                // trackOverdueDebts
 	go app.trackExpiredNotificationsHandler()        // trackExpiredNotification
+	go app.startRssFeedScraperHandler()              // rssFeedScraper
 }
 
 // publishMetrics sets up the expvar variables for the application

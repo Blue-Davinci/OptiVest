@@ -55,6 +55,7 @@ func (app *application) server() error {
 			app.config.scheduler.trackRecurringExpenses,
 			app.config.scheduler.trackOverdueDebts,
 			app.config.scheduler.trackExpiredNotifications,
+			app.config.scheduler.rssFeedScraper,
 		)
 		// Call Shutdown() on our server, passing in the context we just made.
 		shutdownChan <- srv.Shutdown(ctx)

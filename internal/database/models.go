@@ -13,6 +13,91 @@ import (
 	"github.com/sqlc-dev/pqtype"
 )
 
+type FeedApprovalStatus string
+
+const (
+	FeedApprovalStatusPending  FeedApprovalStatus = "pending"
+	FeedApprovalStatusApproved FeedApprovalStatus = "approved"
+	FeedApprovalStatusRejected FeedApprovalStatus = "rejected"
+)
+
+func (e *FeedApprovalStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = FeedApprovalStatus(s)
+	case string:
+		*e = FeedApprovalStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for FeedApprovalStatus: %T", src)
+	}
+	return nil
+}
+
+type NullFeedApprovalStatus struct {
+	FeedApprovalStatus FeedApprovalStatus
+	Valid              bool // Valid is true if FeedApprovalStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullFeedApprovalStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.FeedApprovalStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.FeedApprovalStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullFeedApprovalStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.FeedApprovalStatus), nil
+}
+
+type FeedType string
+
+const (
+	FeedTypeRss  FeedType = "rss"
+	FeedTypeJson FeedType = "json"
+)
+
+func (e *FeedType) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = FeedType(s)
+	case string:
+		*e = FeedType(s)
+	default:
+		return fmt.Errorf("unsupported scan type for FeedType: %T", src)
+	}
+	return nil
+}
+
+type NullFeedType struct {
+	FeedType FeedType
+	Valid    bool // Valid is true if FeedType is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullFeedType) Scan(value interface{}) error {
+	if value == nil {
+		ns.FeedType, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.FeedType.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullFeedType) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.FeedType), nil
+}
+
 type GoalStatus string
 
 const (
@@ -579,6 +664,31 @@ type Expense struct {
 	UpdatedAt    sql.NullTime
 }
 
+type FavoritePost struct {
+	ID        int64
+	PostID    int64
+	FeedID    int64
+	UserID    int64
+	CreatedAt time.Time
+}
+
+type Feed struct {
+	ID              int64
+	UserID          int64
+	Name            string
+	Url             string
+	ImgUrl          sql.NullString
+	FeedType        FeedType
+	FeedCategory    string
+	FeedDescription sql.NullString
+	IsHidden        bool
+	ApprovalStatus  FeedApprovalStatus
+	Version         int32
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	LastFetchedAt   sql.NullTime
+}
+
 type Goal struct {
 	ID                  int64
 	UserID              int64
@@ -746,6 +856,23 @@ type RecurringExpense struct {
 	NextOccurrence     time.Time
 	CreatedAt          sql.NullTime
 	UpdatedAt          sql.NullTime
+}
+
+type RssfeedPost struct {
+	ID                 int64
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+	Channeltitle       string
+	Channelurl         sql.NullString
+	Channeldescription sql.NullString
+	Channellanguage    sql.NullString
+	Itemtitle          string
+	Itemdescription    sql.NullString
+	Itemcontent        sql.NullString
+	ItempublishedAt    time.Time
+	Itemurl            string
+	ImgUrl             string
+	FeedID             int64
 }
 
 type StockInvestment struct {

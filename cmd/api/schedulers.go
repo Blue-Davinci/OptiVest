@@ -105,6 +105,41 @@ func (app *application) trackExpiredNotificationsHandler() {
 	app.config.scheduler.trackRecurringExpenses.Start()
 }
 
+func (app *application) startRssFeedScraperHandler() {
+	app.logger.Info("Starting the RSS feed scraper..", zap.String("time", time.Now().String()))
+	// set interval to every 5 minutes
+	updateInterval := "*/5 * * * *"
+	_, err := app.config.scheduler.rssFeedScraper.AddFunc(updateInterval, app.startRssFeedScraper)
+	if err != nil {
+		app.logger.Error("Error adding [startRssFeedScraper] to scheduler", zap.Error(err))
+	}
+	// Run the tracking first before starting the cron
+	app.startRssFeedScraper()
+	// start the cron scheduler
+	app.config.scheduler.rssFeedScraper.Start()
+}
+
+// startRssFeedScraperHandler() is the method that will start the RSS feed scraper.
+// We will use the nooroutines to set the number of feed bunches to fetch concurrently
+// We fetch the feeds to fetch, summoning the Main scraper.
+func (app *application) startRssFeedScraper() {
+	// number of feed bunches to fetch concurrently
+	noOfFeedsToFetch := int32(app.config.scraper.nooffeedstofetch)
+	// Get the feeds to fetch
+	feeds, err := app.models.FeedManager.GetNextFeedsToFetch(int32(noOfFeedsToFetch))
+	if err != nil {
+		app.logger.Error("Error getting feeds to fetch", zap.Error(err))
+		return
+	}
+	// Use nooroutines to fetch the feeds concurrently
+	for _, feed := range feeds {
+		app.logger.Info("Fetching feed", zap.String("Feed Name", feed.Name), zap.Int64("Feed ID", feed.ID))
+		app.background(func() {
+			app.rssFeedScraper(feed)
+		})
+	}
+}
+
 // =================================================================================================================
 // Handler Functions
 // ==================================================================================================================

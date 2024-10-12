@@ -52,9 +52,9 @@ func (app *application) routes() http.Handler {
 	v1Router.With(dynamicMiddleware.Then).Mount("/groups", app.groupRoutes())
 	v1Router.With(dynamicMiddleware.Then).Mount("/incomes", app.incomeRouter())
 	v1Router.With(dynamicMiddleware.Then).Mount("/debts", app.debtRoutes())
-	v1Router.With(dynamicMiddleware.Then).Mount("/investments", app.investmentPortfolioRoutes())
-	//expenses
 	v1Router.With(dynamicMiddleware.Then).Mount("/expenses", app.expenseRoutes())
+	v1Router.With(dynamicMiddleware.Then).Mount("/investments", app.investmentPortfolioRoutes())
+	v1Router.With(dynamicMiddleware.Then).Mount("/feeds", app.feedRoutes())
 
 	// Moount the v1Router to the main base router
 	router.Mount("/v1", v1Router)
@@ -179,4 +179,18 @@ func (app *application) investmentPortfolioRoutes() chi.Router {
 	// Analysis
 	investmentPortfolioRoutes.Get("/analysis", app.investmentPrtfolioAnalysisHandler)
 	return investmentPortfolioRoutes
+}
+
+func (app *application) feedRoutes() chi.Router {
+	feedRoutes := chi.NewRouter()
+	feedRoutes.Get("/", app.getAllRSSPostWithFavoriteTagsHandler)
+	feedRoutes.Post("/", app.createNewFeedHandler)
+	feedRoutes.Patch("/{feedID}", app.updateFeedHandler)
+	feedRoutes.Delete("/{feedID}", app.deleteFeedByIDHandler)
+
+	// favorites
+	feedRoutes.Post("/favorites", app.createNewFavoriteOnPostHandler)
+	feedRoutes.Delete("/favorites/{postID}", app.deleteFavoriteOnPostHandler)
+
+	return feedRoutes
 }

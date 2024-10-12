@@ -93,7 +93,7 @@ func (app *application) buildLLMRequest(user *data.User, goals *data.InvestmentG
 	}
 
 	// Now you can work with the fullResponse as needed
-	fmt.Println("Full Response:", fullResponse)
+	//fmt.Println("Full Response:", fullResponse)
 	header, llmAnalysis, footer, err := parseLLMResponse(fullResponse)
 	if err != nil {
 		return nil, err

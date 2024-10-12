@@ -234,9 +234,14 @@ func calculateBondVolatility(bondReturns []decimal.Decimal) decimal.Decimal {
 //
 // ==========================================================================================================
 type StockAnalysisStatistics struct {
-	Returns      []decimal.Decimal // returns []
-	SharpeRatio  decimal.Decimal   // sharpe ratio
-	SortinoRatio decimal.Decimal   // sortino ratio
+	Returns              []decimal.Decimal // returns []
+	SharpeRatio          decimal.Decimal   // sharpe ratio
+	SortinoRatio         decimal.Decimal   // sortino ratio
+	AverageSentiment     decimal.Decimal   // average sentiment
+	mostFrequentLabel    string            // most frequent label
+	weightedRelevance    decimal.Decimal   // weighted relevance
+	tickerSentimentScore decimal.Decimal   // ticker sentiment score
+	mostRelevantTopic    string            // most relevant topic
 }
 
 // getStockInvestmentDataHandler() is a helper function that fetches historical data for a given stock symbol
@@ -290,13 +295,50 @@ func (app *application) getStockInvestmentDataHandler(symbol string, riskFreeRat
 	if err != nil {
 		app.logger.Error("Failed to cache time series data in Redis", zap.Error(err))
 	}
+	// make sentiment values
+	averageSentiment := decimal.NewFromFloat(0.0)
+	mostFrequentLabel := ""
+	weightedRelevance := decimal.NewFromFloat(0.0)
+	tickerSentimentScore := decimal.NewFromFloat(0.0)
+	mostRelevantTopic := ""
+	// get sentiment data
+	sentimentData, err := app.getSentimentAnalysis(symbol)
+	if err != nil {
+		app.logger.Info("Failed to get sentiment data", zap.Error(err))
+		//just proceed
+	} else {
+		// Calculate Average Sentiment
+		averageSentiment = sentimentData.CalculateAverageSentiment()
+		app.logger.Info("Average Sentiment", zap.String("average_sentiment", averageSentiment.String()))
+
+		// Find Most Frequent Sentiment Label
+		mostFrequentLabel = sentimentData.FindMostFrequentSentimentLabel()
+		app.logger.Info("Most Frequent Sentiment Label", zap.String("sentiment_label", mostFrequentLabel))
+
+		// Calculate Weighted Relevance
+		weightedRelevance = sentimentData.CalculateWeightedRelevance()
+		app.logger.Info("Weighted Relevance", zap.String("weighted_relevance", weightedRelevance.String()))
+
+		// Ticker Sentiment Score
+		tickerSentimentScore = sentimentData.GetTickerSentiment(symbol)
+		app.logger.Info("Ticker Sentiment Score", zap.String("ticker_sentiment_score", tickerSentimentScore.String()))
+
+		// Most relevant topc
+		mostRelevantTopic = sentimentData.FindMostRelevantTopic()
+		app.logger.Info("Most Relevant Topic", zap.String("most_relevant_topic", mostRelevantTopic))
+	}
 
 	// Perform and log the calculations
 	returns, sharpe_ratio, sortino_ratio := app.performAndLogCalculations(&timeSeriesResponse, riskFreeRate)
 	newStockAnalysisStatistics := StockAnalysisStatistics{
-		Returns:      returns,
-		SharpeRatio:  sharpe_ratio,
-		SortinoRatio: sortino_ratio,
+		Returns:              returns,
+		SharpeRatio:          sharpe_ratio,
+		SortinoRatio:         sortino_ratio,
+		AverageSentiment:     averageSentiment,
+		mostFrequentLabel:    mostFrequentLabel,
+		weightedRelevance:    weightedRelevance,
+		tickerSentimentScore: tickerSentimentScore,
+		mostRelevantTopic:    mostRelevantTopic,
 	}
 
 	return &newStockAnalysisStatistics, nil
@@ -443,34 +485,6 @@ func sortinoRatio(returns []decimal.Decimal, riskFreeRate decimal.Decimal) decim
 // ==========================================================================================================
 // Sentiment Analysis Calculations
 // ==========================================================================================================
-
-func (app *application) performAndLogSentimentCalculations() error {
-	sentimentData, err := app.getSentimentAnalysis("AAPL")
-	if err != nil {
-		return fmt.Errorf("failed to get sentiment data: %v", err)
-	}
-	// Calclate Average Sentiment
-	averageSentiment := sentimentData.CalculateAverageSentiment()
-	app.logger.Info("Average Sentiment", zap.String("average_sentiment", averageSentiment.String()))
-
-	// Find Most Frequent Sentiment Label
-	mostFrequentLabel := sentimentData.FindMostFrequentSentimentLabel()
-	app.logger.Info("Most Frequent Sentiment Label", zap.String("sentiment_label", mostFrequentLabel))
-
-	// Calculate Weighted Relevance
-	weightedRelevance := sentimentData.CalculateWeightedRelevance()
-	app.logger.Info("Weighted Relevance", zap.String("weighted_relevance", weightedRelevance.String()))
-
-	// Ticker Sentiment Score
-	tickerSentimentScore := sentimentData.GetTickerSentiment("AAPL")
-	app.logger.Info("Ticker Sentiment Score", zap.String("ticker_sentiment_score", tickerSentimentScore.String()))
-
-	// Most relevant topc
-	mostRelevantTopic := sentimentData.FindMostRelevantTopic()
-	app.logger.Info("Most Relevant Topic", zap.String("most_relevant_topic", mostRelevantTopic))
-
-	return nil
-}
 
 // getSentimentAnalysis() is a helper function that fetches sentiment analysis data for a given stock symbol
 func (app *application) getSentimentAnalysis(symbol string) (*data.SentimentData, error) {
