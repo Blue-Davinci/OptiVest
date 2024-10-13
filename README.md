@@ -26,8 +26,12 @@ To install OptiVest, follow these steps:
     ```
 3. Install the required dependencies:
     ```sh
-    pip install -r requirements.txt
+    go mod tidy
     ```
+4. To Run the project do:
+   ```sh
+    make run/api
+   ```
 
 ## Usage
 
