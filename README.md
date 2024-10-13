@@ -28,14 +28,10 @@ To install OptiVest, follow these steps:
     ```sh
     go mod tidy
     ```
-4. To Run the project do:
-   ```sh
-    make run/api
-   ```
 
 ## Usage
 
 To start using OptiVest, run the following command:
 ```sh
-go!
+    make run/api
 ```
