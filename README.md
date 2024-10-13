@@ -1,4 +1,6 @@
 # OptiVest
+**Please Note:** This is an Unfinished README which Will Be Updated as the project becomes whole.
+
 
 OptiVest is an AI-powered financial advisor designed to help you manage your finances efficiently. It handles savings, incomes, debts, and expenses, performs portfolio management and analysis, allows setting of financial goals, generates reports, and forecasts future expenses.
 
