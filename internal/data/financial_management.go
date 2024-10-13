@@ -115,6 +115,24 @@ type InvestmentGoal struct {
 	Goals []InvestmentGoalHelper `json:"goals"`
 }
 
+// get the sum of target amount, current amount and monthly contribution
+func (i InvestmentGoal) GetSumAnalysis() (decimal.Decimal, decimal.Decimal, decimal.Decimal) {
+	var targetAmountSum decimal.Decimal
+	var currentAmountSum decimal.Decimal
+	var monthlyContributionSum decimal.Decimal
+	// if we have no goals, we return 0 for all
+	if len(i.Goals) == 0 {
+		return decimal.NewFromInt(0), decimal.NewFromInt(0), decimal.NewFromInt(0)
+	}
+
+	for _, goal := range i.Goals {
+		targetAmountSum = targetAmountSum.Add(goal.TargetAmount)
+		currentAmountSum = currentAmountSum.Add(goal.CurrentAmount)
+		monthlyContributionSum = monthlyContributionSum.Add(goal.MonthlyContribution)
+	}
+	return targetAmountSum, currentAmountSum, monthlyContributionSum
+}
+
 // Investment Goal Helper struct
 type InvestmentGoalHelper struct {
 	Name                string          `json:"name"`

@@ -27,8 +27,12 @@ func (ct *CustomTime1) UnmarshalJSON(b []byte) error {
 	str := strings.Trim(string(b), `"`)
 	// Try parsing in different formats
 	layouts := []string{
-		"2006-01-02T15:04:05Z07:00", // ISO 8601 with time
-		"2006-01-02",                // Date only
+		time.RFC3339,          // ISO 8601 with timezone (e.g., "2006-01-02T15:04:05Z07:00")
+		"2006-01-02",          // Date only (e.g., "2006-01-02")
+		"2006-01-02 15:04:05", // Date and time without timezone (e.g., "2006-01-02 15:04:05")
+		"2006-01-02T15:04:05", // ISO 8601 without timezone (e.g., "2006-01-02T15:04:05")
+		"02/01/2006",          // Alternative format (e.g., "02/01/2006" for day/month/year)
+		"January 2, 2006",     // Month day, year format (e.g., "January 2, 2006")
 	}
 
 	var err error

@@ -193,7 +193,6 @@ WHERE id = $1 AND user_id = $2
 RETURNING id;
 
 -- name: GetAllInvestmentsByUserID :many
--- name: GetAllInvestmentsByUserID :many
 SELECT 
     'stock' AS investment_type,
     jsonb_agg(

@@ -22,6 +22,11 @@ type UserPortfolioProfile struct {
 	InvestmentGoals    *data.InvestmentGoal           `json:"investment_goals"`
 	InvestmentAnalysis data.InvestmentAnalysis        `json:"investment_analysis"`
 }
+type UserPersonalFinanceProfile struct {
+	UserTimeHorizon         database.NullTimeHorizonType   `json:"user_time_horizon"`
+	UserRiskTolerance       database.NullRiskToleranceType `json:"user_risk_tolerance"`
+	PersonalFinanceAnalysis data.UnifiedFinanceAnalysis    `json:"personal_finance_analysis"`
+}
 type Chunk struct {
 	ID                string   `json:"id"`
 	Object            string   `json:"object"`
@@ -42,7 +47,7 @@ type Delta struct {
 
 // buildLLMRequest sends a request to the LLM API with the user's profile and investment analysis data
 // and returns the analyzed portfolio data.
-func (app *application) buildLLMRequest(user *data.User, goals *data.InvestmentGoal, investmentAnalysis *data.InvestmentAnalysis) (*LLMAnalyzedPortfolio, error) {
+func (app *application) buildInvestmentPortfolioLLMRequest(user *data.User, goals *data.InvestmentGoal, investmentAnalysis *data.InvestmentAnalysis) (*LLMAnalyzedPortfolio, error) {
 	// Create a profile
 	profile := UserPortfolioProfile{
 		UserTimeHorizon:    user.TimeHorizon,
@@ -74,12 +79,56 @@ func (app *application) buildLLMRequest(user *data.User, goals *data.InvestmentG
         "include_usage": true
     }
 }`
-	portfolioData, err := json.Marshal(profile)
+	return app.buildLLMRequestHelper(profile, instructions)
+}
+
+func (app *application) buildPersonalFinanceLLMRequest(user *data.User, unifiedPersonalFinanceAnalysis *data.UnifiedFinanceAnalysis) (*LLMAnalyzedPortfolio, error) {
+	// Create a profile
+	profile := UserPersonalFinanceProfile{
+		UserTimeHorizon:         user.TimeHorizon,
+		UserRiskTolerance:       user.RiskTolerance,
+		PersonalFinanceAnalysis: *unifiedPersonalFinanceAnalysis,
+	}
+
+	instructions := `{
+		"messages": [
+		  {
+			"role": "system",
+			"content": "You are a financial assistant that analyzes personal finances, providing detailed budget optimization suggestions, savings opportunities, and debt management strategies. Your task is to analyze the user's financial profile, including income, expenses, debts, savings, and goals. Ensure that your response is strictly in JSON format, structured into five sections: \n\n1. 'summary': Provide a high-level overview of your cash flow, budget utilization, and debt situation. Mention any significant trends, such as over-budget behavior, surplus funds, or debt accumulation. If there are no debts, mention this explicitly. Additionally, provide suggestions for increasing income, such as side jobs, investment opportunities, or skill improvements. This section should include fields like 'cash_flow_summary', 'total_income', 'total_expenses', 'total_debt', 'budget_utilization', 'over_budget', 'debt_trend', and 'income_opportunities'. Handle missing data by indicating 'data unavailable' in relevant fields.\n\n2. 'metrics': Include specific financial metrics, such as income vs. expenses, savings rate, debt-to-income ratio, and progress towards goals. The output should be formatted as JSON and include fields like 'income_vs_expenses', 'savings_rate', 'debt_to_income_ratio', and 'progress_towards_goals' (an array with goal names and progress percentages). If data is missing, clearly indicate so.\n\n3. 'actions': Suggest actionable steps for optimizing your financial health. These steps can include budget adjustments, debt payoff strategies, or reallocating funds towards key goals. Ensure that the actions are measurable and specific, including fields like 'budget_optimization', 'debt_payoff_plan', 'fund_reallocation' (an array indicating which funds to move and where), and 'emergency_fund_recommendation'. Additionally, include fund reallocations and debt payoff percentages in decimal format for frontend parsing.\n\n4. 'recommended_goal_adjustments': Suggest adjustments to goal priorities if you are behind on key financial goals. Structure this as an array with fields like 'goal_name', 'recommended_funds_allocation', and 'progress_needed'. If goals are met, state this clearly.\n\n5. 'overall_summary': Provide an overarching summary that ties together all recommendations and offers long-term financial advice. This section should contain fields like 'summary_text' and 'financial_advice'. Finally, provide a **text summary** as a field in the JSON that summarizes all findings and recommendations in plain language. \n\nEnsure that any missing data (e.g., no debts) is handled gracefully, and percentages are provided in decimal format where applicable for easy use on the frontend."
+		  },
+		  {
+			"role": "user",
+			"content": "Analyze the following financial data for the user and provide detailed suggestions based on their specific income, expenses, debts, budgets, and goals. Include sections for summary, metrics, actions, recommended goal adjustments, and overall recommendations."
+		  },
+		  {
+			"role": "user",
+			"content": %s
+		  }
+		],
+		"stop": [
+		  "<|eot_id|>"
+		],
+		"model": "Meta-Llama-3.1-405B-Instruct",
+		"stream": true,
+		"stream_options": {
+		  "include_usage": true
+		}
+	  }`
+
+	return app.buildLLMRequestHelper(profile, instructions)
+}
+
+// buildLLMRequestHelper builds and sends the LLM request for analysis
+func (app *application) buildLLMRequestHelper(profile interface{}, instructionsTemplate string) (*LLMAnalyzedPortfolio, error) {
+	// Marshal the profile data
+	profileData, err := json.Marshal(profile)
 	if err != nil {
-		app.logger.Info("Error marshalling portfolio data")
+		app.logger.Info("Error marshalling profile data")
 		return nil, err
 	}
-	finalLLMRequest := fmt.Sprintf(instructions, string(portfolioData))
+
+	// Create the final LLM request
+	finalLLMRequest := fmt.Sprintf(instructionsTemplate, string(profileData))
 
 	// Send the request
 	url := app.config.api.apikeys.sambanova.url
@@ -92,13 +141,16 @@ func (app *application) buildLLMRequest(user *data.User, goals *data.InvestmentG
 		return nil, err
 	}
 
-	// Now you can work with the fullResponse as needed
-	//fmt.Println("Full Response:", fullResponse)
+	// Log the full response
+	//app.logger.Info("Full Response:", zap.String("full_response", fullResponse))
+
+	// Parse the response
 	header, llmAnalysis, footer, err := parseLLMResponse(fullResponse)
 	if err != nil {
 		return nil, err
 	}
-	// create a LLMAnalyzedPortfolio
+
+	// Return the analyzed portfolio
 	llmAnalyzedPortfolio := &LLMAnalyzedPortfolio{
 		Header:   header,
 		Analysis: llmAnalysis,

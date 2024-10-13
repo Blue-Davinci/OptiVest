@@ -54,6 +54,7 @@ func (app *application) routes() http.Handler {
 	v1Router.With(dynamicMiddleware.Then).Mount("/debts", app.debtRoutes())
 	v1Router.With(dynamicMiddleware.Then).Mount("/expenses", app.expenseRoutes())
 	v1Router.With(dynamicMiddleware.Then).Mount("/investments", app.investmentPortfolioRoutes())
+	v1Router.With(dynamicMiddleware.Then).Mount("/personalfinance", app.personalFinanceRoutes())
 	v1Router.With(dynamicMiddleware.Then).Mount("/feeds", app.feedRoutes())
 
 	// Moount the v1Router to the main base router
@@ -181,6 +182,7 @@ func (app *application) investmentPortfolioRoutes() chi.Router {
 	return investmentPortfolioRoutes
 }
 
+// feedRoutes() is a method that returns a chi.Router that contains all the routes for the feeds
 func (app *application) feedRoutes() chi.Router {
 	feedRoutes := chi.NewRouter()
 	feedRoutes.Get("/", app.getAllRSSPostWithFavoriteTagsHandler)
@@ -193,4 +195,12 @@ func (app *application) feedRoutes() chi.Router {
 	feedRoutes.Delete("/favorites/{postID}", app.deleteFavoriteOnPostHandler)
 
 	return feedRoutes
+}
+
+// personalFinanceRoutes() is a method that returns a chi.Router that contains all the routes for the personal finance
+func (app *application) personalFinanceRoutes() chi.Router {
+	personalFinanceRoutes := chi.NewRouter()
+	personalFinanceRoutes.Get("/analysis", app.getAllFinanceDetailsForAnalysisByUserIDHandler)
+	personalFinanceRoutes.Get("/prediction", app.getPersonalFinancePrediction)
+	return personalFinanceRoutes
 }

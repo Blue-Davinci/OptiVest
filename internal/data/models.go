@@ -23,6 +23,7 @@ type Models struct {
 	NotificationManager        NotificationManagerModel
 	InvestmentPortfolioManager InvestmentPortfolioModel
 	FeedManager                FeedManagerModel
+	PersonalFinancePortfolio   PersonalFinancePortfolioModel
 }
 
 func NewModels(db *database.Queries) Models {
@@ -36,5 +37,6 @@ func NewModels(db *database.Queries) Models {
 		NotificationManager:        NotificationManagerModel{DB: db},
 		InvestmentPortfolioManager: InvestmentPortfolioModel{DB: db},
 		FeedManager:                FeedManagerModel{DB: db},
+		PersonalFinancePortfolio:   PersonalFinancePortfolioModel{DB: db},
 	}
 }

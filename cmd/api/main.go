@@ -46,11 +46,12 @@ type config struct {
 		author          string
 		defaultcurrency string
 		apikeys         struct { // api keys
-			alphavantage  apikey_details
-			exchangerates apikey_details
-			fred          apikey_details
-			fmp           apikey_details
-			sambanova     apikey_details
+			alphavantage         apikey_details
+			exchangerates        apikey_details
+			fred                 apikey_details
+			fmp                  apikey_details
+			sambanova            apikey_details
+			optivestmicroservice apikey_details
 		}
 	}
 	ws struct {
@@ -177,6 +178,9 @@ func main() {
 	// sambanova
 	flag.StringVar(&cfg.api.apikeys.sambanova.key, "api-key-sambanova", os.Getenv("OPTIVEST_SAMBA_NOVA_LLM_API_KEY"), "Sambanova API Key")
 	flag.StringVar(&cfg.api.apikeys.sambanova.url, "api-url-sambanova", "https://fast-api.snova.ai/v1/chat/completions", "Sambanova API URL")
+	// optivest microservice
+	flag.StringVar(&cfg.api.apikeys.optivestmicroservice.key, "api-key-optivestmicroservice", os.Getenv("OPTIVEST_PREDICTOR_API_KEY"), "OptiVest Microservice API Key")
+	flag.StringVar(&cfg.api.apikeys.optivestmicroservice.url, "api-url-optivestmicroservice", "http://127.0.0.1:8000/v1/predict", "OptiVest Microservice API URL")
 	// Rate limiter flags
 	flag.Float64Var(&cfg.limiter.rps, "limiter-rps", 5, "Rate limiter maximum requests per second")
 	flag.IntVar(&cfg.limiter.burst, "limiter-burst", 10, "Rate limiter maximum burst")

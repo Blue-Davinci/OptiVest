@@ -704,7 +704,7 @@ func (app *application) investmentPrtfolioAnalysisHandler(w http.ResponseWriter,
 		app.serverErrorResponse(w, r, err)
 	}
 	// build LLm
-	analyzedLLMResponse, err := app.buildLLMRequest(user, goals, investmentAnalysis)
+	analyzedLLMResponse, err := app.buildInvestmentPortfolioLLMRequest(user, goals, investmentAnalysis)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 	}
