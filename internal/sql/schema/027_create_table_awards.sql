@@ -3,7 +3,8 @@ CREATE TABLE awards (
     id SERIAL PRIMARY KEY,         -- Unique identifier for each award
     code VARCHAR(50) NOT NULL UNIQUE, -- Unique code for the award
     description TEXT NOT NULL,      -- Description of the award
-    point INTEGER NOT NULL DEFAULT 1,             -- Point value of the award
+    award_image_url TEXT,           -- URL for the image of the award
+    points INTEGER NOT NULL DEFAULT 1,             -- Point value of the award
     created_at TIMESTAMP(0) WITH TIME ZONE NOT NULL DEFAULT NOW(),  -- Timestamp for when the award was created
     updated_at TIMESTAMP(0) WITH TIME ZONE NOT NULL DEFAULT NOW()   -- Timestamp for when the award was last updated
 );
@@ -19,7 +20,7 @@ EXECUTE FUNCTION update_timestamp();
 -- +goose StatementEnd
 
 -- Insert initial award data
-INSERT INTO awards (code, description, point, created_at, updated_at)
+INSERT INTO awards (code, description, points, created_at, updated_at)
 VALUES
     ('first_transaction', 'Awarded for adding the first transaction.', 5, NOW(), NOW()), 
     ('first_income', 'Awarded for adding the first income.', 10, NOW(), NOW()),

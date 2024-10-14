@@ -56,6 +56,7 @@ func (app *application) routes() http.Handler {
 	v1Router.With(dynamicMiddleware.Then).Mount("/investments", app.investmentPortfolioRoutes())
 	v1Router.With(dynamicMiddleware.Then).Mount("/personalfinance", app.personalFinanceRoutes())
 	v1Router.With(dynamicMiddleware.Then).Mount("/feeds", app.feedRoutes())
+	v1Router.With(dynamicMiddleware.Then).Mount("/awards", app.awardRoutes())
 
 	// Moount the v1Router to the main base router
 	router.Mount("/v1", v1Router)
@@ -205,4 +206,11 @@ func (app *application) personalFinanceRoutes() chi.Router {
 	personalFinanceRoutes.Get("/analysis", app.getAllFinanceDetailsForAnalysisByUserIDHandler)
 	personalFinanceRoutes.Get("/prediction", app.getPersonalFinancePrediction)
 	return personalFinanceRoutes
+}
+
+// awardRoutes() is a method that returns a chi.Router that contains all the routes for the awards
+func (app *application) awardRoutes() chi.Router {
+	awardRoutes := chi.NewRouter()
+	awardRoutes.Get("/", app.getAllAwardsForUserByIDHandler)
+	return awardRoutes
 }

@@ -16,11 +16,13 @@ const (
 )
 
 type Award struct {
-	ID          int32     `json:"id"`
-	Code        string    `json:"code"`
-	Description string    `json:"description"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID            int32     `json:"id"`
+	Code          string    `json:"code"`
+	Description   string    `json:"description"`
+	AwardImageUrl string    `json:"award_image_url"`
+	Points        int32     `json:"points"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 // CreateNewUserAward() is a method that creates a new user award
@@ -93,11 +95,13 @@ func populateAward(awardRow interface{}) *Award {
 	switch award := awardRow.(type) {
 	case database.Award:
 		return &Award{
-			ID:          award.ID,
-			Code:        award.Code,
-			Description: award.Description,
-			CreatedAt:   award.CreatedAt,
-			UpdatedAt:   award.UpdatedAt,
+			ID:            award.ID,
+			Code:          award.Code,
+			Description:   award.Description,
+			AwardImageUrl: award.AwardImageUrl.String,
+			Points:        award.Points,
+			CreatedAt:     award.CreatedAt,
+			UpdatedAt:     award.UpdatedAt,
 		}
 	default:
 		return nil

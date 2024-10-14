@@ -33,32 +33,28 @@ SELECT
     id,
     code,
     description,
+    award_image_url,
+    points,
     created_at,
     updated_at
 FROM awards
 `
 
-type GetAllAwardsRow struct {
-	ID          int32
-	Code        string
-	Description string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
-}
-
-func (q *Queries) GetAllAwards(ctx context.Context) ([]GetAllAwardsRow, error) {
+func (q *Queries) GetAllAwards(ctx context.Context) ([]Award, error) {
 	rows, err := q.db.QueryContext(ctx, getAllAwards)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []GetAllAwardsRow
+	var items []Award
 	for rows.Next() {
-		var i GetAllAwardsRow
+		var i Award
 		if err := rows.Scan(
 			&i.ID,
 			&i.Code,
 			&i.Description,
+			&i.AwardImageUrl,
+			&i.Points,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -76,7 +72,7 @@ func (q *Queries) GetAllAwards(ctx context.Context) ([]GetAllAwardsRow, error) {
 }
 
 const getAllAwardsForUserByID = `-- name: GetAllAwardsForUserByID :many
-SELECT a.id, a.code, a.description, a.point, a.created_at, a.updated_at
+SELECT a.id, a.code, a.description, a.award_image_url, a.points, a.created_at, a.updated_at
 FROM awards a
 INNER JOIN user_awards ua ON ua.award_id = a.id
 WHERE ua.user_id = $1
@@ -95,7 +91,8 @@ func (q *Queries) GetAllAwardsForUserByID(ctx context.Context, userID int64) ([]
 			&i.ID,
 			&i.Code,
 			&i.Description,
-			&i.Point,
+			&i.AwardImageUrl,
+			&i.Points,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {

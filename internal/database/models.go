@@ -592,12 +592,13 @@ type AlternativeInvestment struct {
 }
 
 type Award struct {
-	ID          int32
-	Code        string
-	Description string
-	Point       int32
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	ID            int32
+	Code          string
+	Description   string
+	AwardImageUrl sql.NullString
+	Points        int32
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 type BondInvestment struct {

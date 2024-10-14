@@ -15,6 +15,8 @@ SELECT
     id,
     code,
     description,
+    award_image_url,
+    points,
     created_at,
     updated_at
 FROM awards;
