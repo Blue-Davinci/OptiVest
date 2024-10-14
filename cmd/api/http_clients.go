@@ -81,23 +81,35 @@ func GETRequest[T any](c *Optivet_Client, url string, headers map[string]string)
 }
 
 // POSTRequest sends a POST request with a body to the specified URL and unmarshals the response into a generic type T
-func POSTRequest[T any](c *Optivet_Client, url string, headers map[string]string, body interface{}) (T, error) {
+func POSTRequest[T any](c *Optivet_Client, url string, headers map[string]string, body interface{}, isMultipart bool) (T, error) {
 	var result T
 
-	// Marshal the body to JSON
-	jsonBody, err := json.Marshal(body)
-	if err != nil {
-		return result, err
+	// Create the request body based on whether it's multipart or JSON
+	var reqBody io.Reader
+
+	if isMultipart {
+		// If multipart, assert body to be bytes.Buffer, not *bytes.Buffer
+		bufferBody, ok := body.(bytes.Buffer)
+		if !ok {
+			return result, fmt.Errorf("expected body to be bytes.Buffer for multipart request")
+		}
+		reqBody = &bufferBody // Pass a pointer to the bytes.Buffer
+	} else {
+		// Otherwise, marshal body to JSON
+		jsonBody, err := json.Marshal(body)
+		if err != nil {
+			return result, err
+		}
+		reqBody = bytes.NewBuffer(jsonBody)
 	}
 
 	// Create a new POST request
-	req, err := retryablehttp.NewRequest("POST", url, bytes.NewBuffer(jsonBody))
+	req, err := retryablehttp.NewRequest("POST", url, reqBody)
 	if err != nil {
 		return result, err
 	}
 
-	// Set headers
-	req.Header.Set("Content-Type", "application/json")
+	// Set headers (ensure the correct content-type is set for multipart or JSON)
 	for key, value := range headers {
 		req.Header.Set(key, value)
 	}
@@ -111,7 +123,7 @@ func POSTRequest[T any](c *Optivet_Client, url string, headers map[string]string
 
 	// Check if the response status is not 2xx
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return result, errors.New("non-2xx response code")
+		return result, fmt.Errorf("non-2xx response code: %d", resp.StatusCode)
 	}
 
 	// Read the response body

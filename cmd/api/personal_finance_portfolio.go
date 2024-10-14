@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"errors"
+	"mime/multipart"
 	"net/http"
 	"time"
 
@@ -150,8 +152,10 @@ func (app *application) getPersonalFinancePrediction(w http.ResponseWriter, r *h
 	response, err := POSTRequest[data.PersonalFinancePredictionResponse](
 		app.http_client,
 		app.config.api.apikeys.optivestmicroservice.url,
-		map[string]string{"X-API-KEY": app.config.api.apikeys.optivestmicroservice.key},
+		map[string]string{"X-API-KEY": app.config.api.apikeys.optivestmicroservice.key,
+			"Content-Type": "application/json"},
 		info,
+		false,
 	)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
@@ -163,4 +167,108 @@ func (app *application) getPersonalFinancePrediction(w http.ResponseWriter, r *h
 		app.serverErrorResponse(w, r, err)
 	}
 
+}
+
+// getOCRDRecieptDataAnalysis() is a 2 step endpoint handler that will process reciept information provided
+// from the user. The user will only supply the URL of the reciept image and we will process the image.
+// We will perform a POST request to the OCR.Space API endpoint to get the text from the image.
+// After recieving this text, we will then send the data to our LLM to proceed with the analysis
+// And return the analysis to the user.
+func (app *application) getOCRDRecieptDataAnalysisHandler(w http.ResponseWriter, r *http.Request) {
+	// post request, we receive the URL of the reciept image
+	var input struct {
+		URL string `json:"url"`
+	}
+	// decode the request body into the input struct
+	err := app.readJSON(w, r, &input)
+	if err != nil {
+		app.badRequestResponse(w, r, err)
+		return
+	}
+	// validate using validateURL
+	v := validator.New()
+	err = validateURL(input.URL)
+	if err != nil {
+		v.AddError("url", "must be a valid URL")
+		app.failedValidationResponse(w, r, v.Errors)
+		return
+	}
+	// process the OCR request
+	ocrResponse, err := app.processOCRRequest(input.URL)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+		return
+	}
+	// send ocrRespinse to our LLM buildOCRRecieptAnalysisRequest
+	llmOCRRecieptAnalysis, err := app.buildOCRRecieptAnalysisLLMRequest(ocrResponse)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+		return
+	}
+	// send the response
+	err = app.writeJSON(w, http.StatusOK, envelope{"ocr_analysis": llmOCRRecieptAnalysis}, nil)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+	}
+
+}
+
+// Struct for parsed OCR result
+type OCRResponse struct {
+	ParsedResults []struct {
+		ParsedText string `json:"ParsedText"`
+	} `json:"ParsedResults"`
+}
+
+func (app *application) processOCRRequest(url string) (*OCRResponse, error) {
+	// we need a form Body for this, so we create a form body
+	var requestBody bytes.Buffer
+	writer := multipart.NewWriter(&requestBody)
+	// Add URL
+	err := writer.WriteField("url", url)
+	if err != nil {
+		return nil, err
+	}
+	// Add necessary fields for OCR engine 2 and other options
+	fields := map[string]string{
+		"language":                     "eng",
+		"isOverlayRequired":            "false",
+		"OCREngine":                    "2",
+		"isCreateSearchablePdf":        "false",
+		"isSearchablePdfHideTextLayer": "false",
+	}
+	// Add all fields to the form-data
+	for key, value := range fields {
+		err := writer.WriteField(key, value)
+		if err != nil {
+			return nil, err
+		}
+	}
+	// Close the writer
+	err = writer.Close()
+	if err != nil {
+		return nil, err
+	}
+	// set apikey header
+	headers := map[string]string{
+		"apikey":       app.config.api.apikeys.ocrspace.key,
+		"Content-Type": writer.FormDataContentType(),
+	}
+	// print the body
+	app.logger.Info(requestBody.String())
+	// call our POSTREQUEST http client with OCRResponse
+	response, err := POSTRequest[OCRResponse](
+		app.http_client,
+		app.config.api.apikeys.ocrspace.url,
+		headers,
+		requestBody,
+		true,
+	)
+	if err != nil {
+		return nil, err
+	}
+	// print api key and url used
+	//app.logger.Info("ITEMS USED", zap.String("url", app.config.api.apikeys.ocrspace.url), zap.String("API Key", app.config.api.apikeys.ocrspace.key))
+	//app.logger.Info("Response", zap.Any("response", response))
+	return &response, nil
 }

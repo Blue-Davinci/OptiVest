@@ -8,6 +8,7 @@ import (
 
 	"github.com/Blue-Davinci/OptiVest/internal/data"
 	"github.com/Blue-Davinci/OptiVest/internal/database"
+	"go.uber.org/zap"
 )
 
 type LLMAnalyzedPortfolio struct {
@@ -118,6 +119,37 @@ func (app *application) buildPersonalFinanceLLMRequest(user *data.User, unifiedP
 	return app.buildLLMRequestHelper(profile, instructions)
 }
 
+// buildOCRRecieptAnalysisRequest sends a request to the LLM API with the OCR analysis data
+// and returns the analyzed OCR data.
+func (app *application) buildOCRRecieptAnalysisLLMRequest(ocrAnalysis *OCRResponse) (*LLMAnalyzedPortfolio, error) {
+	// no profile for this one, let us create instructions
+	instructions := `
+{
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are tasked with analyzing OCR-processed data from a financial services company and extracting relevant details into a structured JSON format. The JSON output should contain the following fields: items_purchased, total_amount_spent, date_of_purchase, store_name, and payment_method. If any of these fields are missing or unclear, include null for that field. Handle edge cases such as incomplete or unclear data by including an 'error' key to describe any issues encountered. Avoid generating any code."
+    },
+    {
+      "role": "user",
+      "content": "Analyze the following OCR processed data and return the results in a structured JSON format including: 1) Items purchased, 2) Total amount spent, 3) Date of purchase, 4) Store name, 5) Payment method. If any data is missing, please indicate that in the JSON response using null values. If there is an error or the data is unclear, include an 'error' key with a description of the issue."
+    },
+    {
+      "role": "user",
+      "content": %s
+    }
+  ],
+  "stop": ["<|eot_id|>"],
+  "model": "Meta-Llama-3.1-405B-Instruct",
+  "stream": true,
+  "stream_options": {
+    "include_usage": true
+  }
+}
+`
+	return app.buildLLMRequestHelper(ocrAnalysis, instructions)
+}
+
 // buildLLMRequestHelper builds and sends the LLM request for analysis
 func (app *application) buildLLMRequestHelper(profile interface{}, instructionsTemplate string) (*LLMAnalyzedPortfolio, error) {
 	// Marshal the profile data
@@ -129,6 +161,7 @@ func (app *application) buildLLMRequestHelper(profile interface{}, instructionsT
 
 	// Create the final LLM request
 	finalLLMRequest := fmt.Sprintf(instructionsTemplate, string(profileData))
+	app.logger.Info("Final LLM Request:", zap.Any("final_llm_request", finalLLMRequest))
 
 	// Send the request
 	url := app.config.api.apikeys.sambanova.url
@@ -142,7 +175,7 @@ func (app *application) buildLLMRequestHelper(profile interface{}, instructionsT
 	}
 
 	// Log the full response
-	//app.logger.Info("Full Response:", zap.String("full_response", fullResponse))
+	app.logger.Info("Full Response:", zap.String("full_response", fullResponse))
 
 	// Parse the response
 	header, llmAnalysis, footer, err := parseLLMResponse(fullResponse)
@@ -163,26 +196,38 @@ func (app *application) buildLLMRequestHelper(profile interface{}, instructionsT
 // parseLLMResponse parses the response from the LLM API
 // and returns the top section, JSON data, and bottom section.
 func parseLLMResponse(response string) (string, map[string]interface{}, string, error) {
-	// Split the response into parts
-	sections := strings.Split(response, "```json")
+	// Split the response into parts using "```json" as the first preference
+	sections := strings.SplitN(response, "```json", 2)
 	if len(sections) < 2 {
-		return "", nil, "", errors.New("no JSON section found")
+		// If "```json" is not found, try splitting by just "```"
+		sections = strings.SplitN(response, "```", 2)
+		if len(sections) < 2 {
+			return "", nil, "", errors.New("no JSON section found")
+		}
 	}
 
 	// Get the non-JSON top section
 	topSection := strings.TrimSpace(sections[0])
 
 	// Split the remaining parts to extract the JSON and bottom sections
-	jsonAndBottom := strings.Split(sections[1], "```")
+	jsonAndBottom := strings.SplitN(sections[1], "```", 2)
 	if len(jsonAndBottom) < 2 {
 		return "", nil, "", errors.New("incomplete JSON section")
 	}
 
+	// Trim the JSON part and handle potential extra spaces or formatting issues
+	jsonPart := strings.TrimSpace(jsonAndBottom[0])
+
+	// Check if the JSON part is empty
+	if jsonPart == "" {
+		return topSection, nil, strings.TrimSpace(jsonAndBottom[1]), errors.New("parsed JSON part is empty")
+	}
+
 	// Parse the JSON part
 	var jsonData map[string]interface{}
-	err := json.Unmarshal([]byte(strings.TrimSpace(jsonAndBottom[0])), &jsonData)
+	err := json.Unmarshal([]byte(jsonPart), &jsonData)
 	if err != nil {
-		return "", nil, "", err
+		return "", nil, "", fmt.Errorf("error parsing JSON: %w", err)
 	}
 
 	// Get the remaining bottom section

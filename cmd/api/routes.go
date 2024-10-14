@@ -139,6 +139,8 @@ func (app *application) expenseRoutes() chi.Router {
 	expenseRoutes.Post("/recurring", app.createNewRecurringExpenseHandler)
 	expenseRoutes.Patch("/recurring/{expenseID}", app.updateRecurringExpenseByIDHandler)
 
+	expenseRoutes.Post("/receipts", app.getOCRDRecieptDataAnalysisHandler)
+
 	return expenseRoutes
 }
 

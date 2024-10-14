@@ -52,6 +52,7 @@ type config struct {
 			fmp                  apikey_details
 			sambanova            apikey_details
 			optivestmicroservice apikey_details
+			ocrspace             apikey_details
 		}
 	}
 	ws struct {
@@ -181,6 +182,9 @@ func main() {
 	// optivest microservice
 	flag.StringVar(&cfg.api.apikeys.optivestmicroservice.key, "api-key-optivestmicroservice", os.Getenv("OPTIVEST_PREDICTOR_API_KEY"), "OptiVest Microservice API Key")
 	flag.StringVar(&cfg.api.apikeys.optivestmicroservice.url, "api-url-optivestmicroservice", "http://127.0.0.1:8000/v1/predict", "OptiVest Microservice API URL")
+	// ocrspace
+	flag.StringVar(&cfg.api.apikeys.ocrspace.key, "api-key-ocrspace", os.Getenv("OPTIVEST_OCRSPACE_API_KEY"), "OCR.Space API Key")
+	flag.StringVar(&cfg.api.apikeys.ocrspace.url, "api-url-ocrspace", "https://api.ocr.space/parse/image", "OCR.Space API URL")
 	// Rate limiter flags
 	flag.Float64Var(&cfg.limiter.rps, "limiter-rps", 5, "Rate limiter maximum requests per second")
 	flag.IntVar(&cfg.limiter.burst, "limiter-burst", 10, "Rate limiter maximum burst")
