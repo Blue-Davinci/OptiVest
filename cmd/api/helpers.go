@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -570,4 +572,61 @@ func setToCache[T any](ctx context.Context, rdb *redis.Client, key string, value
 func (app *application) calculateYearsToMaturity(bondMD data.CustomTime1) int {
 	yearsToMaturity := int(time.Until(bondMD.ToTime()).Hours() / (24 * 365))
 	return yearsToMaturity
+}
+
+// processOCRRequestHelper() is a helper function that will process the OCR request
+// We will send a POST request to the OCR.Space API endpoint to get the text from the image
+// We will then return the OCRResponse
+func (app *application) proces1sOCRRequestHelper(url string) (*data.OCRResponse, error) {
+	// we need a form Body for this, so we create a form body
+	var requestBody bytes.Buffer
+	writer := multipart.NewWriter(&requestBody)
+	// Add URL
+	err := writer.WriteField("url", url)
+	if err != nil {
+		return nil, err
+	}
+	// Add necessary fields for OCR engine 2 and other options
+	fields := map[string]string{
+		"language":                     "eng",
+		"isOverlayRequired":            "false",
+		"OCREngine":                    "2",
+		"isCreateSearchablePdf":        "false",
+		"isSearchablePdfHideTextLayer": "false",
+	}
+	// Add all fields to the form-data
+	for key, value := range fields {
+		err := writer.WriteField(key, value)
+		if err != nil {
+			return nil, err
+		}
+	}
+	// Close the writer
+	err = writer.Close()
+	if err != nil {
+		return nil, err
+	}
+	// set apikey header
+	headers := map[string]string{
+		"apikey":       app.config.api.apikeys.ocrspace.key,
+		"Content-Type": writer.FormDataContentType(),
+	}
+	// print the body
+	//app.logger.Info(requestBody.String())
+	// call our POSTREQUEST http client with OCRResponse
+	response, err := POSTRequest[data.OCRResponse](
+		app.http_client,
+		app.config.api.apikeys.ocrspace.url,
+		headers,
+		requestBody,
+		true,
+	)
+	if err != nil {
+		return nil, err
+	}
+	// print api key and url used
+	//app.logger.Info("ITEMS USED", zap.String("url", app.config.api.apikeys.ocrspace.url), zap.String("API Key", app.config.api.apikeys.ocrspace.key))
+	//app.logger.Info("OCR Response", zap.Any("response", response))
+	app.logger.Info("Done processing OCR request successfully")
+	return &response, nil
 }

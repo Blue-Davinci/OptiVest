@@ -20,12 +20,24 @@ type PersonalFinancePortfolioModel struct {
 
 const (
 	DefaultPerFinPortDBContextTimeout = 5 * time.Second
+	DefaultRedisOCRTTL                = 24 * time.Hour
+)
+const (
+	// redis prefix
+	RedisOCRRedeiptPrefix = "ocr_receipt_analysis:"
 )
 const (
 	DataUserHasEnoughPredictionDataPerMonth = "sufficient_data_monthly"
 	DataUserHasEnoughPredictionDataPerWeek  = "sufficient_data_weekly"
 	DataUserInsufficientPredictionData      = "insufficient_data"
 )
+
+// Struct for parsed OCR result
+type OCRResponse struct {
+	ParsedResults []struct {
+		ParsedText string `json:"ParsedText"`
+	} `json:"ParsedResults"`
+}
 
 // UnifiedFinanceAnalysis is a struct that contains all the finance analysis data
 type UnifiedFinanceAnalysis struct {
@@ -118,18 +130,22 @@ type GoalAnalysis struct {
 	TargetDate CustomTime1     `json:"target_date"` // You could use time.Time if necessary
 	BudgetName string          `json:"budget_name"`
 }
+
+// TotalGoalAnalysis is a struct that contains all the goal analysis data
 type TotalGoalAnalysis struct {
 	Type        string          `json:"type"`         // Always "goal"
 	Details     []GoalAnalysis  `json:"details"`      // List of goal details
 	TotalAmount decimal.Decimal `json:"total_amount"` // Total goal sum
 }
 
+// PredictionPersonalFinanceData is a struct that represents a personal finance data for prediction
 type PredictionPersonalFinanceData struct {
 	Type        string          `json:"type"`
 	PeriodStart time.Time       `json:"period_start"`
 	TotalAmount decimal.Decimal `json:"total_amount"`
 }
 
+// Prediction is a struct that represents a prediction
 type Prediction struct {
 	Ds               CustomTime1 `json:"ds"`
 	Yhat             float64     `json:"yhat"`

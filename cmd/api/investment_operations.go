@@ -12,6 +12,7 @@ import (
 	"go.uber.org/zap"
 )
 
+// BondAnalysisStatistics struct to hold the bond analysis statistics
 type BondAnalysisStatistics struct {
 	YTM              decimal.Decimal
 	CurrentYield     decimal.Decimal
@@ -55,22 +56,22 @@ func (app *application) performAndLogBondCalculations(symbol, startDatestring st
 		CurrentPrice:    currentPrice,
 		YearsToMaturity: yearsToMaturity,
 	}
-	app.logger.Info("=============================================================================================")
+	//app.logger.Info("=============================================================================================")
 	// Perform Yield to Maturity (YTM) Calculation
 	ytm := calculateYTM(bond.FaceValue, bond.CurrentPrice, bond.CouponRate, bond.YearsToMaturity)
-	app.logger.Info("Yield to Maturity (YTM)", zap.String("symbol", symbol), zap.String("ytm", ytm.String()))
+	//app.logger.Info("Yield to Maturity (YTM)", zap.String("symbol", symbol), zap.String("ytm", ytm.String()))
 
 	// Perform Current Yield Calculation
 	currentYield := calculateCurrentYield(bond.CouponRate, bond.FaceValue, bond.CurrentPrice)
-	app.logger.Info("Current Yield", zap.String("symbol", symbol), zap.String("current_yield", currentYield.String()))
+	//app.logger.Info("Current Yield", zap.String("symbol", symbol), zap.String("current_yield", currentYield.String()))
 
 	// Calculate Macaulay Duration
 	macaulayDuration := bond.CalculateMacaulayDuration(ytm)
-	app.logger.Info("Macaulay Duration", zap.String("symbol", symbol), zap.String("duration", macaulayDuration.String()))
+	//app.logger.Info("Macaulay Duration", zap.String("symbol", symbol), zap.String("duration", macaulayDuration.String()))
 
 	// Calculate Convexity
 	convexity := bond.CalculateConvexity(ytm)
-	app.logger.Info("Convexity", zap.String("symbol", symbol), zap.String("convexity", convexity.String()))
+	//app.logger.Info("Convexity", zap.String("symbol", symbol), zap.String("convexity", convexity.String()))
 
 	// Calculate Bond Returns
 	bondReturns := bondData.CalculateBondReturns()
@@ -81,18 +82,18 @@ func (app *application) performAndLogBondCalculations(symbol, startDatestring st
 
 	// Calculate Anual Bond Returns
 	annualReturn := calculateAnnualReturn(bond.CouponRate, bond.FaceValue, bond.CurrentPrice)
-	app.logger.Info("Annual Return", zap.String("symbol", symbol), zap.String("annual_return", annualReturn.String()))
+	//app.logger.Info("Annual Return", zap.String("symbol", symbol), zap.String("annual_return", annualReturn.String()))
 
 	// Calculate Volatility
 	bondVolatility := calculateBondVolatility(bondReturns)
-	app.logger.Info("Bond Volatility", zap.String("symbol", symbol), zap.String("volatility", bondVolatility.String()))
+	//app.logger.Info("Bond Volatility", zap.String("symbol", symbol), zap.String("volatility", bondVolatility.String()))
 
 	// log the Sharpe and Sortino ratios :
 	sharpe := sharpeRatio(bondReturns, riskFreeRate)
 	sortino := sortinoRatio(bondReturns, riskFreeRate)
-	app.logger.Info("Sharpe Ratio", zap.String("symbol", symbol), zap.String("sharpe_ratio", sharpe.String()))
-	app.logger.Info("Sortino Ratio", zap.String("symbol", symbol), zap.String("sortino_ratio", sortino.String()))
-	app.logger.Info("=============================================================================================")
+	//app.logger.Info("Sharpe Ratio", zap.String("symbol", symbol), zap.String("sharpe_ratio", sharpe.String()))
+	//app.logger.Info("Sortino Ratio", zap.String("symbol", symbol), zap.String("sortino_ratio", sortino.String()))
+	//app.logger.Info("=============================================================================================")
 	// fill in our bond analysis
 	newBondAnalysisStatistics := &BondAnalysisStatistics{
 		YTM:              ytm,
@@ -309,23 +310,23 @@ func (app *application) getStockInvestmentDataHandler(symbol string, riskFreeRat
 	} else {
 		// Calculate Average Sentiment
 		averageSentiment = sentimentData.CalculateAverageSentiment()
-		app.logger.Info("Average Sentiment", zap.String("average_sentiment", averageSentiment.String()))
+		///app.logger.Info("Average Sentiment", zap.String("average_sentiment", averageSentiment.String()))
 
 		// Find Most Frequent Sentiment Label
 		mostFrequentLabel = sentimentData.FindMostFrequentSentimentLabel()
-		app.logger.Info("Most Frequent Sentiment Label", zap.String("sentiment_label", mostFrequentLabel))
+		//app.logger.Info("Most Frequent Sentiment Label", zap.String("sentiment_label", mostFrequentLabel))
 
 		// Calculate Weighted Relevance
 		weightedRelevance = sentimentData.CalculateWeightedRelevance()
-		app.logger.Info("Weighted Relevance", zap.String("weighted_relevance", weightedRelevance.String()))
+		//app.logger.Info("Weighted Relevance", zap.String("weighted_relevance", weightedRelevance.String()))
 
 		// Ticker Sentiment Score
 		tickerSentimentScore = sentimentData.GetTickerSentiment(symbol)
-		app.logger.Info("Ticker Sentiment Score", zap.String("ticker_sentiment_score", tickerSentimentScore.String()))
+		//app.logger.Info("Ticker Sentiment Score", zap.String("ticker_sentiment_score", tickerSentimentScore.String()))
 
 		// Most relevant topc
 		mostRelevantTopic = sentimentData.FindMostRelevantTopic()
-		app.logger.Info("Most Relevant Topic", zap.String("most_relevant_topic", mostRelevantTopic))
+		//app.logger.Info("Most Relevant Topic", zap.String("most_relevant_topic", mostRelevantTopic))
 	}
 
 	// Perform and log the calculations
@@ -500,7 +501,7 @@ func (app *application) getSentimentAnalysis(symbol string) (*data.SentimentData
 		data.ALPHA_VANTAGE_API_KEY,
 		app.config.api.apikeys.alphavantage.key,
 	)
-	app.logger.Info("=============================================================================================")
+	//app.logger.Info("=============================================================================================")
 	app.logger.Info("Sentiment URL", zap.String("url", sentimentURL))
 
 	// check if it was cached
@@ -536,8 +537,8 @@ func (app *application) getSentimentAnalysis(symbol string) (*data.SentimentData
 	}
 
 	// print out the filetype
-	app.logger.Info("Sentiment Amount", zap.Any("filetype", sentimentResponse.Items))
-	app.logger.Info("=============================================================================================")
+	//app.logger.Info("Sentiment Amount", zap.Any("filetype", sentimentResponse.Items))
+	//app.logger.Info("=============================================================================================")
 	// just return
 	return &sentimentResponse, nil
 }
@@ -593,8 +594,8 @@ func (app *application) getRiskMetrics(timeHorizon string) (decimal.Decimal, err
 		app.logger.Error("Failed to cache treasury yield data in Redis", zap.Error(err))
 	}
 	// print out the name
-	app.logger.Info("Treasury Yield Name", zap.String("name", treasuryYieldResponse.Name))
-	app.getRiskFactor(&treasuryYieldResponse, timeHorizon)
+	//app.logger.Info("Treasury Yield Name", zap.String("name", treasuryYieldResponse.Name))
+	//app.getRiskFactor(&treasuryYieldResponse, timeHorizon)
 	return decimal.NewFromInt(0), nil
 }
 

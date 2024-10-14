@@ -24,6 +24,7 @@ type Models struct {
 	InvestmentPortfolioManager InvestmentPortfolioModel
 	FeedManager                FeedManagerModel
 	PersonalFinancePortfolio   PersonalFinancePortfolioModel
+	AwardManager               AwardManagerModel
 }
 
 func NewModels(db *database.Queries) Models {
@@ -38,5 +39,6 @@ func NewModels(db *database.Queries) Models {
 		InvestmentPortfolioManager: InvestmentPortfolioModel{DB: db},
 		FeedManager:                FeedManagerModel{DB: db},
 		PersonalFinancePortfolio:   PersonalFinancePortfolioModel{DB: db},
+		AwardManager:               AwardManagerModel{DB: db},
 	}
 }

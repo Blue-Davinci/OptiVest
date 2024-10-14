@@ -8,7 +8,6 @@ import (
 
 	"github.com/Blue-Davinci/OptiVest/internal/data"
 	"github.com/Blue-Davinci/OptiVest/internal/database"
-	"go.uber.org/zap"
 )
 
 type LLMAnalyzedPortfolio struct {
@@ -121,7 +120,7 @@ func (app *application) buildPersonalFinanceLLMRequest(user *data.User, unifiedP
 
 // buildOCRRecieptAnalysisRequest sends a request to the LLM API with the OCR analysis data
 // and returns the analyzed OCR data.
-func (app *application) buildOCRRecieptAnalysisLLMRequest(ocrAnalysis *OCRResponse) (*LLMAnalyzedPortfolio, error) {
+func (app *application) buildOCRRecieptAnalysisLLMRequest(ocrAnalysis *data.OCRResponse) (*LLMAnalyzedPortfolio, error) {
 	// no profile for this one, let us create instructions
 	instructions := `
 {
@@ -161,7 +160,7 @@ func (app *application) buildLLMRequestHelper(profile interface{}, instructionsT
 
 	// Create the final LLM request
 	finalLLMRequest := fmt.Sprintf(instructionsTemplate, string(profileData))
-	app.logger.Info("Final LLM Request:", zap.Any("final_llm_request", finalLLMRequest))
+	//app.logger.Info("Final LLM Request:", zap.Any("final_llm_request", finalLLMRequest))
 
 	// Send the request
 	url := app.config.api.apikeys.sambanova.url
@@ -175,7 +174,7 @@ func (app *application) buildLLMRequestHelper(profile interface{}, instructionsT
 	}
 
 	// Log the full response
-	app.logger.Info("Full Response:", zap.String("full_response", fullResponse))
+	//app.logger.Info("Full Response:", zap.String("full_response", fullResponse))
 
 	// Parse the response
 	header, llmAnalysis, footer, err := parseLLMResponse(fullResponse)
@@ -189,7 +188,7 @@ func (app *application) buildLLMRequestHelper(profile interface{}, instructionsT
 		Analysis: llmAnalysis,
 		Footer:   footer,
 	}
-
+	app.logger.Info("Done parsing LLM response and building analyzed portfolio")
 	return llmAnalyzedPortfolio, nil
 }
 

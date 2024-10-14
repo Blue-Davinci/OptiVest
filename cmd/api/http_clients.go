@@ -87,6 +87,7 @@ func POSTRequest[T any](c *Optivet_Client, url string, headers map[string]string
 	// Create the request body based on whether it's multipart or JSON
 	var reqBody io.Reader
 
+	// Determine if we are dealing with a multipart request or not
 	if isMultipart {
 		// If multipart, assert body to be bytes.Buffer, not *bytes.Buffer
 		bufferBody, ok := body.(bytes.Buffer)
@@ -220,6 +221,8 @@ func (app *application) LLMRequest(url string, headers map[string]string, body s
 	return fullResponse, nil
 }
 
+// scraperGetRSSFeeds() sends our GET request to our RSS Feed URL
+// We recieve an expected XML response and decode it into an RSSFeed struct
 func (app *application) scraperGetRSSFeeds(retryMax, clientTimeout int, url string, sanitizer *bluemonday.Policy) (*data.RSSFeed, error) {
 	// create a retrayable client with our own settings
 	retryClient := NewClient(
@@ -231,7 +234,6 @@ func (app *application) scraperGetRSSFeeds(retryMax, clientTimeout int, url stri
 	// Create a new request with context for timeout
 	req, err := retryablehttp.NewRequest("GET", url, nil)
 	if err != nil {
-		//fmt.Println("++++++>>>>>>>> err: ", err)
 		return nil, err
 	}
 	// Create a context with timeout
@@ -242,7 +244,6 @@ func (app *application) scraperGetRSSFeeds(retryMax, clientTimeout int, url stri
 	// Perform the request with retries
 	resp, err := retryClient.httpClient.Do(req)
 	if err != nil {
-		fmt.Println("++++++Client Rec err: ", err)
 		switch {
 		case strings.Contains(err.Error(), "context deadline exceeded"):
 			return nil, data.ErrContextDeadline
@@ -256,7 +257,6 @@ func (app *application) scraperGetRSSFeeds(retryMax, clientTimeout int, url stri
 	// Decode the response using RssFeedDecoder() expecting an RSSFeed struct
 	err = app.RssFeedDecoderDecider(url, rssFeed, sanitizer, resp)
 	if err != nil {
-		fmt.Println("++++++>Dec Dec err: ", err)
 		switch {
 		case strings.Contains(err.Error(), "context deadline exceeded"):
 			return nil, data.ErrContextDeadline

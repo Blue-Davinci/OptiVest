@@ -1,9 +1,9 @@
 package main
 
 import (
-	"bytes"
+	"context"
 	"errors"
-	"mime/multipart"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -193,14 +193,49 @@ func (app *application) getOCRDRecieptDataAnalysisHandler(w http.ResponseWriter,
 		app.failedValidationResponse(w, r, v.Errors)
 		return
 	}
+	redisKey := fmt.Sprintf("%s%s", data.RedisOCRRedeiptPrefix, input.URL)
+	ctx := context.Background()
+	// check if we already saved this reciept image in REDIS, if yes, return the data directly
+	// if not, proceed with the OCR request
+	var cachedResponse *LLMAnalyzedPortfolio
+	cachedResponse, err = getFromCache[LLMAnalyzedPortfolio](
+		ctx,
+		app.RedisDB,
+		redisKey,
+	)
+	if err == nil && cachedResponse != nil {
+		err = app.writeJSON(w, http.StatusOK, envelope{"ocr_analysis": cachedResponse}, nil)
+		if err != nil {
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
 	// process the OCR request
-	ocrResponse, err := app.processOCRRequest(input.URL)
+	ocrResponse, err := app.proces1sOCRRequestHelper(input.URL)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
 	}
+	// check if the OCR response is empty/length is 0, if it is return a message saying we could not process the image
+	if len(ocrResponse.ParsedResults) == 0 {
+		v.AddError("error", "Could not process the reciept image")
+		app.failedValidationResponse(w, r, v.Errors)
+		return
+	}
 	// send ocrRespinse to our LLM buildOCRRecieptAnalysisRequest
 	llmOCRRecieptAnalysis, err := app.buildOCRRecieptAnalysisLLMRequest(ocrResponse)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+		return
+	}
+	// save the response in REDIS
+	err = setToCache(
+		ctx,
+		app.RedisDB,
+		redisKey,
+		llmOCRRecieptAnalysis,
+		data.DefaultRedisOCRTTL,
+	)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
@@ -211,64 +246,4 @@ func (app *application) getOCRDRecieptDataAnalysisHandler(w http.ResponseWriter,
 		app.serverErrorResponse(w, r, err)
 	}
 
-}
-
-// Struct for parsed OCR result
-type OCRResponse struct {
-	ParsedResults []struct {
-		ParsedText string `json:"ParsedText"`
-	} `json:"ParsedResults"`
-}
-
-func (app *application) processOCRRequest(url string) (*OCRResponse, error) {
-	// we need a form Body for this, so we create a form body
-	var requestBody bytes.Buffer
-	writer := multipart.NewWriter(&requestBody)
-	// Add URL
-	err := writer.WriteField("url", url)
-	if err != nil {
-		return nil, err
-	}
-	// Add necessary fields for OCR engine 2 and other options
-	fields := map[string]string{
-		"language":                     "eng",
-		"isOverlayRequired":            "false",
-		"OCREngine":                    "2",
-		"isCreateSearchablePdf":        "false",
-		"isSearchablePdfHideTextLayer": "false",
-	}
-	// Add all fields to the form-data
-	for key, value := range fields {
-		err := writer.WriteField(key, value)
-		if err != nil {
-			return nil, err
-		}
-	}
-	// Close the writer
-	err = writer.Close()
-	if err != nil {
-		return nil, err
-	}
-	// set apikey header
-	headers := map[string]string{
-		"apikey":       app.config.api.apikeys.ocrspace.key,
-		"Content-Type": writer.FormDataContentType(),
-	}
-	// print the body
-	app.logger.Info(requestBody.String())
-	// call our POSTREQUEST http client with OCRResponse
-	response, err := POSTRequest[OCRResponse](
-		app.http_client,
-		app.config.api.apikeys.ocrspace.url,
-		headers,
-		requestBody,
-		true,
-	)
-	if err != nil {
-		return nil, err
-	}
-	// print api key and url used
-	//app.logger.Info("ITEMS USED", zap.String("url", app.config.api.apikeys.ocrspace.url), zap.String("API Key", app.config.api.apikeys.ocrspace.key))
-	//app.logger.Info("Response", zap.Any("response", response))
-	return &response, nil
 }

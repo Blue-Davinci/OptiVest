@@ -591,6 +591,15 @@ type AlternativeInvestment struct {
 	UpdatedAt          sql.NullTime
 }
 
+type Award struct {
+	ID          int32
+	Code        string
+	Description string
+	Point       int32
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
 type BondInvestment struct {
 	ID            int64
 	UserID        int64
@@ -922,4 +931,10 @@ type User struct {
 	MfaLastChecked   sql.NullTime
 	RiskTolerance    NullRiskToleranceType
 	TimeHorizon      NullTimeHorizonType
+}
+
+type UserAward struct {
+	UserID    int64
+	AwardID   int32
+	CreatedAt time.Time
 }
