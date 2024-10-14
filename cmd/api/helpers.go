@@ -247,6 +247,72 @@ func (app *application) readInt(qs url.Values, key string, defaultValue int, v *
 	return i
 }
 
+// readFloat() reads a string value from the query string and converts it to a float64
+// before returning. If no matching key could be found it returns the provided default value.
+// If the value couldn't be converted to a float64, then we record an error message in the
+// provided Validator instance.
+func (app *application) readFloat64(qs url.Values, key string, defaultValue float64, v *validator.Validator) float64 {
+	// Extract the value from the query string.
+	s := qs.Get(key)
+	// If no key exists (or the value is empty) then return the default value.
+	if s == "" {
+		return defaultValue
+	}
+	// Try to convert the value to a float64. If this fails, add an error message to the
+	// validator instance and return the default value.
+	f, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		v.AddError(key, "must be a float value")
+		return defaultValue
+	}
+	// Otherwise, return the converted float64 value.
+	return f
+}
+
+// readBoolean() reads a string value from the query string and converts it to a boolean
+// before returning. If no matching key could be found it returns the provided default value.
+// If the value couldn't be converted to a boolean, then we record an error message in the
+// provided Validator instance.
+func (app *application) readBoolean(qs url.Values, key string, defaultValue bool, v *validator.Validator) bool {
+	// Extract the value from the query string.
+	s := qs.Get(key)
+	// If no key exists (or the value is empty) then return the default value.
+	if s == "" {
+		return defaultValue
+	}
+	// Try to convert the value to a boolean. If this fails, add an error message to the
+	// validator instance and return the default value.
+	b, err := strconv.ParseBool(s)
+	if err != nil {
+		v.AddError(key, "must be a boolean value")
+		return defaultValue
+	}
+	// Otherwise, return the converted boolean value.
+	return b
+}
+
+// readDate() reads a string value from the query string and converts it to a time.Time
+// before returning. If no matching key could be found it returns the provided default value.
+// If the value couldn't be converted to a time.Time, then we record an error message in the
+// provided Validator instance.
+func (app *application) readDate(qs url.Values, key string, defaultValue time.Time, v *validator.Validator) time.Time {
+	// Extract the value from the query string.
+	s := qs.Get(key)
+	// If no key exists (or the value is empty) then return the default value.
+	if s == "" {
+		return defaultValue
+	}
+	// Try to convert the value to a time.Time. If this fails, add an error message to the
+	// validator instance and return the default value.
+	d, err := time.Parse("2006-01-02", s)
+	if err != nil {
+		v.AddError(key, "must be a date in the format YYYY-MM-DD")
+		return defaultValue
+	}
+	// Otherwise, return the converted time.Time value.
+	return d
+}
+
 // isLastDayOfMonth() checks if the given time is the last day of the month.
 func (app *application) isLastDayOfMonth(t time.Time) bool {
 	nextDay := t.AddDate(0, 0, 1) // Add one day

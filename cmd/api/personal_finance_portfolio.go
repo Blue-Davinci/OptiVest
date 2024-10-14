@@ -7,7 +7,6 @@ import (
 
 	"github.com/Blue-Davinci/OptiVest/internal/data"
 	"github.com/Blue-Davinci/OptiVest/internal/validator"
-	"go.uber.org/zap"
 )
 
 // getAllFinanceDetailsForAnalysisByUserIDHandler() is a handler that returns all the finance details for analysis by user ID
@@ -49,40 +48,69 @@ func (app *application) getAllFinanceDetailsForAnalysisByUserIDHandler(w http.Re
 func (app *application) getPersonalFinancePrediction(w http.ResponseWriter, r *http.Request) {
 	// get a date from the url as query parameter
 	var input struct {
-		StartDate string
+		StartDate         time.Time
+		Timeline          string
+		PredictionPeriod  int
+		TaxDeductions     bool
+		TaxRate           float64
+		EnableSeasonality bool
+		EnableHolidays    bool
 	}
 	//validate if queries are provided
 	v := validator.New()
 	// Call r.URL.Query() to get the url.Values map containing the query string data.
 	qs := r.URL.Query()
 	// use our helpers to convert the queries
-	input.StartDate = app.readString(qs, "date", "")
-	// If StartDate is empty, use today's date
-	if input.StartDate == "" {
-		app.logger.Info("No date provided, using today's date")
-		input.StartDate = time.Now().Format("2006-01-02")
-	} else {
-		app.logger.Info("Date provided, using the provided date", zap.Any("date", input.StartDate))
-	}
+	input.StartDate = app.readDate(qs, "date", time.Now().AddDate(0, -2, 0), v)
+	input.Timeline = app.readString(qs, "timeline", "monthly")
+	input.PredictionPeriod = app.readInt(qs, "prediction_period", 3, v)
+	input.TaxDeductions = app.readBoolean(qs, "tax_deductions", false, v)
+	input.TaxRate = app.readFloat64(qs, "tax_rate", 0.1, v)
+	input.EnableSeasonality = app.readBoolean(qs, "enable_seasonality", false, v)
+	input.EnableHolidays = app.readBoolean(qs, "enable_holidays", false, v)
 
-	// Convert input.StartDate to a time.Time object
-	startDate, err := time.Parse("2006-01-02", input.StartDate)
-	if err != nil {
-		v.AddError("start_date", "must be a valid date in the format YYYY-MM-DD")
+	// slight validation for the timeline
+	if data.ValidatePredictionParameters(v, input.Timeline); !v.Valid() {
 		app.failedValidationResponse(w, r, v.Errors)
 		return
 	}
 
-	// get the user ID
-	userID := app.contextGetUser(r).ID
-	// get the personal finance prediction
-	personalFinancePrediction, err := app.models.PersonalFinancePortfolio.GetPersonalFinanceDataForMonthByUserID(userID, startDate)
+	// check if a user has enough data points to make a prediction
+	status, err := app.models.PersonalFinancePortfolio.CheckIfUserHasEnoughPredictionData(app.contextGetUser(r).ID, input.Timeline, input.StartDate)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
 	}
+	// we get either DataUserHasEnoughPredictionDataPerMonth, DataUserHasEnoughPredictionDataPerWeek or DataUserInsufficientPredictionData
+	if input.Timeline == "monthly" && status == data.DataUserInsufficientPredictionData {
+		app.failedValidationResponse(w, r, map[string]string{"error": "User has insufficient data points to make a prediction"})
+		return
+	} else if input.Timeline == "weekly" && status == data.DataUserInsufficientPredictionData {
+		app.failedValidationResponse(w, r, map[string]string{"error": "User has insufficient data points to make a prediction"})
+		return
+	}
+
+	// get the user ID
+	user := app.contextGetUser(r)
+	// get the personal finance prediction based on the chosseb timelin, for monthly or weekly
+	// Initialize the personalFinancePrediction variable
+	var personalFinancePrediction []*data.PredictionPersonalFinanceData
+	if input.Timeline == "weekly" {
+		app.logger.Info("Getting personal finance data for weekly")
+		personalFinancePrediction, err = app.models.PersonalFinancePortfolio.GetPersonalFinanceDataForWeeklyByUserID(user.ID, input.StartDate)
+		if err != nil {
+			app.serverErrorResponse(w, r, err)
+			return
+		}
+	} else {
+		personalFinancePrediction, err = app.models.PersonalFinancePortfolio.GetPersonalFinanceDataForMonthByUserID(user.ID, input.StartDate)
+		if err != nil {
+			app.serverErrorResponse(w, r, err)
+			return
+		}
+	}
 	// get goals analysis
-	goals, err := app.models.FinancialManager.GetGoalsForUserInvestmentHelper(userID)
+	goals, err := app.models.FinancialManager.GetGoalsForUserInvestmentHelper(user.ID)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -95,7 +123,16 @@ func (app *application) getPersonalFinancePrediction(w http.ResponseWriter, r *h
 	// get sum values for goals
 	targetAmountSum, currentAmountSum, monthlyContributionSum := goals.GetSumAnalysis()
 	// process the personal finance data
-	info, err := app.models.PersonalFinancePortfolio.ProcessPersonalFinanceData(personalFinancePrediction)
+	info, err := app.models.PersonalFinancePortfolio.ProcessPersonalFinanceData(
+		personalFinancePrediction,
+		input.Timeline,
+		user.CountryCode,
+		input.PredictionPeriod,
+		input.TaxDeductions,
+		input.TaxRate,
+		input.EnableSeasonality,
+		input.EnableHolidays,
+	)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return

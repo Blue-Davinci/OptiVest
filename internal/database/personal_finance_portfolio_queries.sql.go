@@ -14,40 +14,36 @@ import (
 const checkIfUserHasEnoughPredictionData = `-- name: CheckIfUserHasEnoughPredictionData :one
 SELECT 
     CASE
-        WHEN (
-            SELECT COUNT(*) 
+        WHEN $2 = 'weekly' AND (
+            SELECT COUNT(DISTINCT DATE_TRUNC('week', e.date_occurred)) 
             FROM expenses e 
             WHERE e.user_id = $1
-              AND e.date_occurred >= NOW() - INTERVAL '2 months'
-        ) >= 2
-        OR (
-            SELECT COUNT(*) 
-            FROM income i 
-            WHERE i.user_id = $1
-              AND i.date_received >= NOW() - INTERVAL '2 months'
-        ) >= 2
-        THEN 'sufficient_data_monthly'
-        
-        WHEN (
-            SELECT COUNT(*) 
-            FROM expenses e 
-            WHERE e.user_id = $1
-              AND e.date_occurred >= NOW() - INTERVAL '2 weeks'
-        ) >= 2
-        OR (
-            SELECT COUNT(*) 
-            FROM income i 
-            WHERE i.user_id = $1
-              AND i.date_received >= NOW() - INTERVAL '2 weeks'
+              AND e.date_occurred >= $3  -- Start date
+              AND e.date_occurred <= NOW()
         ) >= 2
         THEN 'sufficient_data_weekly'
-        
+
+        WHEN $2 = 'monthly' AND (
+            SELECT COUNT(DISTINCT DATE_TRUNC('month', e.date_occurred)) 
+            FROM expenses e 
+            WHERE e.user_id = $1
+              AND e.date_occurred >= $3  -- Start date
+              AND e.date_occurred <= NOW()
+        ) >= 2
+        THEN 'sufficient_data_monthly'
+
         ELSE 'insufficient_data'
     END AS data_status
 `
 
-func (q *Queries) CheckIfUserHasEnoughPredictionData(ctx context.Context, userID int64) (string, error) {
-	row := q.db.QueryRowContext(ctx, checkIfUserHasEnoughPredictionData, userID)
+type CheckIfUserHasEnoughPredictionDataParams struct {
+	UserID       int64
+	Column2      interface{}
+	DateOccurred time.Time
+}
+
+func (q *Queries) CheckIfUserHasEnoughPredictionData(ctx context.Context, arg CheckIfUserHasEnoughPredictionDataParams) (string, error) {
+	row := q.db.QueryRowContext(ctx, checkIfUserHasEnoughPredictionData, arg.UserID, arg.Column2, arg.DateOccurred)
 	var data_status string
 	err := row.Scan(&data_status)
 	return data_status, err
@@ -270,6 +266,95 @@ func (q *Queries) GetPersonalFinanceDataForMonthByUserID(ctx context.Context, ar
 	var items []GetPersonalFinanceDataForMonthByUserIDRow
 	for rows.Next() {
 		var i GetPersonalFinanceDataForMonthByUserIDRow
+		if err := rows.Scan(&i.Type, &i.PeriodStart, &i.TotalAmount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getPersonalFinanceDataForWeeklyByUserID = `-- name: GetPersonalFinanceDataForWeeklyByUserID :many
+WITH income_data AS (
+    SELECT 
+        i.user_id,
+        i.amount,
+        i.date_received
+    FROM income i
+    WHERE i.user_id = $1
+    AND i.date_received BETWEEN $2 AND CURRENT_DATE -- Filter by start date and current date
+),
+expense_data AS (
+    SELECT 
+        e.user_id,
+        e.amount,
+        e.date_occurred
+    FROM expenses e
+    WHERE e.user_id = $1
+    AND e.date_occurred BETWEEN $2 AND CURRENT_DATE -- Filter by start date and current date
+),
+goal_data AS (
+    SELECT 
+        g.user_id,
+        g.monthly_contribution AS amount,
+        g.start_date
+    FROM goals g
+    WHERE g.user_id = $1
+    AND g.status = 'ongoing'  -- Aggregate only "ongoing" goals
+    AND g.start_date BETWEEN $2 AND CURRENT_DATE -- Filter by start date and current date
+)
+SELECT
+    'income' AS type,
+    CAST(DATE_TRUNC('week', id.date_received) AS DATE) AS period_start,
+    CAST(SUM(id.amount) AS NUMERIC(15, 2)) AS total_amount
+FROM income_data id
+GROUP BY DATE_TRUNC('week', id.date_received)
+
+UNION ALL
+
+SELECT
+    'expense' AS type,
+    CAST(DATE_TRUNC('week', ed.date_occurred) AS DATE) AS period_start,
+    CAST(SUM(ed.amount) AS NUMERIC(15, 2)) AS total_amount
+FROM expense_data ed
+GROUP BY DATE_TRUNC('week', ed.date_occurred)
+
+UNION ALL
+
+SELECT
+    'goal' AS type,
+    CAST(DATE_TRUNC('week', gd.start_date) AS DATE)AS period_start,
+    CAST(SUM(gd.amount) AS NUMERIC(15, 2)) AS total_amount
+FROM goal_data gd
+GROUP BY DATE_TRUNC('week', gd.start_date)
+`
+
+type GetPersonalFinanceDataForWeeklyByUserIDParams struct {
+	UserID       int64
+	DateReceived time.Time
+}
+
+type GetPersonalFinanceDataForWeeklyByUserIDRow struct {
+	Type        string
+	PeriodStart time.Time
+	TotalAmount string
+}
+
+func (q *Queries) GetPersonalFinanceDataForWeeklyByUserID(ctx context.Context, arg GetPersonalFinanceDataForWeeklyByUserIDParams) ([]GetPersonalFinanceDataForWeeklyByUserIDRow, error) {
+	rows, err := q.db.QueryContext(ctx, getPersonalFinanceDataForWeeklyByUserID, arg.UserID, arg.DateReceived)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetPersonalFinanceDataForWeeklyByUserIDRow
+	for rows.Next() {
+		var i GetPersonalFinanceDataForWeeklyByUserIDRow
 		if err := rows.Scan(&i.Type, &i.PeriodStart, &i.TotalAmount); err != nil {
 			return nil, err
 		}

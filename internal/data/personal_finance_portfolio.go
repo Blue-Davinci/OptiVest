@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Blue-Davinci/OptiVest/internal/database"
+	"github.com/Blue-Davinci/OptiVest/internal/validator"
 	"github.com/shopspring/decimal"
 )
 
@@ -196,6 +197,11 @@ type SavingsData struct {
 	Goal                float64 `json:"goal"`
 }
 
+// ValidatePredictionParameters() validates the prediction parameters
+func ValidatePredictionParameters(v *validator.Validator, timeline string) {
+	v.Check(timeline == "monthly" || timeline == "weekly", "timeline", "must be either 'monthly' or 'weekly'")
+}
+
 // GetAllFinanceDetailsForAnalysisByUserID() returns all the finance details for a user
 // The data is returned in JSON format and includes income, expenses, budgets, and debts.
 // We will need to unmarshal this data into the appropriate structs in the frontend based
@@ -258,12 +264,16 @@ func (m PersonalFinancePortfolioModel) GetAllFinanceDetailsForAnalysisByUserID(u
 // to make a prediction. We will send a constant that will alert the caller whether to use
 // per week in the call to the micro service or per month. We will return a string constant
 // and an error if the operation fails.
-func (m PersonalFinancePortfolioModel) CheckIfUserHasEnoughPredictionData(userID int64) (string, error) {
+func (m PersonalFinancePortfolioModel) CheckIfUserHasEnoughPredictionData(userID int64, timeline string, dateOccurred time.Time) (string, error) {
 	ctx, cancel := contextGenerator(context.Background(), DefaultPerFinPortDBContextTimeout)
 	defer cancel()
 
 	// Get the total number of finance rows for the user
-	totalFinanceRows, err := m.DB.CheckIfUserHasEnoughPredictionData(ctx, userID)
+	totalFinanceRows, err := m.DB.CheckIfUserHasEnoughPredictionData(ctx, database.CheckIfUserHasEnoughPredictionDataParams{
+		UserID:       userID,
+		Column2:      timeline,
+		DateOccurred: dateOccurred,
+	})
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return DataUserInsufficientPredictionData, nil
@@ -322,7 +332,55 @@ func (m PersonalFinancePortfolioModel) GetPersonalFinanceDataForMonthByUserID(us
 	return predictionPersonalFinanceData, nil
 }
 
-func (m PersonalFinancePortfolioModel) ProcessPersonalFinanceData(predictionData []*PredictionPersonalFinanceData) (*PersonalFinancePredictionRequest, error) {
+// GetPersonalFinanceDataForWeeklyByUserID() returns all the finance details for a user from
+// a given start date to today. We take in the user id and the start date and return a
+// A PredictionPersonalFinanceData struct that contains all the finance analysis data and
+// an error if the operation fails.
+// This is different from the monthly version because it returns data for a week instead of a month.
+func (m PersonalFinancePortfolioModel) GetPersonalFinanceDataForWeeklyByUserID(userID int64, startDate time.Time) ([]*PredictionPersonalFinanceData, error) {
+	ctx, cancel := contextGenerator(context.Background(), DefaultPerFinPortDBContextTimeout)
+	defer cancel()
+
+	// Get the personal finance rows for the user
+	personalFinanceRows, err := m.DB.GetPersonalFinanceDataForWeeklyByUserID(ctx, database.GetPersonalFinanceDataForWeeklyByUserIDParams{
+		UserID:       userID,
+		DateReceived: startDate,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return nil, ErrGeneralRecordNotFound
+		default:
+			return nil, err
+		}
+	}
+
+	if len(personalFinanceRows) == 0 {
+		return nil, ErrGeneralRecordNotFound
+	}
+	predictionPersonalFinanceData := []*PredictionPersonalFinanceData{}
+
+	for _, personalFinanceRow := range personalFinanceRows {
+		totalAmount, err := decimal.NewFromString(personalFinanceRow.TotalAmount)
+		if err != nil {
+			return nil, err
+		}
+		predictionPersonalFinanceData = append(predictionPersonalFinanceData, &PredictionPersonalFinanceData{
+			Type:        personalFinanceRow.Type,
+			PeriodStart: personalFinanceRow.PeriodStart,
+			TotalAmount: totalAmount,
+		})
+	}
+
+	return predictionPersonalFinanceData, nil
+}
+
+// ProcessPersonalFinanceData() processes the personal finance data and returns a structured
+// request body with float64 values. We take in a slice of PredictionPersonalFinanceData and
+// return a PersonalFinancePredictionRequest struct and an error if the operation fails.
+func (m PersonalFinancePortfolioModel) ProcessPersonalFinanceData(predictionData []*PredictionPersonalFinanceData,
+	frequency string, country string, predictionPeriod int, enableTaxDeductions bool, taxRate float64,
+	enableSeasonality bool, enableHolidays bool) (*PersonalFinancePredictionRequest, error) {
 	// Initialize slices to hold expenses and incomes as float64
 	var expenses []float64
 	var incomes []float64
@@ -363,10 +421,6 @@ func (m PersonalFinancePortfolioModel) ProcessPersonalFinanceData(predictionData
 		}
 	}
 
-	// Static values for savings (for demonstration purposes)
-	savings.CurrentSavings = 10000.0
-	savings.Goal = 20000.0
-
 	// Helper function to remove timezone from a time.Time value
 	removeTimezone := func(t time.Time) string {
 		return t.Format("2006-01-02")
@@ -380,13 +434,13 @@ func (m PersonalFinancePortfolioModel) ProcessPersonalFinanceData(predictionData
 		IncomesStartDate:    removeTimezone(incomesStartDate),
 		Savings:             savings,
 		SavingsStartDate:    removeTimezone(savingsStartDate),
-		Frequency:           "monthly", // Static for now
-		Country:             "Kenya",   // Static for now
-		PredictionPeriod:    3,         // Static for now
-		EnableTaxDeductions: false,     // Static for now
-		TaxRate:             0.1,       // Static for now
-		EnableSeasonality:   false,     // Static for now
-		EnableHolidays:      false,     // Static for now
+		Frequency:           frequency,
+		Country:             country,
+		PredictionPeriod:    predictionPeriod,
+		EnableTaxDeductions: enableTaxDeductions,
+		TaxRate:             taxRate,
+		EnableSeasonality:   enableSeasonality,
+		EnableHolidays:      enableHolidays,
 	}, nil
 }
 

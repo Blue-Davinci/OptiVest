@@ -113,36 +113,27 @@ SELECT * FROM total_debts;
 -- name: CheckIfUserHasEnoughPredictionData :one
 SELECT 
     CASE
-        WHEN (
-            SELECT COUNT(*) 
+        WHEN $2 = 'weekly' AND (
+            SELECT COUNT(DISTINCT DATE_TRUNC('week', e.date_occurred)) 
             FROM expenses e 
             WHERE e.user_id = $1
-              AND e.date_occurred >= NOW() - INTERVAL '2 months'
-        ) >= 2
-        OR (
-            SELECT COUNT(*) 
-            FROM income i 
-            WHERE i.user_id = $1
-              AND i.date_received >= NOW() - INTERVAL '2 months'
-        ) >= 2
-        THEN 'sufficient_data_monthly'
-        
-        WHEN (
-            SELECT COUNT(*) 
-            FROM expenses e 
-            WHERE e.user_id = $1
-              AND e.date_occurred >= NOW() - INTERVAL '2 weeks'
-        ) >= 2
-        OR (
-            SELECT COUNT(*) 
-            FROM income i 
-            WHERE i.user_id = $1
-              AND i.date_received >= NOW() - INTERVAL '2 weeks'
+              AND e.date_occurred >= $3  -- Start date
+              AND e.date_occurred <= NOW()
         ) >= 2
         THEN 'sufficient_data_weekly'
-        
+
+        WHEN $2 = 'monthly' AND (
+            SELECT COUNT(DISTINCT DATE_TRUNC('month', e.date_occurred)) 
+            FROM expenses e 
+            WHERE e.user_id = $1
+              AND e.date_occurred >= $3  -- Start date
+              AND e.date_occurred <= NOW()
+        ) >= 2
+        THEN 'sufficient_data_monthly'
+
         ELSE 'insufficient_data'
     END AS data_status;
+
 
 -- name: GetPersonalFinanceDataForMonthByUserID :many
 WITH income_data AS (
@@ -197,3 +188,58 @@ SELECT
     CAST(SUM(gd.amount) AS NUMERIC(15, 2)) AS total_amount
 FROM goal_data gd
 GROUP BY DATE_TRUNC('month', gd.start_date);
+
+-- name: GetPersonalFinanceDataForWeeklyByUserID :many
+WITH income_data AS (
+    SELECT 
+        i.user_id,
+        i.amount,
+        i.date_received
+    FROM income i
+    WHERE i.user_id = $1
+    AND i.date_received BETWEEN $2 AND CURRENT_DATE -- Filter by start date and current date
+),
+expense_data AS (
+    SELECT 
+        e.user_id,
+        e.amount,
+        e.date_occurred
+    FROM expenses e
+    WHERE e.user_id = $1
+    AND e.date_occurred BETWEEN $2 AND CURRENT_DATE -- Filter by start date and current date
+),
+goal_data AS (
+    SELECT 
+        g.user_id,
+        g.monthly_contribution AS amount,
+        g.start_date
+    FROM goals g
+    WHERE g.user_id = $1
+    AND g.status = 'ongoing'  -- Aggregate only "ongoing" goals
+    AND g.start_date BETWEEN $2 AND CURRENT_DATE -- Filter by start date and current date
+)
+SELECT
+    'income' AS type,
+    CAST(DATE_TRUNC('week', id.date_received) AS DATE) AS period_start,
+    CAST(SUM(id.amount) AS NUMERIC(15, 2)) AS total_amount
+FROM income_data id
+GROUP BY DATE_TRUNC('week', id.date_received)
+
+UNION ALL
+
+SELECT
+    'expense' AS type,
+    CAST(DATE_TRUNC('week', ed.date_occurred) AS DATE) AS period_start,
+    CAST(SUM(ed.amount) AS NUMERIC(15, 2)) AS total_amount
+FROM expense_data ed
+GROUP BY DATE_TRUNC('week', ed.date_occurred)
+
+UNION ALL
+
+SELECT
+    'goal' AS type,
+    CAST(DATE_TRUNC('week', gd.start_date) AS DATE)AS period_start,
+    CAST(SUM(gd.amount) AS NUMERIC(15, 2)) AS total_amount
+FROM goal_data gd
+GROUP BY DATE_TRUNC('week', gd.start_date);
+
