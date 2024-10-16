@@ -97,8 +97,16 @@ func (app *application) registerUserHandler(w http.ResponseWriter, r *http.Reque
 		}
 	})
 
+	// minimize data we send back to the client
+	newUser := data.UserSubInfo{
+		FirstName:        user.FirstName,
+		LastName:         user.LastName,
+		ProfileAvatarURL: user.ProfileAvatarURL,
+		Activated:        user.Activated,
+	}
+
 	//write our 202 response back to the user and check for any errors
-	err = app.writeJSON(w, http.StatusAccepted, envelope{"user": user}, nil)
+	err = app.writeJSON(w, http.StatusAccepted, envelope{"user": newUser}, nil)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 	}
@@ -176,13 +184,15 @@ func (app *application) activateUserHandler(w http.ResponseWriter, r *http.Reque
 			app.logger.Error("Error sending welcome email", zap.String("email", user.Email), zap.Error(err))
 		}
 	})
+	// minimize data we send back to the client
+	newUser := data.UserSubInfo{
+		FirstName:        user.FirstName,
+		LastName:         user.LastName,
+		ProfileAvatarURL: user.ProfileAvatarURL,
+		Activated:        user.Activated,
+	}
 	// Send the updated user details to the client in a JSON response.
-	err = app.writeJSON(w, http.StatusOK, envelope{
-		"first_name": user.FirstName,
-		"last_name":  user.LastName,
-		"email":      user.Email,
-		"activated":  user.Activated,
-	}, nil)
+	err = app.writeJSON(w, http.StatusAccepted, envelope{"user": newUser}, nil)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 	}

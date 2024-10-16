@@ -73,6 +73,12 @@ type User struct {
 	RiskTolerance    database.NullRiskToleranceType `json:"risk_tolerance"`     // Risk Tolerance Level, low, medium, high
 	TimeHorizon      database.NullTimeHorizonType   `json:"time_horizon"`       // Time Horizon Level, short, medium, long
 }
+type UserSubInfo struct {
+	FirstName        string `json:"first_name"`
+	LastName         string `json:"last_name"`
+	ProfileAvatarURL string `json:"profile_avatar_url"`
+	Activated        bool   `json:"activated"`
+}
 
 // Define a custom ErrDuplicateEmail error.
 var (
