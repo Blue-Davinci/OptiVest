@@ -69,6 +69,7 @@ func (app *application) userRoutes(dynamicMiddleware *alice.Chain) chi.Router {
 	userRoutes.Post("/", app.registerUserHandler)
 	// /activation : for activating accounts
 	userRoutes.Put("/activated", app.activateUserHandler)
+	userRoutes.Put("/password", app.updateUserPasswordHandler)
 	userRoutes.With(dynamicMiddleware.Then).Patch("/mfa", app.setupMFAHandler)
 	userRoutes.With(dynamicMiddleware.Then).Patch("/mfa/verify", app.verifiy2FASetupHandler)
 	return userRoutes
