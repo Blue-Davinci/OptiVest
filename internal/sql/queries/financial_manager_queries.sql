@@ -146,8 +146,6 @@ WHERE b.id = $1
 AND b.user_id = $2;
 
 
-
-
 -- name: GetGoalByID :one
 SELECT 
     id, 
@@ -202,6 +200,37 @@ WHERE gt.goal_id IS NULL
   AND g.start_date < CURRENT_DATE
 ORDER BY truncated_tracking_date ASC
 RETURNING id, user_id, goal_id, contributed_amount;
+
+-- name: GetAllGoalsWithProgressionByUserID :many
+WITH goal_contributions AS (
+    -- Aggregate total contributed amount for each goal
+    SELECT 
+        gt.goal_id,
+        COALESCE(SUM(gt.contributed_amount), 0)::NUMERIC AS total_contributed_amount
+    FROM goal_tracking gt
+    GROUP BY gt.goal_id
+)
+SELECT 
+    g.id, 
+    g.user_id,
+    g.budget_id,
+    g.name, 
+    g.current_amount, 
+    g.target_amount, 
+    g.monthly_contribution, 
+    g.start_date, 
+    g.end_date, 
+    g.status, 
+    g.created_at, 
+    g.updated_at,
+    -- Join with aggregated contribution data
+    COALESCE(gc.total_contributed_amount , 0)::NUMERIC AS total_contributed_amount,
+    -- Calculate and cast the percentage progress
+    COALESCE((gc.total_contributed_amount / g.target_amount) * 100, 0)::NUMERIC AS progress_percentage
+FROM goals g
+LEFT JOIN goal_contributions gc ON g.id = gc.goal_id
+WHERE g.user_id = $1; -- Add filtering for a specific user (use user_id placeholder)
+
 
 -- name: CreateNewGoalPlan :one
 INSERT INTO goal_plans (
@@ -342,3 +371,5 @@ WHERE b.user_id = $1
 
 -- Group by budget to allow aggregation for goals, recurring expenses, and total expenses
 GROUP BY b.id, es.total_expenses, res.total_projected_recurring_expenses, res.recurring_expenses;
+
+

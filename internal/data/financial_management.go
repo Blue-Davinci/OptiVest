@@ -122,6 +122,13 @@ type Goals struct {
 	UpdatedAt           time.Time           `json:"updated_at"`
 }
 
+// GoalsWithProgression struct represents goals enriched with progressions and total amount contrivbuted
+type GoalsWithProgression struct {
+	Goals                   Goals           `json:"goals"`
+	TotalContributedAmounts decimal.Decimal `json:"total_contributed_amounts"`
+	ProgressPercentage      decimal.Decimal `json:"progress_percentage"`
+}
+
 // iInvestment Goal will hold an array of goals that will be used
 // in our final LLM request to track user goals
 type InvestmentGoal struct {
@@ -669,6 +676,37 @@ func (m FinancialManagerModel) GetGoalsForUserInvestmentHelper(userID int64) (*I
 	return investmentGoal, nil
 }
 
+// GetAllGoalsWithProgressionByUserID() retrieves all goal records associated with a user ID
+func (m FinancialManagerModel) GetAllGoalsWithProgressionByUserID(userID int64) ([]*GoalsWithProgression, error) {
+	ctx, cancel := contextGenerator(context.Background(), DefaultFinManDBContextTimeout)
+	defer cancel()
+	// Fetch goals from the database
+	goals, err := m.DB.GetAllGoalsWithProgressionByUserID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if len(goals) == 0 {
+		return nil, ErrGeneralRecordNotFound
+	}
+	// initialize our goals with progression
+	goalsWithProgressions := []*GoalsWithProgression{}
+	// Process each goal
+	for _, goal := range goals {
+		var goalsWithProgression GoalsWithProgression
+		// populate the goal struct
+		populatedGoal := populateGoal(goal)
+		// fill in the total contributed amount
+		goalsWithProgression = GoalsWithProgression{
+			Goals:                   *populatedGoal,
+			TotalContributedAmounts: decimal.RequireFromString(goal.TotalContributedAmount),
+			ProgressPercentage:      decimal.RequireFromString(goal.ProgressPercentage),
+		}
+		goalsWithProgressions = append(goalsWithProgressions, &goalsWithProgression)
+	}
+	// everything went well
+	return goalsWithProgressions, nil
+}
+
 // ============================================================================================================
 // Goal Tracking
 // ============================================================================================================
@@ -985,8 +1023,9 @@ func populateEnrichedBudgetSummary(enrichedBugetSummaryRow interface{}) *Enriche
 		enrichedBudgetSummary.BudgetCategory = enrichedBudget.BudgetCategory
 		enrichedBudgetSummary.BudgetTotalAmount = decimal.RequireFromString(enrichedBudget.BudgetTotalAmount)
 		enrichedBudgetSummary.BudgetIsStrict = enrichedBudget.BudgetIsStrict
-		enrichedBudgetSummary.TotalProjectedRecurringExpenses = decimal.RequireFromString(enrichedBudget.TotalProjectedRecurringExpenses)
-		enrichedBudgetSummary.TotalExpenses = decimal.RequireFromString(enrichedBudget.TotalExpenses)
+		// get int64 totals
+		enrichedBudgetSummary.TotalProjectedRecurringExpenses = decimal.NewFromInt(enrichedBudget.TotalProjectedRecurringExpenses)
+		enrichedBudgetSummary.TotalExpenses = decimal.NewFromInt(enrichedBudget.TotalExpenses)
 
 		fmt.Println("--- Enriched Budget Summary: ", enrichedBudgetSummary.BudgetName)
 		// Return the enriched budget summary
@@ -1000,6 +1039,21 @@ func populateEnrichedBudgetSummary(enrichedBugetSummaryRow interface{}) *Enriche
 func populateGoal(goalRow interface{}) *Goals {
 	switch goal := goalRow.(type) {
 	case database.GetGoalByIDRow:
+		return &Goals{
+			Id:                  goal.ID,
+			UserID:              goal.UserID,
+			BudgetID:            goal.BudgetID.Int64,
+			Name:                goal.Name,
+			CurrentAmount:       decimal.RequireFromString(goal.CurrentAmount.String),
+			TargetAmount:        decimal.RequireFromString(goal.TargetAmount),
+			MonthlyContribution: decimal.RequireFromString(goal.MonthlyContribution),
+			StartDate:           goal.StartDate,
+			EndDate:             goal.EndDate,
+			Status:              goal.Status,
+			CreatedAt:           goal.CreatedAt,
+			UpdatedAt:           goal.UpdatedAt,
+		}
+	case database.GetAllGoalsWithProgressionByUserIDRow:
 		return &Goals{
 			Id:                  goal.ID,
 			UserID:              goal.UserID,

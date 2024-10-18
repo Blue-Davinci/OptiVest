@@ -820,3 +820,24 @@ func (app *application) getBudgetGoalExpenseSummaryHandler(w http.ResponseWriter
 		app.serverErrorResponse(w, r, err)
 	}
 }
+
+// getAllGoalsWithProgressionByUserIDHandler() is a handler function that handles the retrieval of all goals with progression
+// for a user.
+// We get the user from the context and get all the goals with progression associated with the user.
+func (app *application) getAllGoalsWithProgressionByUserIDHandler(w http.ResponseWriter, r *http.Request) {
+	// Get the user from the context
+	user := app.contextGetUser(r)
+
+	// Get the goals with progression for the user
+	goals, err := app.models.FinancialManager.GetAllGoalsWithProgressionByUserID(user.ID)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+		return
+	}
+
+	// Return the goals with a 200 OK response
+	err = app.writeJSON(w, http.StatusOK, envelope{"goals": goals}, nil)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+	}
+}

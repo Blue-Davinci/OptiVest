@@ -102,6 +102,7 @@ func (app *application) goalRoutes() chi.Router {
 	goalRoutes := chi.NewRouter()
 	goalRoutes.Post("/", app.createNewGoalHandler)
 	goalRoutes.Patch("/{goalID}", app.updatedGoalHandler)
+	goalRoutes.Get("/progression", app.getAllGoalsWithProgressionByUserIDHandler)
 	// /plan : for creating a new plan for a goal
 	goalRoutes.Post("/plan", app.createNewGoalPlanHandler)
 	goalRoutes.Patch("/plan/{goalPlanID}", app.updatedGoalPlanHandler)

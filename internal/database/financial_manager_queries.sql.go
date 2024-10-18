@@ -116,6 +116,8 @@ func (q *Queries) CreateNewGoal(ctx context.Context, arg CreateNewGoalParams) (C
 }
 
 const createNewGoalPlan = `-- name: CreateNewGoalPlan :one
+
+
 INSERT INTO goal_plans (
     user_id, 
     name, 
@@ -144,6 +146,7 @@ type CreateNewGoalPlanRow struct {
 	UpdatedAt sql.NullTime
 }
 
+// Add filtering for a specific user (use user_id placeholder)
 func (q *Queries) CreateNewGoalPlan(ctx context.Context, arg CreateNewGoalPlanParams) (CreateNewGoalPlanRow, error) {
 	row := q.db.QueryRowContext(ctx, createNewGoalPlan,
 		arg.UserID,
@@ -265,6 +268,92 @@ func (q *Queries) GetAllGoalSummaryByBudgetID(ctx context.Context, arg GetAllGoa
 			&i.TotalExpenses,
 			&i.ProjectedRecurringExpenses,
 			&i.BudgetSurplus,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getAllGoalsWithProgressionByUserID = `-- name: GetAllGoalsWithProgressionByUserID :many
+WITH goal_contributions AS (
+    -- Aggregate total contributed amount for each goal
+    SELECT 
+        gt.goal_id,
+        COALESCE(SUM(gt.contributed_amount), 0)::NUMERIC AS total_contributed_amount
+    FROM goal_tracking gt
+    GROUP BY gt.goal_id
+)
+SELECT 
+    g.id, 
+    g.user_id,
+    g.budget_id,
+    g.name, 
+    g.current_amount, 
+    g.target_amount, 
+    g.monthly_contribution, 
+    g.start_date, 
+    g.end_date, 
+    g.status, 
+    g.created_at, 
+    g.updated_at,
+    -- Join with aggregated contribution data
+    COALESCE(gc.total_contributed_amount , 0)::NUMERIC AS total_contributed_amount,
+    -- Calculate and cast the percentage progress
+    COALESCE((gc.total_contributed_amount / g.target_amount) * 100, 0)::NUMERIC AS progress_percentage
+FROM goals g
+LEFT JOIN goal_contributions gc ON g.id = gc.goal_id
+WHERE g.user_id = $1
+`
+
+type GetAllGoalsWithProgressionByUserIDRow struct {
+	ID                     int64
+	UserID                 int64
+	BudgetID               sql.NullInt64
+	Name                   string
+	CurrentAmount          sql.NullString
+	TargetAmount           string
+	MonthlyContribution    string
+	StartDate              time.Time
+	EndDate                time.Time
+	Status                 GoalStatus
+	CreatedAt              time.Time
+	UpdatedAt              time.Time
+	TotalContributedAmount string
+	ProgressPercentage     string
+}
+
+func (q *Queries) GetAllGoalsWithProgressionByUserID(ctx context.Context, userID int64) ([]GetAllGoalsWithProgressionByUserIDRow, error) {
+	rows, err := q.db.QueryContext(ctx, getAllGoalsWithProgressionByUserID, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetAllGoalsWithProgressionByUserIDRow
+	for rows.Next() {
+		var i GetAllGoalsWithProgressionByUserIDRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.BudgetID,
+			&i.Name,
+			&i.CurrentAmount,
+			&i.TargetAmount,
+			&i.MonthlyContribution,
+			&i.StartDate,
+			&i.EndDate,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.TotalContributedAmount,
+			&i.ProgressPercentage,
 		); err != nil {
 			return nil, err
 		}
@@ -415,18 +504,18 @@ SELECT
             'current_amount', g.current_amount,
             'target_amount', g.target_amount,
             'monthly_contribution', g.monthly_contribution,
-            'total_contributed', COALESCE(gs.total_goal_contribution, 0)::NUMERIC  -- Cast total contributions to NUMERIC
+            'total_contributed', COALESCE(gs.total_goal_contribution, 0)
         )
     ) AS goals,
 
     -- Include the recurring expense details for each budget
     COALESCE(res.recurring_expenses, '[]'::jsonb) AS recurring_expenses,
 
-    -- Total projected recurring expenses for each budget (casted to NUMERIC)
-    COALESCE(res.total_projected_recurring_expenses, 0)::NUMERIC AS total_projected_recurring_expenses,
+    -- Total projected recurring expenses for each budget
+    COALESCE(res.total_projected_recurring_expenses, 0) AS total_projected_recurring_expenses,
 
-    -- Total non-recurring expenses for each budget (casted to NUMERIC)
-    COALESCE(es.total_expenses, 0)::NUMERIC AS total_expenses
+    -- Total non-recurring expenses for each budget
+    COALESCE(es.total_expenses, 0) AS total_expenses
     
 FROM budgets b
 LEFT JOIN goals g ON b.id = g.budget_id
@@ -447,8 +536,8 @@ type GetBudgetGoalExpenseSummaryRow struct {
 	BudgetIsStrict                  bool
 	Goals                           json.RawMessage
 	RecurringExpenses               json.RawMessage
-	TotalProjectedRecurringExpenses string
-	TotalExpenses                   string
+	TotalProjectedRecurringExpenses int64
+	TotalExpenses                   int64
 }
 
 // Filter budgets by user_id
