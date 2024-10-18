@@ -688,6 +688,11 @@ func (app *application) investmentPrtfolioAnalysisHandler(w http.ResponseWriter,
 			return
 		}
 	}
+	// if goals are empty, we can't proceed
+	if len(goals.Goals) == 0 {
+		app.failedValidationResponse(w, r, map[string]string{"goals": "no goals set for user"})
+		return
+	}
 	// check all investments
 	investmentAnalysis, err := app.models.InvestmentPortfolioManager.GetAllInvestmentsByUserID(user.ID)
 	if err != nil {
@@ -703,13 +708,17 @@ func (app *application) investmentPrtfolioAnalysisHandler(w http.ResponseWriter,
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 	}
-	// build LLm
+	// build LLm only if we have goals and investments. For investment analysis length of investmentAnalysis.stockAnalysis and investmentAnalysis.bondAnalysis
+	// for investmentanalysis if both are empty then we can't proceed
+	if len(investmentAnalysis.StockAnalysis) == 0 && len(investmentAnalysis.BondAnalysis) == 0 {
+		app.failedValidationResponse(w, r, map[string]string{"investment_analysis": "no investments to analyze"})
+		return
+	}
+
 	analyzedLLMResponse, err := app.buildInvestmentPortfolioLLMRequest(user, goals, investmentAnalysis)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 	}
-	// get analyzed LLM response
-
 	// output this infor
 	err = app.writeJSON(w, http.StatusOK,
 		envelope{"goals": goals, "investment_analysis": investmentAnalysis, "llm_analysis": analyzedLLMResponse},
@@ -720,6 +729,36 @@ func (app *application) investmentPrtfolioAnalysisHandler(w http.ResponseWriter,
 
 }
 
+// getAllInvestmentInfoByUserIDHandler() is a handler responsible for getting all investment information by user ID
+// we will recieve a user ID. We will proceed to get the following data:
+func (app *application) getAllInvestmentInfoByUserIDHandler(w http.ResponseWriter, r *http.Request) {
+	//  retrieve user ID from context
+	user := app.contextGetUser(r)
+	// check all investments
+	investmentAnalysis, err := app.models.InvestmentPortfolioManager.GetAllInvestmentInfoByUserID(user.ID)
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrGeneralRecordNotFound):
+			app.notFoundResponse(w, r)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
+
+	// output this infor
+	err = app.writeJSON(w, http.StatusOK,
+		envelope{"investment_analysis": investmentAnalysis},
+		nil)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+	}
+}
+
+// performInvestmentPortfolioAnalysis() is a helper function that will perform the analysis of the investment portfolio
+// we will recieve a user ID. We will proceed to get the following data:
+// 1. Stock Bond Analysis - all the investments the user has made which include stocks, bonds & alternatives
+// 2. Bond Analysis - all the investments the user has made which include stocks, bonds & alternatives
 func (app *application) performInvestmentPortfolioAnalysis(investmentAnalysis *data.InvestmentAnalysis, user *data.User) error {
 	// Check if the user's time horizon is set; if not, default to short term
 	if string(user.TimeHorizon.TimeHorizonType) == "" {
@@ -738,7 +777,7 @@ func (app *application) performInvestmentPortfolioAnalysis(investmentAnalysis *d
 			stock := &investmentAnalysis.StockAnalysis[i] // Get a pointer to the stock analysis
 
 			// Update the stock analysis
-			if err := app.updateStockAnalysis(stock, riskFreeRate); err != nil {
+			if err := app.updateStockAnalysis(user.ID, stock, riskFreeRate); err != nil {
 				return err
 			}
 		}
@@ -749,7 +788,7 @@ func (app *application) performInvestmentPortfolioAnalysis(investmentAnalysis *d
 			bond := &investmentAnalysis.BondAnalysis[i] // Get a pointer to the bond analysis
 
 			// Update the bond analysis
-			if err := app.updateBondAnalysis(bond, riskFreeRate); err != nil {
+			if err := app.updateBondAnalysis(user.ID, bond, riskFreeRate); err != nil {
 				return err
 			}
 		}
@@ -758,60 +797,5 @@ func (app *application) performInvestmentPortfolioAnalysis(investmentAnalysis *d
 	// there is nocurrent implementation for alternative investments
 	// ToDo: Implement alternative investment analysis
 	app.logger.Info("Investment portfolio analysis completed successfully.")
-	return nil
-}
-
-// updateBondAnalysis updates the BondAnalysis data with performance metrics.
-func (app *application) updateBondAnalysis(bond *data.BondAnalysis, riskFreeRate decimal.Decimal) error {
-	defaultFaceValue := decimal.NewFromFloat(1000.0)
-	// calculate years to maturity by subtracting the current date from the maturity date to int
-	yearsToMaturity := app.calculateYearsToMaturity(bond.MaturityDate)
-	// Get bond investment data
-	bondAnalysisStatistics, err := app.performAndLogBondCalculations(
-		bond.BondSymbol,
-		data.BondDefaultStartDate,
-		defaultFaceValue,
-		bond.CouponRate,
-		yearsToMaturity,
-		riskFreeRate,
-	)
-	if err != nil {
-		return err
-	}
-
-	// Fill in the bond analysis data
-	bond.YTM = bondAnalysisStatistics.YTM
-	bond.CurrentYield = bondAnalysisStatistics.CurrentYield
-	bond.MacaulayDuration = bondAnalysisStatistics.MacaulayDuration
-	bond.Convexity = bondAnalysisStatistics.Convexity
-	bond.BondReturns = bondAnalysisStatistics.BondReturns[:5]
-	bond.AnnualReturn = bondAnalysisStatistics.AnnualReturn
-	bond.BondVolatility = bondAnalysisStatistics.BondVolatility
-	bond.SharpeRatio = bondAnalysisStatistics.SharpeRatio
-	bond.SortinoRatio = bondAnalysisStatistics.SortinoRatio
-
-	return nil
-}
-
-// updateStockAnalysis updates the StockAnalysis data with performance metrics.
-func (app *application) updateStockAnalysis(stock *data.StockAnalysis, riskFreeRate decimal.Decimal) error {
-	// Get sector performance
-	sectorPerformance, err := app.getSectorPerformance(stock.Sector)
-	if err != nil {
-		return err
-	}
-
-	// Get stock investment data
-	stockAnalysisStatistics, err := app.getStockInvestmentDataHandler(stock.StockSymbol, riskFreeRate)
-	if err != nil {
-		return err
-	}
-
-	// Fill in the stock analysis data
-	stock.Returns = stockAnalysisStatistics.Returns[:5]
-	stock.SharpeRatio = stockAnalysisStatistics.SharpeRatio
-	stock.SortinoRatio = stockAnalysisStatistics.SortinoRatio
-	stock.SectorPerformance = sectorPerformance
-
 	return nil
 }

@@ -254,6 +254,18 @@ func (app *application) updateUserPasswordHandler(w http.ResponseWriter, r *http
 		app.serverErrorResponse(w, r, err)
 		return
 	}
+	// Succesful, so we send an email for a succesful password reset
+	app.background(func() {
+		data := map[string]any{
+			"firstName": user.FirstName,
+			"lastName":  user.LastName,
+		}
+		// Send the welcome email, passing in the map above as dynamic data.
+		err = app.mailer.Send(user.Email, "password_change_acknowledgment.tmpl", data)
+		if err != nil {
+			app.logger.Error("Error password reset acknowledgment email", zap.String("email", user.Email), zap.Error(err))
+		}
+	})
 	// Send the user a confirmation message.
 	env := envelope{"message": "your password was successfully reset"}
 	err = app.writeJSON(w, http.StatusOK, env, nil)

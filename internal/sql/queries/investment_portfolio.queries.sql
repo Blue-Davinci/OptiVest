@@ -240,3 +240,91 @@ SELECT
 FROM alternative_investments a
 WHERE a.user_id = $1;
 
+
+-- name: CreateStockAnalysis :one
+INSERT INTO stock_analysis (
+    user_id,
+    stock_symbol,
+    returns,
+    sharpe_ratio,
+    sortino_ratio,
+    sector_performance,
+    sentiment_label,
+    risk_free_rate
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8
+)
+RETURNING id, analysis_date;
+
+-- name: CreateBondAnalysis :one
+INSERT INTO bond_analysis (
+    user_id,
+    bond_symbol,
+    ytm,
+    current_yield,
+    macaulay_duration,
+    convexity,
+    bond_returns,
+    annual_return,
+    bond_volatility,
+    sharpe_ratio,
+    sortino_ratio,
+    risk_free_rate
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
+)
+RETURNING id, analysis_date;
+
+-- name: CreateLLMAnalysisResponse :one
+INSERT INTO llm_analysis_responses (
+    user_id,
+    header,
+    analysis,
+    footer
+) VALUES ($1, $2, $3,$4  ) 
+RETURNING id;
+
+
+-- name: GetAllInvestmentInfoByUserID :many
+WITH stock_data AS (
+    SELECT 'stock' AS investment_type, 
+           stock_symbol AS symbol, 
+           array_to_string(returns, ',') AS returns, -- Convert numeric[] to TEXT
+           sharpe_ratio, 
+           sortino_ratio, 
+           COALESCE(sector_performance, 0) AS sector_performance, -- Default to 0 if NULL
+           COALESCE(sentiment_label, 'No Sentiment') AS sentiment_label -- Default to 'No Sentiment' if NULL
+    FROM stock_analysis
+    WHERE stock_analysis.user_id = $1
+),
+bond_data AS (
+    SELECT 'bond' AS investment_type, 
+           bond_symbol AS symbol, 
+           COALESCE(NULL::TEXT, 'No Returns') AS returns, -- Default to 'No Returns' if NULL
+           sharpe_ratio, 
+           sortino_ratio, 
+           COALESCE(NULL::DECIMAL(10, 4), 0) AS sector_performance, -- Default to 0 if NULL
+           COALESCE(NULL::VARCHAR(30), 'No Sentiment') AS sentiment_label -- Default to 'No Sentiment' if NULL
+    FROM bond_analysis
+    WHERE bond_analysis.user_id = $1
+),
+alternative_investment_data AS (
+    SELECT 'alternative' AS investment_type, 
+           investment_name AS symbol,  -- Use investment_name as the symbol for alternative investments
+           COALESCE(NULL::TEXT, 'No Returns') AS returns, -- Default to 'No Returns' if NULL
+           COALESCE(NULL::DECIMAL(10, 4), 0) AS sharpe_ratio,  -- Default to 0 if NULL
+           COALESCE(NULL::DECIMAL(10, 4), 0) AS sortino_ratio,  -- Default to 0 if NULL
+           COALESCE(profit_margin, 0) AS sector_performance,  -- Default to 0 if NULL
+           COALESCE(NULL::VARCHAR(30), 'No Sentiment') AS sentiment_label -- Default to 'No Sentiment' if NULL
+    FROM alternative_investments
+    WHERE alternative_investments.user_id = $1
+)
+SELECT *
+FROM stock_data
+UNION ALL
+SELECT *
+FROM bond_data
+UNION ALL
+SELECT *
+FROM alternative_investment_data;
+

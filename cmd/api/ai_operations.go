@@ -10,12 +10,6 @@ import (
 	"github.com/Blue-Davinci/OptiVest/internal/database"
 )
 
-type LLMAnalyzedPortfolio struct {
-	// string, map[string]interface{}, string
-	Header   string
-	Analysis map[string]interface{}
-	Footer   string
-}
 type UserPortfolioProfile struct {
 	UserTimeHorizon    database.NullTimeHorizonType   `json:"user_time_horizon"`
 	UserRiskTolerance  database.NullRiskToleranceType `json:"user_risk_tolerance"`
@@ -47,7 +41,7 @@ type Delta struct {
 
 // buildLLMRequest sends a request to the LLM API with the user's profile and investment analysis data
 // and returns the analyzed portfolio data.
-func (app *application) buildInvestmentPortfolioLLMRequest(user *data.User, goals *data.InvestmentGoal, investmentAnalysis *data.InvestmentAnalysis) (*LLMAnalyzedPortfolio, error) {
+func (app *application) buildInvestmentPortfolioLLMRequest(user *data.User, goals *data.InvestmentGoal, investmentAnalysis *data.InvestmentAnalysis) (*data.LLMAnalyzedPortfolio, error) {
 	// Create a profile
 	profile := UserPortfolioProfile{
 		UserTimeHorizon:    user.TimeHorizon,
@@ -79,10 +73,21 @@ func (app *application) buildInvestmentPortfolioLLMRequest(user *data.User, goal
         "include_usage": true
     }
 }`
-	return app.buildLLMRequestHelper(profile, instructions)
+	// get the analyzed portfolio
+	analyzedPortfolio, err := app.buildLLMRequestHelper(profile, instructions)
+	if err != nil {
+		return nil, err
+	}
+	// save the analyzed portfolio to the database using CreateLLMAnalysisResponse
+	err = app.models.InvestmentPortfolioManager.CreateLLMAnalysisResponse(user.ID, analyzedPortfolio)
+	if err != nil {
+		return nil, err
+	}
+	// return the analyzed portfolio
+	return analyzedPortfolio, nil
 }
 
-func (app *application) buildPersonalFinanceLLMRequest(user *data.User, unifiedPersonalFinanceAnalysis *data.UnifiedFinanceAnalysis) (*LLMAnalyzedPortfolio, error) {
+func (app *application) buildPersonalFinanceLLMRequest(user *data.User, unifiedPersonalFinanceAnalysis *data.UnifiedFinanceAnalysis) (*data.LLMAnalyzedPortfolio, error) {
 	// Create a profile
 	profile := UserPersonalFinanceProfile{
 		UserTimeHorizon:         user.TimeHorizon,
@@ -120,7 +125,7 @@ func (app *application) buildPersonalFinanceLLMRequest(user *data.User, unifiedP
 
 // buildOCRRecieptAnalysisRequest sends a request to the LLM API with the OCR analysis data
 // and returns the analyzed OCR data.
-func (app *application) buildOCRRecieptAnalysisLLMRequest(ocrAnalysis *data.OCRResponse) (*LLMAnalyzedPortfolio, error) {
+func (app *application) buildOCRRecieptAnalysisLLMRequest(ocrAnalysis *data.OCRResponse) (*data.LLMAnalyzedPortfolio, error) {
 	// no profile for this one, let us create instructions
 	instructions := `
 {
@@ -150,7 +155,7 @@ func (app *application) buildOCRRecieptAnalysisLLMRequest(ocrAnalysis *data.OCRR
 }
 
 // buildLLMRequestHelper builds and sends the LLM request for analysis
-func (app *application) buildLLMRequestHelper(profile interface{}, instructionsTemplate string) (*LLMAnalyzedPortfolio, error) {
+func (app *application) buildLLMRequestHelper(profile interface{}, instructionsTemplate string) (*data.LLMAnalyzedPortfolio, error) {
 	// Marshal the profile data
 	profileData, err := json.Marshal(profile)
 	if err != nil {
@@ -183,7 +188,7 @@ func (app *application) buildLLMRequestHelper(profile interface{}, instructionsT
 	}
 
 	// Return the analyzed portfolio
-	llmAnalyzedPortfolio := &LLMAnalyzedPortfolio{
+	llmAnalyzedPortfolio := &data.LLMAnalyzedPortfolio{
 		Header:   header,
 		Analysis: llmAnalysis,
 		Footer:   footer,

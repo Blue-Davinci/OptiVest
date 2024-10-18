@@ -7,6 +7,7 @@ package database
 import (
 	"database/sql"
 	"database/sql/driver"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -601,6 +602,23 @@ type Award struct {
 	UpdatedAt     time.Time
 }
 
+type BondAnalysis struct {
+	ID               int64
+	UserID           int64
+	BondSymbol       string
+	Ytm              sql.NullString
+	CurrentYield     sql.NullString
+	MacaulayDuration sql.NullString
+	Convexity        sql.NullString
+	BondReturns      []string
+	AnnualReturn     sql.NullString
+	BondVolatility   sql.NullString
+	SharpeRatio      sql.NullString
+	SortinoRatio     sql.NullString
+	RiskFreeRate     sql.NullString
+	AnalysisDate     time.Time
+}
+
 type BondInvestment struct {
 	ID            int64
 	UserID        int64
@@ -840,6 +858,15 @@ type InvestmentTransaction struct {
 	UpdatedAt         sql.NullTime
 }
 
+type LlmAnalysisResponse struct {
+	ID        int64
+	UserID    int64
+	CreatedAt time.Time
+	Header    sql.NullString
+	Analysis  json.RawMessage
+	Footer    sql.NullString
+}
+
 type Notification struct {
 	ID               int64
 	UserID           int64
@@ -883,6 +910,19 @@ type RssfeedPost struct {
 	Itemurl            string
 	ImgUrl             string
 	FeedID             int64
+}
+
+type StockAnalysis struct {
+	ID                int64
+	UserID            int64
+	StockSymbol       string
+	Returns           []string
+	SharpeRatio       sql.NullString
+	SortinoRatio      sql.NullString
+	SectorPerformance sql.NullString
+	SentimentLabel    sql.NullString
+	RiskFreeRate      sql.NullString
+	AnalysisDate      time.Time
 }
 
 type StockInvestment struct {

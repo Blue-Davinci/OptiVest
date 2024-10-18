@@ -799,3 +799,24 @@ func (app *application) getGoalPlansForUserHandler(w http.ResponseWriter, r *htt
 		app.serverErrorResponse(w, r, err)
 	}
 }
+
+// gtBudgetGoalExpenseSummaryHandler() is a handler function that handles the retrieval of all goals and expenses
+// for all budgets for a user.
+// We get the user from the context and get all the goals and expenses associated with the user.
+func (app *application) getBudgetGoalExpenseSummaryHandler(w http.ResponseWriter, r *http.Request) {
+	// Get the user from the context
+	user := app.contextGetUser(r)
+
+	// Get the goals and expenses for the user
+	enrichedBudgets, err := app.models.FinancialManager.GetBudgetGoalExpenseSummary(user.ID)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+		return
+	}
+
+	// Return the goals and expenses with a 200 OK response
+	err = app.writeJSON(w, http.StatusOK, envelope{"enriched_budgets": enrichedBudgets}, nil)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+	}
+}

@@ -183,6 +183,50 @@ type InvestmentTransaction struct {
 	UpdatedAt         time.Time                    `json:"updated_at"`         // Record update timestamp
 }
 
+// BondAnalysisStatistics struct to hold the bond analysis statistics
+type BondAnalysisStatistics struct {
+	YTM              decimal.Decimal
+	CurrentYield     decimal.Decimal
+	MacaulayDuration decimal.Decimal
+	Convexity        decimal.Decimal
+	BondReturns      []decimal.Decimal
+	AnnualReturn     decimal.Decimal
+	BondVolatility   decimal.Decimal
+	SharpeRatio      decimal.Decimal
+	SortinoRatio     decimal.Decimal
+}
+
+// StockAnalysisStatistics struct to hold the stock analysis statistics
+type StockAnalysisStatistics struct {
+	Returns              []decimal.Decimal // returns []
+	SharpeRatio          decimal.Decimal   // sharpe ratio
+	SortinoRatio         decimal.Decimal   // sortino ratio
+	AverageSentiment     decimal.Decimal   // average sentiment
+	MostFrequentLabel    string            // most frequent label
+	WeightedRelevance    decimal.Decimal   // weighted relevance
+	TickerSentimentScore decimal.Decimal   // ticker sentiment score
+	MostRelevantTopic    string            // most relevant topic
+}
+
+// AlternativeAnalysisStatistics struct to hold the analysis statistics
+type LLMAnalyzedPortfolio struct {
+	// string, map[string]interface{}, string
+	Header   string
+	Analysis map[string]interface{}
+	Footer   string
+}
+
+// InvestmentSummary struct to hold the investment summary
+type InvestmentSummary struct {
+	InvestmentType    string          `json:"investment_type"`
+	Symbol            string          `json:"symbol"`
+	Returns           string          `json:"returns"`
+	SharpeRatio       decimal.Decimal `json:"sharpe_ratio"`
+	SortinoRatio      decimal.Decimal `json:"sortino_ratio"`
+	SectorPerformance decimal.Decimal `json:"sector_performance"`
+	SentimentLabel    string          `json:"sentiment_label"`
+}
+
 func ValidateURLID(v *validator.Validator, stockID int64, fieldName string) {
 	v.Check(stockID > 0, fieldName, "must be a valid ID")
 }
@@ -737,6 +781,148 @@ func (m InvestmentPortfolioModel) GetAllInvestmentsByUserID(userID int64) (*Inve
 
 	// Return the InvestmentAnalysis struct and nil if there was no error.
 	return investmentAnalysis, nil
+}
+
+// CreateStockAnalysis() creates a stock analysis for a user's stock investment.
+// This method recieves a *StockAnalysisStatistics struct and returns an error if there was an issue creating the stock analysis.
+func (m InvestmentPortfolioModel) CreateStockAnalysis(userID int64, riskFreeRate decimal.Decimal, symbol string, stockAnalysis *StockAnalysis) error {
+	ctx, cancel := contextGenerator(context.Background(), DefaultInvPortContextTimeout)
+	defer cancel()
+
+	// convert array of decimal.Decimal to array of strings
+	returns := []string{}
+	for _, val := range stockAnalysis.Returns {
+		returns = append(returns, val.String())
+	}
+
+	// Create a new stock analysis in the database.
+	_, err := m.DB.CreateStockAnalysis(ctx, database.CreateStockAnalysisParams{
+		UserID:            userID,
+		StockSymbol:       symbol,
+		Returns:           returns[:5],
+		SharpeRatio:       sql.NullString{String: stockAnalysis.SharpeRatio.String(), Valid: stockAnalysis.SharpeRatio.String() != ""},
+		SortinoRatio:      sql.NullString{String: stockAnalysis.SortinoRatio.String(), Valid: stockAnalysis.SortinoRatio.String() != ""},
+		SectorPerformance: sql.NullString{String: stockAnalysis.SectorPerformance.String(), Valid: stockAnalysis.SectorPerformance.String() != ""},
+		SentimentLabel:    sql.NullString{String: stockAnalysis.SentimentLabel, Valid: stockAnalysis.SentimentLabel != ""},
+		RiskFreeRate:      sql.NullString{String: riskFreeRate.String(), Valid: riskFreeRate.String() != ""},
+	})
+	if err != nil {
+		return err
+	}
+
+	// Return nil if there was no error.
+	return nil
+}
+
+// CreateBondAnalysis() creates a bond analysis for a user's bond investment.
+// This method recieves a *BondAnalysisStatistics struct and returns an error if there was an issue creating the bond analysis.
+func (m InvestmentPortfolioModel) CreateBondAnalysis(userID int64, symbol string, bondAnalysis *BondAnalysis) error {
+	ctx, cancel := contextGenerator(context.Background(), DefaultInvPortContextTimeout)
+	defer cancel()
+
+	// convert array of decimal.Decimal to array of strings
+	bondReturns := []string{}
+	for _, val := range bondAnalysis.BondReturns {
+		bondReturns = append(bondReturns, val.String())
+	}
+
+	// Create a new bond analysis in the database.
+	_, err := m.DB.CreateBondAnalysis(ctx, database.CreateBondAnalysisParams{
+		UserID:           userID,
+		BondSymbol:       symbol,
+		Ytm:              sql.NullString{String: bondAnalysis.YTM.String(), Valid: bondAnalysis.YTM.String() != ""},
+		CurrentYield:     sql.NullString{String: bondAnalysis.CurrentYield.String(), Valid: bondAnalysis.CurrentYield.String() != ""},
+		MacaulayDuration: sql.NullString{String: bondAnalysis.MacaulayDuration.String(), Valid: bondAnalysis.MacaulayDuration.String() != ""},
+		Convexity:        sql.NullString{String: bondAnalysis.Convexity.String(), Valid: bondAnalysis.Convexity.String() != ""},
+		BondReturns:      bondReturns[:5],
+		AnnualReturn:     sql.NullString{String: bondAnalysis.AnnualReturn.String(), Valid: bondAnalysis.AnnualReturn.String() != ""},
+		BondVolatility:   sql.NullString{String: bondAnalysis.BondVolatility.String(), Valid: bondAnalysis.BondVolatility.String() != ""},
+		SharpeRatio:      sql.NullString{String: bondAnalysis.SharpeRatio.String(), Valid: bondAnalysis.SharpeRatio.String() != ""},
+		SortinoRatio:     sql.NullString{String: bondAnalysis.SortinoRatio.String(), Valid: bondAnalysis.SortinoRatio.String() != ""},
+	})
+	if err != nil {
+		return err
+	}
+
+	// Return nil if there was no error.
+	return nil
+}
+
+// CreateLLMAnalysisResponse() creates a new LLM analysis response in the database.
+// we accept a user ID and an *LLMAnalyzedPortfolio. We return an error if there was an issue creating the LLM analysis response.
+func (m InvestmentPortfolioModel) CreateLLMAnalysisResponse(userID int64, analyzedPortfolio *LLMAnalyzedPortfolio) error {
+	ctx, cancel := contextGenerator(context.Background(), DefaultInvPortContextTimeout)
+	defer cancel()
+
+	// Convert map[string]interface{} to json.RawMessage
+	analysisJSON, err := json.Marshal(analyzedPortfolio.Analysis)
+	if err != nil {
+		return fmt.Errorf("failed to marshal analysis data: %w", err)
+	}
+
+	// Create a new LLM analysis response in the database.
+	_, err = m.DB.CreateLLMAnalysisResponse(ctx, database.CreateLLMAnalysisResponseParams{
+		UserID:   userID,
+		Header:   sql.NullString{String: analyzedPortfolio.Header, Valid: analyzedPortfolio.Header != ""},
+		Analysis: json.RawMessage(analysisJSON), // Use the marshaled JSON
+		Footer:   sql.NullString{String: analyzedPortfolio.Footer, Valid: analyzedPortfolio.Footer != ""},
+	})
+	if err != nil {
+		return err
+	}
+
+	// Return nil if there was no error.
+	return nil
+}
+
+// GetAllInvestmentInfoByUserID() retrieves all investment information for a user.
+// We take in a user ID and return a slice of InvestmentInfo structs.
+// We return an error if there was an issue retrieving the investment information.
+func (m InvestmentPortfolioModel) GetAllInvestmentInfoByUserID(userID int64) ([]*InvestmentSummary, error) {
+	ctx, cancel := contextGenerator(context.Background(), DefaultInvPortContextTimeout)
+	defer cancel()
+	// Retrieve all investment information from the database.
+	investmentInfo, err := m.DB.GetAllInvestmentInfoByUserID(ctx, userID)
+	if err != nil {
+		switch {
+		case err == sql.ErrNoRows:
+			return nil, ErrGeneralRecordNotFound
+		default:
+			return nil, err
+		}
+	}
+	// check if the result is empty
+	if len(investmentInfo) == 0 {
+		return nil, ErrGeneralRecordNotFound
+	}
+	// Create a new slice of InvestmentInfo structs to hold the information.
+	investmentInfoSlice := []*InvestmentSummary{}
+	// Iterate through each investment and populate the InvestmentInfo struct.
+	for _, investment := range investmentInfo {
+		investmentInfoSlice = append(investmentInfoSlice, populateInvestmentSummary(investment))
+	}
+	// Return the slice of InvestmentInfo structs and nil if there was no error.
+	return investmentInfoSlice, nil
+}
+
+// populateInvestmentSummary() populates an investment summary struct with information from the database.
+// We take in a row from the database.
+// We return a pointer to an investment summary.
+func populateInvestmentSummary(investmentRow interface{}) *InvestmentSummary {
+	switch investment := investmentRow.(type) {
+	case database.GetAllInvestmentInfoByUserIDRow:
+		return &InvestmentSummary{
+			InvestmentType:    investment.InvestmentType,
+			Symbol:            investment.Symbol,
+			Returns:           investment.Returns,
+			SharpeRatio:       decimal.RequireFromString(investment.SharpeRatio.String),
+			SortinoRatio:      decimal.RequireFromString(investment.SortinoRatio.String),
+			SectorPerformance: decimal.RequireFromString(investment.SectorPerformance),
+			SentimentLabel:    investment.SentimentLabel,
+		}
+	default:
+		return nil
+	}
 }
 
 // populateAlternativeInvestment() populates an alternative investment struct with information from the database.

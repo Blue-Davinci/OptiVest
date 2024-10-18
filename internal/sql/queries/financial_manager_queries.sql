@@ -265,3 +265,80 @@ SET status = 'completed',
     updated_at = NOW()
 WHERE current_amount >= target_amount
   AND status = 'ongoing';
+
+
+-- name: GetBudgetGoalExpenseSummary :many
+WITH goal_summaries AS (
+    -- Sum the contributed amounts for each goal in goal_tracking
+    SELECT 
+        g.id AS goal_id,
+        SUM(gt.contributed_amount) AS total_goal_contribution
+    FROM goals g
+    LEFT JOIN goal_tracking gt ON g.id = gt.goal_id
+    WHERE g.user_id = $1  -- Filter by user_id
+    GROUP BY g.id
+),
+expense_summaries AS (
+    -- Sum the amounts for each budget in the expenses table
+    SELECT 
+        budget_id,
+        SUM(e.amount) AS total_expenses
+    FROM expenses e
+    WHERE e.user_id = $1  -- Filter by user_id
+    GROUP BY budget_id
+),
+recurring_expense_summaries AS (
+    -- Group the recurring expenses by budget and sum their projected amounts
+    SELECT 
+        budget_id,
+        SUM(re.projected_amount) AS total_projected_recurring_expenses,
+        jsonb_agg(
+            jsonb_build_object(
+                'recurring_expense_name', re.name,
+                'recurrence_interval', re.recurrence_interval,
+                'projected_amount', re.projected_amount
+            )
+        ) AS recurring_expenses
+    FROM recurring_expenses re
+    WHERE re.user_id = $1  -- Filter by user_id
+    GROUP BY budget_id
+)
+SELECT 
+    b.id AS budget_id,
+    b.name AS budget_name,
+    b.category AS budget_category,
+    b.total_amount AS budget_total_amount,
+    b.is_strict AS budget_is_strict,  -- Add is_strict field
+
+    -- Include the goal details for each budget
+    jsonb_agg(
+        jsonb_build_object(
+            'goal_id', g.id,
+            'goal_name', g.name,
+            'current_amount', g.current_amount,
+            'target_amount', g.target_amount,
+            'monthly_contribution', g.monthly_contribution,
+            'total_contributed', COALESCE(gs.total_goal_contribution, 0)
+        )
+    ) AS goals,
+
+    -- Include the recurring expense details for each budget
+    COALESCE(res.recurring_expenses, '[]'::jsonb) AS recurring_expenses,
+
+    -- Total projected recurring expenses for each budget
+    COALESCE(res.total_projected_recurring_expenses, 0) AS total_projected_recurring_expenses,
+
+    -- Total non-recurring expenses for each budget
+    COALESCE(es.total_expenses, 0) AS total_expenses
+    
+FROM budgets b
+LEFT JOIN goals g ON b.id = g.budget_id
+LEFT JOIN goal_summaries gs ON g.id = gs.goal_id
+LEFT JOIN expense_summaries es ON b.id = es.budget_id
+LEFT JOIN recurring_expense_summaries res ON b.id = res.budget_id
+
+-- Filter budgets by user_id
+WHERE b.user_id = $1
+
+-- Group by budget to allow aggregation for goals, recurring expenses, and total expenses
+GROUP BY b.id, es.total_expenses, res.total_projected_recurring_expenses, res.recurring_expenses;

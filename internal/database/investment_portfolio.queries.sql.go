@@ -10,7 +10,98 @@ import (
 	"database/sql"
 	"encoding/json"
 	"time"
+
+	"github.com/lib/pq"
 )
+
+const createBondAnalysis = `-- name: CreateBondAnalysis :one
+INSERT INTO bond_analysis (
+    user_id,
+    bond_symbol,
+    ytm,
+    current_yield,
+    macaulay_duration,
+    convexity,
+    bond_returns,
+    annual_return,
+    bond_volatility,
+    sharpe_ratio,
+    sortino_ratio,
+    risk_free_rate
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
+)
+RETURNING id, analysis_date
+`
+
+type CreateBondAnalysisParams struct {
+	UserID           int64
+	BondSymbol       string
+	Ytm              sql.NullString
+	CurrentYield     sql.NullString
+	MacaulayDuration sql.NullString
+	Convexity        sql.NullString
+	BondReturns      []string
+	AnnualReturn     sql.NullString
+	BondVolatility   sql.NullString
+	SharpeRatio      sql.NullString
+	SortinoRatio     sql.NullString
+	RiskFreeRate     sql.NullString
+}
+
+type CreateBondAnalysisRow struct {
+	ID           int64
+	AnalysisDate time.Time
+}
+
+func (q *Queries) CreateBondAnalysis(ctx context.Context, arg CreateBondAnalysisParams) (CreateBondAnalysisRow, error) {
+	row := q.db.QueryRowContext(ctx, createBondAnalysis,
+		arg.UserID,
+		arg.BondSymbol,
+		arg.Ytm,
+		arg.CurrentYield,
+		arg.MacaulayDuration,
+		arg.Convexity,
+		pq.Array(arg.BondReturns),
+		arg.AnnualReturn,
+		arg.BondVolatility,
+		arg.SharpeRatio,
+		arg.SortinoRatio,
+		arg.RiskFreeRate,
+	)
+	var i CreateBondAnalysisRow
+	err := row.Scan(&i.ID, &i.AnalysisDate)
+	return i, err
+}
+
+const createLLMAnalysisResponse = `-- name: CreateLLMAnalysisResponse :one
+INSERT INTO llm_analysis_responses (
+    user_id,
+    header,
+    analysis,
+    footer
+) VALUES ($1, $2, $3,$4  ) 
+RETURNING id
+`
+
+type CreateLLMAnalysisResponseParams struct {
+	UserID   int64
+	Header   sql.NullString
+	Analysis json.RawMessage
+	Footer   sql.NullString
+}
+
+func (q *Queries) CreateLLMAnalysisResponse(ctx context.Context, arg CreateLLMAnalysisResponseParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, createLLMAnalysisResponse,
+		arg.UserID,
+		arg.Header,
+		arg.Analysis,
+		arg.Footer,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
 
 const createNewAlternativeInvestment = `-- name: CreateNewAlternativeInvestment :one
 INSERT INTO alternative_investments (
@@ -221,6 +312,54 @@ func (q *Queries) CreateNewStockInvestment(ctx context.Context, arg CreateNewSto
 	return i, err
 }
 
+const createStockAnalysis = `-- name: CreateStockAnalysis :one
+INSERT INTO stock_analysis (
+    user_id,
+    stock_symbol,
+    returns,
+    sharpe_ratio,
+    sortino_ratio,
+    sector_performance,
+    sentiment_label,
+    risk_free_rate
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8
+)
+RETURNING id, analysis_date
+`
+
+type CreateStockAnalysisParams struct {
+	UserID            int64
+	StockSymbol       string
+	Returns           []string
+	SharpeRatio       sql.NullString
+	SortinoRatio      sql.NullString
+	SectorPerformance sql.NullString
+	SentimentLabel    sql.NullString
+	RiskFreeRate      sql.NullString
+}
+
+type CreateStockAnalysisRow struct {
+	ID           int64
+	AnalysisDate time.Time
+}
+
+func (q *Queries) CreateStockAnalysis(ctx context.Context, arg CreateStockAnalysisParams) (CreateStockAnalysisRow, error) {
+	row := q.db.QueryRowContext(ctx, createStockAnalysis,
+		arg.UserID,
+		arg.StockSymbol,
+		pq.Array(arg.Returns),
+		arg.SharpeRatio,
+		arg.SortinoRatio,
+		arg.SectorPerformance,
+		arg.SentimentLabel,
+		arg.RiskFreeRate,
+	)
+	var i CreateStockAnalysisRow
+	err := row.Scan(&i.ID, &i.AnalysisDate)
+	return i, err
+}
+
 const deleteAlternativeInvestmentByID = `-- name: DeleteAlternativeInvestmentByID :one
 DELETE FROM alternative_investments
 WHERE id = $1 AND user_id = $2
@@ -291,6 +430,91 @@ func (q *Queries) DeleteStockInvestmentByID(ctx context.Context, arg DeleteStock
 	var id int64
 	err := row.Scan(&id)
 	return id, err
+}
+
+const getAllInvestmentInfoByUserID = `-- name: GetAllInvestmentInfoByUserID :many
+WITH stock_data AS (
+    SELECT 'stock' AS investment_type, 
+           stock_symbol AS symbol, 
+           array_to_string(returns, ',') AS returns, -- Convert numeric[] to TEXT
+           sharpe_ratio, 
+           sortino_ratio, 
+           COALESCE(sector_performance, 0) AS sector_performance, -- Default to 0 if NULL
+           COALESCE(sentiment_label, 'No Sentiment') AS sentiment_label -- Default to 'No Sentiment' if NULL
+    FROM stock_analysis
+    WHERE stock_analysis.user_id = $1
+),
+bond_data AS (
+    SELECT 'bond' AS investment_type, 
+           bond_symbol AS symbol, 
+           COALESCE(NULL::TEXT, 'No Returns') AS returns, -- Default to 'No Returns' if NULL
+           sharpe_ratio, 
+           sortino_ratio, 
+           COALESCE(NULL::DECIMAL(10, 4), 0) AS sector_performance, -- Default to 0 if NULL
+           COALESCE(NULL::VARCHAR(30), 'No Sentiment') AS sentiment_label -- Default to 'No Sentiment' if NULL
+    FROM bond_analysis
+    WHERE bond_analysis.user_id = $1
+),
+alternative_investment_data AS (
+    SELECT 'alternative' AS investment_type, 
+           investment_name AS symbol,  -- Use investment_name as the symbol for alternative investments
+           COALESCE(NULL::TEXT, 'No Returns') AS returns, -- Default to 'No Returns' if NULL
+           COALESCE(NULL::DECIMAL(10, 4), 0) AS sharpe_ratio,  -- Default to 0 if NULL
+           COALESCE(NULL::DECIMAL(10, 4), 0) AS sortino_ratio,  -- Default to 0 if NULL
+           COALESCE(profit_margin, 0) AS sector_performance,  -- Default to 0 if NULL
+           COALESCE(NULL::VARCHAR(30), 'No Sentiment') AS sentiment_label -- Default to 'No Sentiment' if NULL
+    FROM alternative_investments
+    WHERE alternative_investments.user_id = $1
+)
+SELECT investment_type, symbol, returns, sharpe_ratio, sortino_ratio, sector_performance, sentiment_label
+FROM stock_data
+UNION ALL
+SELECT investment_type, symbol, returns, sharpe_ratio, sortino_ratio, sector_performance, sentiment_label
+FROM bond_data
+UNION ALL
+SELECT investment_type, symbol, returns, sharpe_ratio, sortino_ratio, sector_performance, sentiment_label
+FROM alternative_investment_data
+`
+
+type GetAllInvestmentInfoByUserIDRow struct {
+	InvestmentType    string
+	Symbol            string
+	Returns           string
+	SharpeRatio       sql.NullString
+	SortinoRatio      sql.NullString
+	SectorPerformance string
+	SentimentLabel    string
+}
+
+func (q *Queries) GetAllInvestmentInfoByUserID(ctx context.Context, userID int64) ([]GetAllInvestmentInfoByUserIDRow, error) {
+	rows, err := q.db.QueryContext(ctx, getAllInvestmentInfoByUserID, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetAllInvestmentInfoByUserIDRow
+	for rows.Next() {
+		var i GetAllInvestmentInfoByUserIDRow
+		if err := rows.Scan(
+			&i.InvestmentType,
+			&i.Symbol,
+			&i.Returns,
+			&i.SharpeRatio,
+			&i.SortinoRatio,
+			&i.SectorPerformance,
+			&i.SentimentLabel,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const getAllInvestmentsByUserID = `-- name: GetAllInvestmentsByUserID :many

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strings"
 	"time"
 
 	"github.com/Blue-Davinci/OptiVest/internal/data"
@@ -12,23 +13,79 @@ import (
 	"go.uber.org/zap"
 )
 
-// BondAnalysisStatistics struct to hold the bond analysis statistics
-type BondAnalysisStatistics struct {
-	YTM              decimal.Decimal
-	CurrentYield     decimal.Decimal
-	MacaulayDuration decimal.Decimal
-	Convexity        decimal.Decimal
-	BondReturns      []decimal.Decimal
-	AnnualReturn     decimal.Decimal
-	BondVolatility   decimal.Decimal
-	SharpeRatio      decimal.Decimal
-	SortinoRatio     decimal.Decimal
+// updateBondAnalysis updates the BondAnalysis data with performance metrics.
+func (app *application) updateBondAnalysis(userID int64, bond *data.BondAnalysis, riskFreeRate decimal.Decimal) error {
+	defaultFaceValue := decimal.NewFromFloat(1000.0)
+	// calculate years to maturity by subtracting the current date from the maturity date to int
+	yearsToMaturity := app.calculateYearsToMaturity(bond.MaturityDate)
+	// Get bond investment data
+	bondAnalysisStatistics, err := app.performAndLogBondCalculations(
+		bond.BondSymbol,
+		data.BondDefaultStartDate,
+		defaultFaceValue,
+		bond.CouponRate,
+		yearsToMaturity,
+		riskFreeRate,
+	)
+	if err != nil {
+		return err
+	}
+
+	// Fill in the bond analysis data
+	bond.YTM = bondAnalysisStatistics.YTM
+	bond.CurrentYield = bondAnalysisStatistics.CurrentYield
+	bond.MacaulayDuration = bondAnalysisStatistics.MacaulayDuration
+	bond.Convexity = bondAnalysisStatistics.Convexity
+	bond.BondReturns = bondAnalysisStatistics.BondReturns[:5]
+	bond.AnnualReturn = bondAnalysisStatistics.AnnualReturn
+	bond.BondVolatility = bondAnalysisStatistics.BondVolatility
+	bond.SharpeRatio = bondAnalysisStatistics.SharpeRatio
+	bond.SortinoRatio = bondAnalysisStatistics.SortinoRatio
+
+	// save the bond analysis
+	err = app.models.InvestmentPortfolioManager.CreateBondAnalysis(userID, bond.BondSymbol, bond)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
+
+// updateStockAnalysis updates the StockAnalysis data with performance metrics.
+func (app *application) updateStockAnalysis(userID int64, stock *data.StockAnalysis, riskFreeRate decimal.Decimal) error {
+	// Get sector performance
+	sectorPerformance, err := app.getSectorPerformance(stock.Sector)
+	if err != nil {
+		return err
+	}
+
+	// Get stock investment data
+	stockAnalysisStatistics, err := app.getStockInvestmentDataHandler(stock.StockSymbol, riskFreeRate)
+	if err != nil {
+		return err
+	}
+
+	// Fill in the stock analysis data
+	stock.Returns = stockAnalysisStatistics.Returns[:5]
+	stock.SharpeRatio = stockAnalysisStatistics.SharpeRatio
+	stock.SortinoRatio = stockAnalysisStatistics.SortinoRatio
+	stock.SectorPerformance = sectorPerformance
+	stock.SentimentLabel = stockAnalysisStatistics.MostFrequentLabel
+	// save the stock analysis using CreateStockAnalysis passing userID, riskFreeRate, stockSymbol, stockAnalysis
+	err = app.models.InvestmentPortfolioManager.CreateStockAnalysis(userID, riskFreeRate, stock.StockSymbol, stock)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// =======================================================================================================
 
 // ==========================================================================================================
 // Bond Investment Calculations
 // ==========================================================================================================
-func (app *application) performAndLogBondCalculations(symbol, startDatestring string, faceValue, couponRate decimal.Decimal, yearsToMaturity int, riskFreeRate decimal.Decimal) (*BondAnalysisStatistics, error) {
+func (app *application) performAndLogBondCalculations(symbol, startDatestring string, faceValue, couponRate decimal.Decimal, yearsToMaturity int, riskFreeRate decimal.Decimal) (*data.BondAnalysisStatistics, error) {
 	// Fetch bond data using the getBondInvestmentDataHandler
 	bondData, err := app.getBondInvestmentDataHandler(symbol, startDatestring)
 	if err != nil {
@@ -95,7 +152,7 @@ func (app *application) performAndLogBondCalculations(symbol, startDatestring st
 	//app.logger.Info("Sortino Ratio", zap.String("symbol", symbol), zap.String("sortino_ratio", sortino.String()))
 	//app.logger.Info("=============================================================================================")
 	// fill in our bond analysis
-	newBondAnalysisStatistics := &BondAnalysisStatistics{
+	newBondAnalysisStatistics := &data.BondAnalysisStatistics{
 		YTM:              ytm,
 		CurrentYield:     currentYield,
 		MacaulayDuration: macaulayDuration,
@@ -234,22 +291,12 @@ func calculateBondVolatility(bondReturns []decimal.Decimal) decimal.Decimal {
 //	Stock Investment Calculations
 //
 // ==========================================================================================================
-type StockAnalysisStatistics struct {
-	Returns              []decimal.Decimal // returns []
-	SharpeRatio          decimal.Decimal   // sharpe ratio
-	SortinoRatio         decimal.Decimal   // sortino ratio
-	AverageSentiment     decimal.Decimal   // average sentiment
-	mostFrequentLabel    string            // most frequent label
-	weightedRelevance    decimal.Decimal   // weighted relevance
-	tickerSentimentScore decimal.Decimal   // ticker sentiment score
-	mostRelevantTopic    string            // most relevant topic
-}
 
 // getStockInvestmentDataHandler() is a helper function that fetches historical data for a given stock symbol
 // We will get a symbol and use the client to fetch the historical data for that symbol via ALPHA VANTAGE API
 // We use app.http_client as our main client that expects an *Optivet_Client, url, headers if any
 // We expect back a TimeSeriesMonthlyResponse struct and an error
-func (app *application) getStockInvestmentDataHandler(symbol string, riskFreeRate decimal.Decimal) (*StockAnalysisStatistics, error) {
+func (app *application) getStockInvestmentDataHandler(symbol string, riskFreeRate decimal.Decimal) (*data.StockAnalysisStatistics, error) {
 	redisKey := fmt.Sprintf("%s:%s", data.RedisStockTimeSeriesPrefix, symbol)
 	ctx := context.Background()
 	ttl := 24 * time.Hour
@@ -267,14 +314,23 @@ func (app *application) getStockInvestmentDataHandler(symbol string, riskFreeRat
 
 	if cachedResponse != nil {
 		// Data found in cache, perform and log the calculations
-		app.logger.Info(" Stock Data found in cache", zap.String("symbol", symbol))
 		app.performAndLogCalculations(cachedResponse, riskFreeRate)
 		returns, sharpe_ratio, sortino_ratio := app.performAndLogCalculations(cachedResponse, riskFreeRate)
-		newStockAnalysisStatistics := StockAnalysisStatistics{
+		newStockAnalysisStatistics := data.StockAnalysisStatistics{
 			Returns:      returns,
 			SharpeRatio:  sharpe_ratio,
 			SortinoRatio: sortino_ratio,
 		}
+		// call fillSentimentDataHelper to fill in the sentiment data
+		err = app.fillSentimentDataHelper(&newStockAnalysisStatistics, symbol)
+		if err != nil {
+			// just print the error
+			app.logger.Error("Error filling sentiment data", zap.String("symbol", symbol))
+		}
+		app.logger.Info("Current simble, average sentiment and most frequent label: ",
+			zap.String("symbol", symbol),
+			zap.String("average_sentiment", newStockAnalysisStatistics.AverageSentiment.String()),
+			zap.String("most_frequent_label", newStockAnalysisStatistics.MostFrequentLabel))
 
 		return &newStockAnalysisStatistics, nil
 	}
@@ -296,53 +352,55 @@ func (app *application) getStockInvestmentDataHandler(symbol string, riskFreeRat
 	if err != nil {
 		app.logger.Error("Failed to cache time series data in Redis", zap.Error(err))
 	}
-	// make sentiment values
-	averageSentiment := decimal.NewFromFloat(0.0)
-	mostFrequentLabel := ""
-	weightedRelevance := decimal.NewFromFloat(0.0)
-	tickerSentimentScore := decimal.NewFromFloat(0.0)
-	mostRelevantTopic := ""
-	// get sentiment data
-	sentimentData, err := app.getSentimentAnalysis(symbol)
-	if err != nil {
-		app.logger.Info("Failed to get sentiment data", zap.Error(err))
-		//just proceed
-	} else {
-		// Calculate Average Sentiment
-		averageSentiment = sentimentData.CalculateAverageSentiment()
-		///app.logger.Info("Average Sentiment", zap.String("average_sentiment", averageSentiment.String()))
-
-		// Find Most Frequent Sentiment Label
-		mostFrequentLabel = sentimentData.FindMostFrequentSentimentLabel()
-		//app.logger.Info("Most Frequent Sentiment Label", zap.String("sentiment_label", mostFrequentLabel))
-
-		// Calculate Weighted Relevance
-		weightedRelevance = sentimentData.CalculateWeightedRelevance()
-		//app.logger.Info("Weighted Relevance", zap.String("weighted_relevance", weightedRelevance.String()))
-
-		// Ticker Sentiment Score
-		tickerSentimentScore = sentimentData.GetTickerSentiment(symbol)
-		//app.logger.Info("Ticker Sentiment Score", zap.String("ticker_sentiment_score", tickerSentimentScore.String()))
-
-		// Most relevant topc
-		mostRelevantTopic = sentimentData.FindMostRelevantTopic()
-		//app.logger.Info("Most Relevant Topic", zap.String("most_relevant_topic", mostRelevantTopic))
-	}
+	app.logger.Info("Current risk free rate: ", zap.String("risk_free_rate", riskFreeRate.String()))
 
 	// Perform and log the calculations
 	returns, sharpe_ratio, sortino_ratio := app.performAndLogCalculations(&timeSeriesResponse, riskFreeRate)
-	newStockAnalysisStatistics := StockAnalysisStatistics{
-		Returns:              returns,
-		SharpeRatio:          sharpe_ratio,
-		SortinoRatio:         sortino_ratio,
-		AverageSentiment:     averageSentiment,
-		mostFrequentLabel:    mostFrequentLabel,
-		weightedRelevance:    weightedRelevance,
-		tickerSentimentScore: tickerSentimentScore,
-		mostRelevantTopic:    mostRelevantTopic,
+	newStockAnalysisStatistics := data.StockAnalysisStatistics{
+		Returns:      returns,
+		SharpeRatio:  sharpe_ratio,
+		SortinoRatio: sortino_ratio,
+	}
+	err = app.fillSentimentDataHelper(&newStockAnalysisStatistics, symbol)
+	if err != nil {
+		// just print the error
+		app.logger.Error("Error filling sentiment data", zap.Error(err))
 	}
 
 	return &newStockAnalysisStatistics, nil
+}
+
+// fillSentimentDataHelper() is a helper function that will fill a StockAnalysisStatistics struct with sentiment data
+// sentiment data include average sentiment, most frequent label, weighted relevance, ticker sentiment score, and most relevant topic
+// we return an error if the call to getSentimentAnalysis fails
+func (app *application) fillSentimentDataHelper(stockAnalysisStatistics *data.StockAnalysisStatistics, symbol string) error {
+	// get sentiment data
+	sentimentData, err := app.getSentimentAnalysis(symbol)
+	if err != nil {
+		// fill in the items with empty
+		stockAnalysisStatistics.AverageSentiment = decimal.NewFromInt(0)
+		stockAnalysisStatistics.MostFrequentLabel = "N/A"
+		stockAnalysisStatistics.WeightedRelevance = decimal.NewFromInt(0)
+		stockAnalysisStatistics.TickerSentimentScore = decimal.NewFromInt(0)
+		stockAnalysisStatistics.MostRelevantTopic = "N/A"
+		return err
+	}
+	// Calculate Average Sentiment
+	stockAnalysisStatistics.AverageSentiment = sentimentData.CalculateAverageSentiment()
+
+	// Find Most Frequent Sentiment Label
+	stockAnalysisStatistics.MostFrequentLabel = sentimentData.FindMostFrequentSentimentLabel()
+
+	// Calculate Weighted Relevance
+	stockAnalysisStatistics.WeightedRelevance = sentimentData.CalculateWeightedRelevance()
+
+	// Ticker Sentiment Score
+	stockAnalysisStatistics.TickerSentimentScore = sentimentData.GetTickerSentiment(symbol)
+
+	// Most relevant topc
+	stockAnalysisStatistics.MostRelevantTopic = sentimentData.FindMostRelevantTopic()
+
+	return nil
 }
 
 // Perform and log calculations like returns, Sharpe ratio, and Sortino ratio
@@ -503,6 +561,7 @@ func (app *application) getSentimentAnalysis(symbol string) (*data.SentimentData
 	)
 	//app.logger.Info("=============================================================================================")
 	app.logger.Info("Sentiment URL", zap.String("url", sentimentURL))
+	app.logger.Info("Sentiment Symbol", zap.String("symbol", symbol))
 
 	// check if it was cached
 	cachedResponse, err := getFromCache[data.SentimentData](ctx, app.RedisDB, redisKey)
@@ -576,8 +635,8 @@ func (app *application) getRiskMetrics(timeHorizon string) (decimal.Decimal, err
 	if cachedResponse != nil {
 		// Data found in cache, perform and log the calculations
 		app.logger.Info("Treasury Yield Data found in cache")
-		app.getRiskFactor(cachedResponse, timeHorizon)
-		return decimal.NewFromInt(0), nil
+		riskFactor := app.getRiskFactor(cachedResponse, timeHorizon)
+		return riskFactor, nil
 	}
 	// if no cache was found, get the data
 	treasuryYieldResponse, err := GETRequest[data.TreasuryYieldData](app.http_client, treasuryYieldURL, nil)
@@ -593,26 +652,34 @@ func (app *application) getRiskMetrics(timeHorizon string) (decimal.Decimal, err
 	if err != nil {
 		app.logger.Error("Failed to cache treasury yield data in Redis", zap.Error(err))
 	}
+	// calculate the latest yield
+	riskFactor := app.getRiskFactor(&treasuryYieldResponse, timeHorizon)
+	if err != nil {
+		return decimal.NewFromInt(0), err
+	}
 	// print out the name
 	//app.logger.Info("Treasury Yield Name", zap.String("name", treasuryYieldResponse.Name))
 	//app.getRiskFactor(&treasuryYieldResponse, timeHorizon)
-	return decimal.NewFromInt(0), nil
+	return riskFactor, nil
 }
 
-func (app *application) getRiskFactor(data *data.TreasuryYieldData, timeHorizone string) {
-	latestRisk, err := data.GetLatestYield()
-	if err != nil {
-		app.logger.Error("Failed to get latest risk rate", zap.Error(err))
-		return
+func (app *application) getRiskFactor(data *data.TreasuryYieldData, timeHorizone string) decimal.Decimal {
+	// check time horizon
+	// if time horizon includes "short" then get latest yield otherwise get average yield
+	if strings.Contains(timeHorizone, "short") {
+		latestRisk, err := data.GetLatestYield()
+		if err != nil {
+			app.logger.Error("Failed to get latest risk rate", zap.Error(err))
+			return decimal.NewFromInt(0)
+		}
+		return latestRisk
 	}
 	averageRisk, err := data.CalculateAverageYield(180)
 	if err != nil {
 		app.logger.Error("Failed to calculate average risk rate", zap.Error(err))
-		return
+		return decimal.NewFromInt(0)
 	}
-	app.logger.Info("Latest Value:", zap.String("latest_risk", latestRisk.String()))
-	app.logger.Info("Average Value:", zap.String("average_risk", averageRisk.String()))
-	app.logger.Info("Time Horizon:", zap.String("time_horizon", timeHorizone))
+	return averageRisk
 }
 
 // ==========================================================================================================

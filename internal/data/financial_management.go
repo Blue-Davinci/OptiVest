@@ -3,6 +3,7 @@ package data
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -76,6 +77,18 @@ type EnrichedBudget struct {
 	Budget              Budget              `json:"budget"`
 	Goal_Summary        []*Goal_Summary     `json:"goal_summary"`
 	Goal_Summary_Totals Goal_Summary_Totals `json:"goal_summary_totals"`
+}
+
+type EnrichedBudgetSummary struct {
+	BudgetID                        int64                    `json:"budget_id"`
+	BudgetName                      string                   `json:"budget_name"`
+	BudgetCategory                  string                   `json:"budget_category"`
+	BudgetTotalAmount               decimal.Decimal          `json:"budget_total_amount"`
+	BudgetIsStrict                  bool                     `json:"budget_is_strict"`
+	Goals                           []map[string]interface{} `json:"goals"`
+	RecurringExpenses               []map[string]interface{} `json:"recurring_expenses"`
+	TotalProjectedRecurringExpenses decimal.Decimal          `json:"total_projected_recurring_expenses"`
+	TotalExpenses                   decimal.Decimal          `json:"total_expenses"`
 }
 
 // Budget struct represents a user's Budget
@@ -290,6 +303,35 @@ func (m FinancialManagerModel) CreateNewBudget(newBudget *Budget) error {
 	newBudget.UpdatedAt = budget.UpdatedAt
 	// everything went well
 	return nil
+}
+
+// getBudgetGoalExpenseSummary() is a helper method that will be used to retrieve
+// a summary of a user's budget, goals and expenses
+// We will return a *EnrichedBudget struct and an error if the operation fails.
+func (m FinancialManagerModel) GetBudgetGoalExpenseSummary(userID int64) ([]*EnrichedBudgetSummary, error) {
+	ctx, cancel := contextGenerator(context.Background(), DefaultFinManDBContextTimeout)
+	defer cancel()
+	// Fetch the budget from the database
+	enrichedBugetRows, err := m.DB.GetBudgetGoalExpenseSummary(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	// check if empty result
+	if len(enrichedBugetRows) == 0 {
+		return nil, ErrGeneralRecordNotFound
+	}
+	// initialize our enriched budget
+	enrichedBudgets := []*EnrichedBudgetSummary{}
+	// Process each budget
+	for _, enrichedBudgetRow := range enrichedBugetRows {
+		// make a budget
+		budget := populateEnrichedBudgetSummary(enrichedBudgetRow)
+		// append the enriched budget to the slice
+		enrichedBudgets = append(enrichedBudgets, budget)
+	}
+
+	// everything went well
+	return enrichedBudgets, nil
 }
 
 // DeleteBudgetByID() deletes a budget record from the database by its ID
@@ -919,6 +961,41 @@ func (m FinancialManagerModel) GetAllGoalSummaryBudgetID(budgetID, userID int64)
 // ============================================================================================================
 // Populators
 // ============================================================================================================
+
+func populateEnrichedBudgetSummary(enrichedBugetSummaryRow interface{}) *EnrichedBudgetSummary {
+	switch enrichedBudget := enrichedBugetSummaryRow.(type) {
+	case database.GetBudgetGoalExpenseSummaryRow:
+		var enrichedBudgetSummary EnrichedBudgetSummary
+
+		// Unmarshal the goals (JSON array)
+		err := json.Unmarshal([]byte(enrichedBudget.Goals), &enrichedBudgetSummary.Goals)
+		if err != nil {
+			return nil
+		}
+
+		// Unmarshal the recurring expenses (JSON array)
+		err = json.Unmarshal([]byte(enrichedBudget.RecurringExpenses), &enrichedBudgetSummary.RecurringExpenses)
+		if err != nil {
+			return nil
+		}
+
+		// Fill in the rest of the enriched budget summary
+		enrichedBudgetSummary.BudgetID = enrichedBudget.BudgetID
+		enrichedBudgetSummary.BudgetName = enrichedBudget.BudgetName
+		enrichedBudgetSummary.BudgetCategory = enrichedBudget.BudgetCategory
+		enrichedBudgetSummary.BudgetTotalAmount = decimal.RequireFromString(enrichedBudget.BudgetTotalAmount)
+		enrichedBudgetSummary.BudgetIsStrict = enrichedBudget.BudgetIsStrict
+		enrichedBudgetSummary.TotalProjectedRecurringExpenses = decimal.RequireFromString(enrichedBudget.TotalProjectedRecurringExpenses)
+		enrichedBudgetSummary.TotalExpenses = decimal.RequireFromString(enrichedBudget.TotalExpenses)
+
+		fmt.Println("--- Enriched Budget Summary: ", enrichedBudgetSummary.BudgetName)
+		// Return the enriched budget summary
+		return &enrichedBudgetSummary
+
+	default:
+		return nil
+	}
+}
 
 func populateGoal(goalRow interface{}) *Goals {
 	switch goal := goalRow.(type) {

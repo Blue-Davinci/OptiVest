@@ -197,8 +197,8 @@ func (app *application) getOCRDRecieptDataAnalysisHandler(w http.ResponseWriter,
 	ctx := context.Background()
 	// check if we already saved this reciept image in REDIS, if yes, return the data directly
 	// if not, proceed with the OCR request
-	var cachedResponse *LLMAnalyzedPortfolio
-	cachedResponse, err = getFromCache[LLMAnalyzedPortfolio](
+	var cachedResponse *data.LLMAnalyzedPortfolio
+	cachedResponse, err = getFromCache[data.LLMAnalyzedPortfolio](
 		ctx,
 		app.RedisDB,
 		redisKey,

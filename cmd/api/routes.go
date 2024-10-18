@@ -90,6 +90,7 @@ func (app *application) apiKeyRoutes() chi.Router {
 func (app *application) budgetRoutes() chi.Router {
 	budgetRoutes := chi.NewRouter()
 	budgetRoutes.Get("/", app.getBudgetsForUserHandler)
+	budgetRoutes.Get("/summary", app.getBudgetGoalExpenseSummaryHandler)
 	budgetRoutes.Post("/", app.createNewBudgetdHandler)
 	budgetRoutes.Patch("/{budgetID}", app.updateBudgetHandler)
 	budgetRoutes.Delete("/{budgetID}", app.deleteBudgetByIDHandler)
@@ -205,6 +206,7 @@ func (app *application) feedRoutes() chi.Router {
 func (app *application) personalFinanceRoutes() chi.Router {
 	personalFinanceRoutes := chi.NewRouter()
 	personalFinanceRoutes.Get("/analysis", app.getAllFinanceDetailsForAnalysisByUserIDHandler)
+	personalFinanceRoutes.Get("/summary", app.getAllInvestmentInfoByUserIDHandler)
 	personalFinanceRoutes.Get("/prediction", app.getPersonalFinancePrediction)
 	return personalFinanceRoutes
 }
