@@ -831,7 +831,12 @@ func (app *application) getAllGoalsWithProgressionByUserIDHandler(w http.Respons
 	// Get the goals with progression for the user
 	goals, err := app.models.FinancialManager.GetAllGoalsWithProgressionByUserID(user.ID)
 	if err != nil {
-		app.serverErrorResponse(w, r, err)
+		switch {
+		case errors.Is(err, data.ErrGeneralRecordNotFound):
+			app.notFoundResponse(w, r)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
 		return
 	}
 
@@ -841,3 +846,5 @@ func (app *application) getAllGoalsWithProgressionByUserIDHandler(w http.Respons
 		app.serverErrorResponse(w, r, err)
 	}
 }
+
+//

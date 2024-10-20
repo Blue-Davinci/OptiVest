@@ -129,3 +129,18 @@ func convertToDecimal(value interface{}) (decimal.Decimal, error) {
 		return decimal.Zero, fmt.Errorf("unexpected type %T", v)
 	}
 }
+
+func convertNumberToMonth(decimalMonth decimal.Decimal) (string, error) {
+	// Convert decimal.Decimal to int
+	monthNumber := decimalMonth.IntPart() // Get the integer part of the decimal
+
+	if monthNumber < 1 || monthNumber > 12 {
+		return "", fmt.Errorf("invalid month number: %d", monthNumber)
+	}
+	// Convert the month number to time.Month
+	month := time.Month(monthNumber)
+
+	// Get the full month name
+	return month.String(), nil
+
+}

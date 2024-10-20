@@ -209,6 +209,7 @@ func (app *application) personalFinanceRoutes() chi.Router {
 	personalFinanceRoutes.Get("/analysis", app.getAllFinanceDetailsForAnalysisByUserIDHandler)
 	personalFinanceRoutes.Get("/summary", app.getAllInvestmentInfoByUserIDHandler)
 	personalFinanceRoutes.Get("/prediction", app.getPersonalFinancePrediction)
+	personalFinanceRoutes.Get("/expense-income/summary", app.getExpenseIncomeSummaryReportHandler)
 	return personalFinanceRoutes
 }
 

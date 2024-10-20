@@ -243,3 +243,30 @@ SELECT
 FROM goal_data gd
 GROUP BY DATE_TRUNC('week', gd.start_date);
 
+-- name: GetExpenseIncomeSummaryReport :many
+WITH monthly_income AS (
+    SELECT
+        EXTRACT(MONTH FROM i.date_received) AS month,
+        SUM(i.amount)::NUMERIC AS total_income
+    FROM income i
+    WHERE i.user_id = $1
+      AND EXTRACT(YEAR FROM i.date_received) = EXTRACT(YEAR FROM CURRENT_DATE)
+    GROUP BY month
+),
+monthly_expenses AS (
+    SELECT
+        EXTRACT(MONTH FROM e.date_occurred) AS month,
+        SUM(e.amount)::NUMERIC AS total_expenses
+    FROM expenses e
+    WHERE e.user_id = $1
+      AND EXTRACT(YEAR FROM e.date_occurred) = EXTRACT(YEAR FROM CURRENT_DATE)
+    GROUP BY month
+)
+SELECT 
+    COALESCE(i.month, e.month) AS month_value,  -- Alias to avoid ambiguity
+    COALESCE(i.total_income, 0)::NUMERIC AS total_income,
+    COALESCE(e.total_expenses, 0)::NUMERIC AS total_expenses
+FROM monthly_income i
+FULL OUTER JOIN monthly_expenses e
+    ON i.month = e.month
+ORDER BY month_value;

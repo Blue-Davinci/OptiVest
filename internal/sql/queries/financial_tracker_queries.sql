@@ -236,3 +236,4 @@ WHERE
     remaining_balance > 0  -- Debt is not fully paid
 AND (interest_last_calculated IS NULL OR interest_last_calculated < CURRENT_DATE) -- Interest calculation is overdue
 LIMIT $1 OFFSET $2;
+

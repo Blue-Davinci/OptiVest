@@ -145,6 +145,13 @@ type PredictionPersonalFinanceData struct {
 	TotalAmount decimal.Decimal `json:"total_amount"`
 }
 
+// ExpensesIncomesMonthlySummary is a struct that represents the expenses and incomes summary per month
+type ExpensesIncomesMonthlySummary struct {
+	Month         string          `json:"month"`
+	TotalIncome   decimal.Decimal `json:"total_income"`
+	TotalExpenses decimal.Decimal `json:"total_expenses"`
+}
+
 // Prediction is a struct that represents a prediction
 type Prediction struct {
 	Ds               CustomTime1 `json:"ds"`
@@ -458,6 +465,48 @@ func (m PersonalFinancePortfolioModel) ProcessPersonalFinanceData(predictionData
 		EnableSeasonality:   enableSeasonality,
 		EnableHolidays:      enableHolidays,
 	}, nil
+}
+
+// GetExpenseIncomeSummaryReport() returns a summary report of the expenses and incomes
+// It returns all expenses and incomes per month for a specific user
+func (m PersonalFinancePortfolioModel) GetExpenseIncomeSummaryReport(userID int64) ([]*ExpensesIncomesMonthlySummary, error) {
+	ctx, cancel := contextGenerator(context.Background(), DefaultPerFinPortDBContextTimeout)
+	defer cancel()
+
+	// Get the personal finance rows for the user
+	personalFinanceRows, err := m.DB.GetExpenseIncomeSummaryReport(ctx, userID)
+	if err != nil {
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return nil, ErrGeneralRecordNotFound
+		default:
+			return nil, err
+		}
+	}
+
+	if len(personalFinanceRows) == 0 {
+		return nil, ErrGeneralRecordNotFound
+	}
+	// Initialize the slice to hold the summaries
+	expenseIncomeSummaries := []*ExpensesIncomesMonthlySummary{}
+
+	for _, personalFinanceRow := range personalFinanceRows {
+		// Convert decimal.Decimal to float64
+		monthStr, err := convertNumberToMonth(decimal.RequireFromString(personalFinanceRow.MonthValue))
+		if err != nil {
+			monthStr = "January"
+			fmt.Println("An error occurred while converting the month number to a string:", err)
+		}
+		expenseIncomeSummary := &ExpensesIncomesMonthlySummary{
+			Month:         monthStr,
+			TotalIncome:   decimal.RequireFromString(personalFinanceRow.TotalIncome),
+			TotalExpenses: decimal.RequireFromString(personalFinanceRow.TotalExpenses),
+		}
+		expenseIncomeSummaries = append(expenseIncomeSummaries, expenseIncomeSummary)
+	}
+
+	//  return it
+	return expenseIncomeSummaries, nil
 }
 
 // populatePersonalFinancePortfolio() is a helper function that populates the personal finance portfolio

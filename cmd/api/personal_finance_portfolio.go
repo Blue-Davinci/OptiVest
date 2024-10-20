@@ -247,3 +247,27 @@ func (app *application) getOCRDRecieptDataAnalysisHandler(w http.ResponseWriter,
 	}
 
 }
+
+// getExpenseIncomeSummaryReportHandler() is a handler that returns the expense and income summary report
+// This will return a summary for the current year of each month's total income and total expenses
+func (app *application) getExpenseIncomeSummaryReportHandler(w http.ResponseWriter, r *http.Request) {
+	// get the user ID
+	user := app.contextGetUser(r)
+	// get the expense and income summary report
+	expenseIncomeSummaryReport, err := app.models.PersonalFinancePortfolio.GetExpenseIncomeSummaryReport(user.ID)
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrGeneralRecordNotFound):
+			// should not ignore as this route is full dependant on a user finance data
+			// if they do not have any finance data, then we should return a not found response
+			app.notFoundResponse(w, r)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
+	}
+	// send the response
+	err = app.writeJSON(w, http.StatusOK, envelope{"expense_income_summary_report": expenseIncomeSummaryReport}, nil)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+	}
+}
