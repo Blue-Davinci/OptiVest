@@ -19,12 +19,14 @@ type PersonalFinancePortfolioModel struct {
 }
 
 const (
-	DefaultPerFinPortDBContextTimeout = 5 * time.Second
-	DefaultRedisOCRTTL                = 24 * time.Hour
+	DefaultPerFinPortDBContextTimeout   = 5 * time.Second
+	DefaultRedisOCRTTL                  = 24 * time.Hour
+	DefaultRedisExpenseIncomeSummaryTTL = 12 * time.Hour
 )
 const (
 	// redis prefix
-	RedisOCRRedeiptPrefix = "ocr_receipt_analysis:"
+	RedisOCRRedeiptPrefix           = "ocr_receipt_analysis:"
+	RedisExpenseIncomeSummaryPrefix = "expense_income_summary:"
 )
 const (
 	DataUserHasEnoughPredictionDataPerMonth = "sufficient_data_monthly"

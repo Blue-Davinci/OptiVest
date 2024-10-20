@@ -9,6 +9,7 @@ import (
 
 	"github.com/Blue-Davinci/OptiVest/internal/data"
 	"github.com/Blue-Davinci/OptiVest/internal/validator"
+	"go.uber.org/zap"
 )
 
 // getAllFinanceDetailsForAnalysisByUserIDHandler() is a handler that returns all the finance details for analysis by user ID
@@ -251,21 +252,41 @@ func (app *application) getOCRDRecieptDataAnalysisHandler(w http.ResponseWriter,
 // getExpenseIncomeSummaryReportHandler() is a handler that returns the expense and income summary report
 // This will return a summary for the current year of each month's total income and total expenses
 func (app *application) getExpenseIncomeSummaryReportHandler(w http.ResponseWriter, r *http.Request) {
-	// get the user ID
+	// Get the user ID
 	user := app.contextGetUser(r)
-	// get the expense and income summary report
+	redisKey := fmt.Sprintf("%s%d", data.RedisExpenseIncomeSummaryPrefix, user.ID)
+	ctx := context.Background()
+
+	// Attempt to get cached data from Redis
+	cachedData, err := getFromCache[[]*data.ExpensesIncomesMonthlySummary](ctx, app.RedisDB, redisKey)
+	if err == nil && cachedData != nil {
+		// If found in cache, return the cached response
+		err = app.writeJSON(w, http.StatusOK, envelope{"expense_income_summary_report": cachedData}, nil)
+		if err != nil {
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
+
+	// If not found in cache or an error occurred, proceed to fetch from the database
 	expenseIncomeSummaryReport, err := app.models.PersonalFinancePortfolio.GetExpenseIncomeSummaryReport(user.ID)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
-			// should not ignore as this route is full dependant on a user finance data
-			// if they do not have any finance data, then we should return a not found response
-			app.notFoundResponse(w, r)
+			app.notFoundResponse(w, r) // No finance data found
 		default:
-			app.serverErrorResponse(w, r, err)
+			app.serverErrorResponse(w, r, err) // Other error
 		}
+		return
 	}
-	// send the response
+
+	// Cache the result in Redis
+	err = setToCache(ctx, app.RedisDB, redisKey, &expenseIncomeSummaryReport, data.DefaultRedisExpenseIncomeSummaryTTL) // Cache for 24 hours
+	if err != nil {
+		app.logger.Info("Error caching data:", zap.Error(err)) // Log but don't stop execution
+	}
+
+	// Return the response
 	err = app.writeJSON(w, http.StatusOK, envelope{"expense_income_summary_report": expenseIncomeSummaryReport}, nil)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
