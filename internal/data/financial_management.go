@@ -1024,8 +1024,8 @@ func populateEnrichedBudgetSummary(enrichedBugetSummaryRow interface{}) *Enriche
 		enrichedBudgetSummary.BudgetTotalAmount = decimal.RequireFromString(enrichedBudget.BudgetTotalAmount)
 		enrichedBudgetSummary.BudgetIsStrict = enrichedBudget.BudgetIsStrict
 		// get int64 totals
-		enrichedBudgetSummary.TotalProjectedRecurringExpenses = decimal.NewFromInt(enrichedBudget.TotalProjectedRecurringExpenses)
-		enrichedBudgetSummary.TotalExpenses = decimal.NewFromInt(enrichedBudget.TotalExpenses)
+		enrichedBudgetSummary.TotalProjectedRecurringExpenses = decimal.RequireFromString(enrichedBudget.TotalProjectedRecurringExpenses)
+		enrichedBudgetSummary.TotalExpenses = decimal.RequireFromString(enrichedBudget.TotalExpenses)
 
 		fmt.Println("--- Enriched Budget Summary: ", enrichedBudgetSummary.BudgetName)
 		// Return the enriched budget summary

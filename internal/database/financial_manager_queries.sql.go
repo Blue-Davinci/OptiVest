@@ -512,10 +512,10 @@ SELECT
     COALESCE(res.recurring_expenses, '[]'::jsonb) AS recurring_expenses,
 
     -- Total projected recurring expenses for each budget
-    COALESCE(res.total_projected_recurring_expenses, 0) AS total_projected_recurring_expenses,
+    COALESCE(res.total_projected_recurring_expenses, 0)::NUMERIC AS total_projected_recurring_expenses,
 
     -- Total non-recurring expenses for each budget
-    COALESCE(es.total_expenses, 0) AS total_expenses
+    COALESCE(es.total_expenses, 0)::NUMERIC AS total_expenses
     
 FROM budgets b
 LEFT JOIN goals g ON b.id = g.budget_id
@@ -536,8 +536,8 @@ type GetBudgetGoalExpenseSummaryRow struct {
 	BudgetIsStrict                  bool
 	Goals                           json.RawMessage
 	RecurringExpenses               json.RawMessage
-	TotalProjectedRecurringExpenses int64
-	TotalExpenses                   int64
+	TotalProjectedRecurringExpenses string
+	TotalExpenses                   string
 }
 
 // Filter budgets by user_id
