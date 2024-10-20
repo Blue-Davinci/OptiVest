@@ -249,6 +249,93 @@ func (q *Queries) CreateNewRecurringExpense(ctx context.Context, arg CreateNewRe
 	return i, err
 }
 
+const getAllExpensesByUserID = `-- name: GetAllExpensesByUserID :many
+SELECT 
+    e.id,
+    e.user_id,
+    e.budget_id,
+    e.name,
+    e.category,
+    e.amount,
+    e.is_recurring,
+    e.description,
+    e.date_occurred,
+    e.created_at,
+    e.updated_at,
+    COUNT(*) OVER () AS total_count
+FROM 
+    expenses e
+WHERE e.user_id = $1  -- Filter by user ID
+AND ($2 = '' OR to_tsvector('simple', e.name) @@ plainto_tsquery('simple', $2))
+ORDER BY 
+    e.date_occurred DESC
+LIMIT 
+    $3 OFFSET $4
+`
+
+type GetAllExpensesByUserIDParams struct {
+	UserID  int64
+	Column2 interface{}
+	Limit   int32
+	Offset  int32
+}
+
+type GetAllExpensesByUserIDRow struct {
+	ID           int64
+	UserID       int64
+	BudgetID     int64
+	Name         string
+	Category     string
+	Amount       string
+	IsRecurring  bool
+	Description  sql.NullString
+	DateOccurred time.Time
+	CreatedAt    sql.NullTime
+	UpdatedAt    sql.NullTime
+	TotalCount   int64
+}
+
+func (q *Queries) GetAllExpensesByUserID(ctx context.Context, arg GetAllExpensesByUserIDParams) ([]GetAllExpensesByUserIDRow, error) {
+	rows, err := q.db.QueryContext(ctx, getAllExpensesByUserID,
+		arg.UserID,
+		arg.Column2,
+		arg.Limit,
+		arg.Offset,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetAllExpensesByUserIDRow
+	for rows.Next() {
+		var i GetAllExpensesByUserIDRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.BudgetID,
+			&i.Name,
+			&i.Category,
+			&i.Amount,
+			&i.IsRecurring,
+			&i.Description,
+			&i.DateOccurred,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.TotalCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getAllOverdueDebts = `-- name: GetAllOverdueDebts :many
 SELECT 
     COUNT(*) OVER() AS total_count,

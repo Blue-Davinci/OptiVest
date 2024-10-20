@@ -237,3 +237,25 @@ WHERE
 AND (interest_last_calculated IS NULL OR interest_last_calculated < CURRENT_DATE) -- Interest calculation is overdue
 LIMIT $1 OFFSET $2;
 
+-- name: GetAllExpensesByUserID :many
+SELECT 
+    e.id,
+    e.user_id,
+    e.budget_id,
+    e.name,
+    e.category,
+    e.amount,
+    e.is_recurring,
+    e.description,
+    e.date_occurred,
+    e.created_at,
+    e.updated_at,
+    COUNT(*) OVER () AS total_count
+FROM 
+    expenses e
+WHERE e.user_id = $1  -- Filter by user ID
+AND ($2 = '' OR to_tsvector('simple', e.name) @@ plainto_tsquery('simple', $2))
+ORDER BY 
+    e.date_occurred DESC
+LIMIT 
+    $3 OFFSET $4; 

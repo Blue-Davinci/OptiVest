@@ -209,14 +209,24 @@ monthly_expenses AS (
     WHERE e.user_id = $1
       AND EXTRACT(YEAR FROM e.date_occurred) = EXTRACT(YEAR FROM CURRENT_DATE)
     GROUP BY month
+),
+monthly_budgets AS (
+    SELECT
+        EXTRACT(MONTH FROM b.created_at) AS month,
+        SUM(b.total_amount)::NUMERIC AS total_budget
+    FROM budgets b
+    WHERE b.user_id = $1
+      AND EXTRACT(YEAR FROM b.created_at) = EXTRACT(YEAR FROM CURRENT_DATE)
+    GROUP BY month
 )
 SELECT 
-    COALESCE(i.month, e.month) AS month_value,  -- Alias to avoid ambiguity
+    COALESCE(i.month, e.month, b.month) AS month_value,  -- Alias to avoid ambiguity
     COALESCE(i.total_income, 0)::NUMERIC AS total_income,
-    COALESCE(e.total_expenses, 0)::NUMERIC AS total_expenses
+    COALESCE(e.total_expenses, 0)::NUMERIC AS total_expenses,
+    COALESCE(b.total_budget, 0)::NUMERIC AS total_budget
 FROM monthly_income i
-FULL OUTER JOIN monthly_expenses e
-    ON i.month = e.month
+FULL OUTER JOIN monthly_expenses e ON i.month = e.month
+FULL OUTER JOIN monthly_budgets b ON COALESCE(i.month, e.month) = b.month
 ORDER BY month_value
 `
 
@@ -224,6 +234,7 @@ type GetExpenseIncomeSummaryReportRow struct {
 	MonthValue    string
 	TotalIncome   string
 	TotalExpenses string
+	TotalBudget   string
 }
 
 func (q *Queries) GetExpenseIncomeSummaryReport(ctx context.Context, userID int64) ([]GetExpenseIncomeSummaryReportRow, error) {
@@ -235,7 +246,12 @@ func (q *Queries) GetExpenseIncomeSummaryReport(ctx context.Context, userID int6
 	var items []GetExpenseIncomeSummaryReportRow
 	for rows.Next() {
 		var i GetExpenseIncomeSummaryReportRow
-		if err := rows.Scan(&i.MonthValue, &i.TotalIncome, &i.TotalExpenses); err != nil {
+		if err := rows.Scan(
+			&i.MonthValue,
+			&i.TotalIncome,
+			&i.TotalExpenses,
+			&i.TotalBudget,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

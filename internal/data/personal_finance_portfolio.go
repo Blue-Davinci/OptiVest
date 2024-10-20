@@ -152,6 +152,7 @@ type ExpensesIncomesMonthlySummary struct {
 	Month         string          `json:"month"`
 	TotalIncome   decimal.Decimal `json:"total_income"`
 	TotalExpenses decimal.Decimal `json:"total_expenses"`
+	TotalBudget   decimal.Decimal `json:"total_budget"` // Total budget sum
 }
 
 // Prediction is a struct that represents a prediction
@@ -503,6 +504,7 @@ func (m PersonalFinancePortfolioModel) GetExpenseIncomeSummaryReport(userID int6
 			Month:         monthStr,
 			TotalIncome:   decimal.RequireFromString(personalFinanceRow.TotalIncome),
 			TotalExpenses: decimal.RequireFromString(personalFinanceRow.TotalExpenses),
+			TotalBudget:   decimal.RequireFromString(personalFinanceRow.TotalBudget),
 		}
 		expenseIncomeSummaries = append(expenseIncomeSummaries, expenseIncomeSummary)
 	}

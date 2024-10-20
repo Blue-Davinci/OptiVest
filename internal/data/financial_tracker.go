@@ -267,6 +267,46 @@ func (m *FinancialTrackingModel) UpdateRecurringExpenseByID(userID int64, recurr
 	return nil
 }
 
+// GetAllExpensesByUserID() gets all the expenses by a user ID
+// This route supports pagination and a name search parameter for the
+// expense's name.
+// We return an array of expenses, metadata struct and an error if any was found
+func (m *FinancialTrackingModel) GetAllExpensesByUserID(userID int64, expenseName string, filters Filters) ([]*Expense, Metadata, error) {
+	// set our context
+	ctx, cancel := contextGenerator(context.Background(), DefaultFinTrackDBContextTimeout)
+	defer cancel()
+	// get the expenses
+	expenses, err := m.DB.GetAllExpensesByUserID(ctx, database.GetAllExpensesByUserIDParams{
+		UserID:  userID,
+		Column2: expenseName,
+		Limit:   int32(filters.limit()),
+		Offset:  int32(filters.offset()),
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return nil, Metadata{}, ErrGeneralRecordNotFound
+		default:
+			return nil, Metadata{}, err
+		}
+	}
+	if len(expenses) == 0 {
+		return nil, Metadata{}, ErrGeneralRecordNotFound
+	}
+	// set totals
+	totalRecords := 0
+	// populate the expenses
+	var populatedExpenses []*Expense
+	for _, expense := range expenses {
+		totalRecords = int(expense.TotalCount)
+		populatedExpenses = append(populatedExpenses, populateExpense(expense))
+	}
+	// calculate metadata
+	metadata := calculateMetadata(totalRecords, filters.Page, filters.PageSize)
+	// we are good
+	return populatedExpenses, metadata, nil
+}
+
 // GetRecurringExpenseByID() gets a recurring expense by its ID
 func (m *FinancialTrackingModel) GetRecurringExpenseByID(userID, recurringExpenseID int64) (*RecurringExpense, error) {
 	// set our context
@@ -785,6 +825,20 @@ func populateRecurringExpense(recurringExpensRow interface{}) *RecurringExpense 
 func populateExpense(expenseRow interface{}) *Expense {
 	switch expense := expenseRow.(type) {
 	case database.Expense:
+		return &Expense{
+			ID:           expense.ID,
+			UserID:       expense.UserID,
+			BudgetID:     expense.BudgetID,
+			Name:         expense.Name,
+			Category:     expense.Category,
+			Amount:       decimal.RequireFromString(expense.Amount),
+			IsRecurring:  expense.IsRecurring,
+			Description:  expense.Description.String,
+			DateOccurred: expense.DateOccurred,
+			CreatedAt:    expense.CreatedAt.Time,
+			UpdatedAt:    expense.UpdatedAt.Time,
+		}
+	case database.GetAllExpensesByUserIDRow:
 		return &Expense{
 			ID:           expense.ID,
 			UserID:       expense.UserID,
