@@ -47,8 +47,10 @@ func (ct *CustomTime1) UnmarshalJSON(b []byte) error {
 }
 
 const (
-	DefaultInvPortContextTimeout = 5 * time.Second
-	BondDefaultStartDate         = "2021-01-01"
+	DefaultInvPortContextTimeout          = 5 * time.Second
+	DefaultInvestmentPortfolioSummaryTTL  = 10 * time.Minute
+	RedisInvestmentPortfolioSummaryPrefix = "investment_portfolio_summary:"
+	BondDefaultStartDate                  = "2021-01-01"
 )
 
 var (

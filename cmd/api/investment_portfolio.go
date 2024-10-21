@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -734,6 +735,26 @@ func (app *application) investmentPrtfolioAnalysisHandler(w http.ResponseWriter,
 func (app *application) getAllInvestmentInfoByUserIDHandler(w http.ResponseWriter, r *http.Request) {
 	//  retrieve user ID from context
 	user := app.contextGetUser(r)
+	redisKey := fmt.Sprintf("%s%d", data.RedisInvestmentPortfolioSummaryPrefix, user.ID)
+	ctx := context.Background()
+	// check if result was already cached in the cache
+	cachedResponse, err := getFromCache[[]*data.InvestmentSummary](ctx, app.RedisDB, redisKey)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrNoDataFoundInRedis):
+			//app.notFoundResponse(w, r)
+		default:
+			app.serverErrorResponse(w, r, err)
+			return
+		}
+	}
+	if cachedResponse != nil {
+		err = app.writeJSON(w, http.StatusOK, envelope{"investment_analysis": cachedResponse}, nil)
+		if err != nil {
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
 	// check all investments
 	investmentAnalysis, err := app.models.InvestmentPortfolioManager.GetAllInvestmentInfoByUserID(user.ID)
 	if err != nil {
@@ -745,11 +766,14 @@ func (app *application) getAllInvestmentInfoByUserIDHandler(w http.ResponseWrite
 		}
 		return
 	}
+	// set the cache
+	err = setToCache(ctx, app.RedisDB, redisKey, &investmentAnalysis, data.DefaultInvestmentPortfolioSummaryTTL)
+	if err != nil {
+		app.logger.Info("Error caching data:", zap.Error(err)) // Log but don't stop execution
+	}
 
 	// output this infor
-	err = app.writeJSON(w, http.StatusOK,
-		envelope{"investment_analysis": investmentAnalysis},
-		nil)
+	err = app.writeJSON(w, http.StatusOK, envelope{"investment_analysis": investmentAnalysis}, nil)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 	}
