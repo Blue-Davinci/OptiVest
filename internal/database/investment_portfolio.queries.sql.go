@@ -672,6 +672,43 @@ func (q *Queries) GetBondByBondID(ctx context.Context, id int64) (BondInvestment
 	return i, err
 }
 
+const getLatestLLMAnalysisResponseByUserID = `-- name: GetLatestLLMAnalysisResponseByUserID :one
+SELECT
+    id,
+    user_id,
+    header,
+    analysis,
+    footer,
+    created_at
+FROM llm_analysis_responses
+WHERE user_id = $1
+ORDER BY created_at DESC
+LIMIT 1
+`
+
+type GetLatestLLMAnalysisResponseByUserIDRow struct {
+	ID        int64
+	UserID    int64
+	Header    sql.NullString
+	Analysis  json.RawMessage
+	Footer    sql.NullString
+	CreatedAt time.Time
+}
+
+func (q *Queries) GetLatestLLMAnalysisResponseByUserID(ctx context.Context, userID int64) (GetLatestLLMAnalysisResponseByUserIDRow, error) {
+	row := q.db.QueryRowContext(ctx, getLatestLLMAnalysisResponseByUserID, userID)
+	var i GetLatestLLMAnalysisResponseByUserIDRow
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Header,
+		&i.Analysis,
+		&i.Footer,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getStockByStockID = `-- name: GetStockByStockID :one
 SELECT
     id,

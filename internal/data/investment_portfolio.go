@@ -213,9 +213,10 @@ type StockAnalysisStatistics struct {
 // AlternativeAnalysisStatistics struct to hold the analysis statistics
 type LLMAnalyzedPortfolio struct {
 	// string, map[string]interface{}, string
-	Header   string
-	Analysis map[string]interface{}
-	Footer   string
+	Header    string
+	Analysis  map[string]interface{}
+	Footer    string
+	CreatedAt time.Time
 }
 
 // InvestmentSummary struct to hold the investment summary
@@ -875,6 +876,43 @@ func (m InvestmentPortfolioModel) CreateLLMAnalysisResponse(userID int64, analyz
 
 	// Return nil if there was no error.
 	return nil
+}
+
+// GetLatestLLMAnalysisResponseByUserID() retrieves the latest LLM analysis response for a user.
+// We take in a user ID and return a pointer to an LLMAnalysisResponse struct.
+// We return an error if there was an issue retrieving the LLM analysis response.
+func (m InvestmentPortfolioModel) GetLatestLLMAnalysisResponseByUserID(userID int64) (*LLMAnalyzedPortfolio, error) {
+	ctx, cancel := contextGenerator(context.Background(), DefaultInvPortContextTimeout)
+	defer cancel()
+
+	// Retrieve the latest LLM analysis response from the database.
+	analysisResponse, err := m.DB.GetLatestLLMAnalysisResponseByUserID(ctx, userID)
+	if err != nil {
+		switch {
+		case err == sql.ErrNoRows:
+			return nil, ErrGeneralRecordNotFound
+		default:
+			return nil, err
+		}
+	}
+
+	// decode the analysis data
+	analysisMapData := map[string]interface{}{}
+	err = json.Unmarshal(analysisResponse.Analysis, &analysisMapData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal analysis data: %w", err)
+	}
+
+	// Create a new LLMAnalysisResponse struct to hold the information.
+	llmAnalysisResponse := &LLMAnalyzedPortfolio{
+		Header:    analysisResponse.Header.String,
+		Analysis:  analysisMapData,
+		Footer:    analysisResponse.Footer.String,
+		CreatedAt: analysisResponse.CreatedAt,
+	}
+
+	// Return the LLMAnalysisResponse struct and nil if there was no error.
+	return llmAnalysisResponse, nil
 }
 
 // GetAllInvestmentInfoByUserID() retrieves all investment information for a user.

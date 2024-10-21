@@ -730,6 +730,29 @@ func (app *application) investmentPrtfolioAnalysisHandler(w http.ResponseWriter,
 
 }
 
+// getLatestLLMAnalysisResponseByUserIDHandler() is a handler responsible for getting the latest LLM analysis response by user ID
+// We extract the User ID from the context, we then proceed to get the latest LLM analysis response
+func (app *application) getLatestLLMAnalysisResponseByUserIDHandler(w http.ResponseWriter, r *http.Request) {
+	//  retrieve user ID from context
+	user := app.contextGetUser(r)
+	// get the latest LLM analysis response
+	latestLLMAnalysisResponse, err := app.models.InvestmentPortfolioManager.GetLatestLLMAnalysisResponseByUserID(user.ID)
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrGeneralRecordNotFound):
+			app.notFoundResponse(w, r)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
+	// output this infor
+	err = app.writeJSON(w, http.StatusOK, envelope{"llm_analysis": latestLLMAnalysisResponse}, nil)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+	}
+}
+
 // getAllInvestmentInfoByUserIDHandler() is a handler responsible for getting all investment information by user ID
 // we will recieve a user ID. We will proceed to get the following data:
 func (app *application) getAllInvestmentInfoByUserIDHandler(w http.ResponseWriter, r *http.Request) {

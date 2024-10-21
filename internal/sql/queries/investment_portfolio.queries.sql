@@ -284,6 +284,19 @@ INSERT INTO llm_analysis_responses (
 ) VALUES ($1, $2, $3,$4  ) 
 RETURNING id;
 
+-- name: GetLatestLLMAnalysisResponseByUserID :one
+SELECT
+    id,
+    user_id,
+    header,
+    analysis,
+    footer,
+    created_at
+FROM llm_analysis_responses
+WHERE user_id = $1
+ORDER BY created_at DESC
+LIMIT 1;
+
 
 -- name: GetAllInvestmentInfoByUserID :many
 WITH stock_data AS (
