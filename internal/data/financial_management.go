@@ -74,9 +74,10 @@ const (
 
 // Enriched budget
 type EnrichedBudget struct {
-	Budget              Budget              `json:"budget"`
-	Goal_Summary        []*Goal_Summary     `json:"goal_summary"`
-	Goal_Summary_Totals Goal_Summary_Totals `json:"goal_summary_totals"`
+	Budget              Budget                       `json:"budget"`
+	Goal_Summary        []*Goal_Summary              `json:"goal_summary"`
+	Recurring_Expenses  []*Recurring_Expense_Summary `json:"recurring_expenses"`
+	Goal_Summary_Totals Goal_Summary_Totals          `json:"goal_summary_totals"`
 }
 
 type EnrichedBudgetSummary struct {
@@ -169,6 +170,14 @@ type Goal_Summary struct {
 	Name                string          `json:"name"`
 	MonthlyContribution decimal.Decimal `json:"monthly_contribution"`
 	TargetAmount        decimal.Decimal `json:"target_amount"`
+}
+
+// Recurring_Expense_Summary struct represents a summary of a recurring expense
+type Recurring_Expense_Summary struct {
+	ID              int64           `json:"id"`
+	Name            string          `json:"name"`
+	ProjectedAmount decimal.Decimal `json:"projected_amount"`
+	NextOccurrence  CustomTime1     `json:"next_occurrence"`
 }
 
 // Goal_Summary_Totals struct represents the totals for a goal summary
@@ -440,9 +449,25 @@ func (m FinancialManagerModel) GetBudgetsForUser(userID int64, searchQuery strin
 	// Process each budget
 	for _, row := range budgets {
 		var enrichedBudget EnrichedBudget
+		// make a goal summary
+		var goalSummary = []*Goal_Summary{}
+		// make a recurring expense summary
+		var recurringExpenseSummary = []*Recurring_Expense_Summary{}
 		totalBudgets = int(row.TotalBudgets)
 		// make a budget
 		budget := populateBudget(row)
+		// unmarshall [{}] goals to our goal summary
+		err := json.Unmarshal([]byte(row.Goals), &goalSummary)
+		if err != nil {
+			fmt.Println("Error unmarshalling goals: ", err)
+			return nil, Metadata{}, err
+		}
+		// unmarshall [{}] recurring expenses to our recurring expense summary
+		err = json.Unmarshal([]byte(row.RecurringExpenses), &recurringExpenseSummary)
+		if err != nil {
+			fmt.Println("Error unmarshalling recurring expenses: ", err)
+			return nil, Metadata{}, err
+		}
 		// return a goal summary and totals for each budget
 		goalSummaryTotals, err := m.GetAllGoalSummaryBudgetID(budget.Id, userID)
 		if err != nil {
@@ -454,6 +479,8 @@ func (m FinancialManagerModel) GetBudgetsForUser(userID int64, searchQuery strin
 		}
 		//enrich our budget
 		enrichedBudget.Budget = *budget
+		enrichedBudget.Goal_Summary = goalSummary
+		enrichedBudget.Recurring_Expenses = recurringExpenseSummary
 		enrichedBudget.Goal_Summary_Totals = *goalSummaryTotals
 		// append the enriched budget to the slice
 		enrichedBudgets = append(enrichedBudgets, &enrichedBudget)
@@ -484,7 +511,7 @@ func populateBudget(budgetRow interface{}) *Budget {
 			CreatedAt:      budget.CreatedAt,
 			UpdatedAt:      budget.UpdatedAt,
 		}
-	case database.GetBudgetsForUserRow:
+	case database.GetBudgetsForUserRow: // database.GetBudgetsForUserRow
 		return &Budget{
 			Id:             budget.ID,
 			UserID:         budget.UserID,

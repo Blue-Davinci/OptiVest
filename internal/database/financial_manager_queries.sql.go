@@ -576,22 +576,72 @@ func (q *Queries) GetBudgetGoalExpenseSummary(ctx context.Context, userID int64)
 }
 
 const getBudgetsForUser = `-- name: GetBudgetsForUser :many
-SELECT count(*) OVER() AS total_budgets,
-    id, 
-    user_id, 
-    name,
-    is_strict, 
-    category, 
-    total_amount, 
-    currency_code, 
-    conversion_rate,
-    description, 
-    created_at, 
-    updated_at
-FROM budgets
-WHERE user_id = $1
-AND ($2 = '' OR to_tsvector('simple', name) @@ plainto_tsquery('simple', $2))
-ORDER BY created_at DESC
+SELECT COUNT(*) OVER() AS total_budgets,
+    b.id, 
+    b.user_id, 
+    b.name, 
+    b.is_strict, 
+    b.category, 
+    b.total_amount, 
+    b.currency_code, 
+    b.conversion_rate, 
+    b.description, 
+    b.created_at, 
+    b.updated_at,
+
+    -- Aggregate goals into JSON array
+    COALESCE(goals.goals, '[]'::json) AS goals,
+
+    -- Aggregate recurring expenses into JSON array without duplication
+    COALESCE(recurring_expenses.expenses, '[]'::json) AS recurring_expenses,
+
+    -- Total sums
+    COALESCE(goals.total_monthly_contributions, 0) AS total_monthly_contributions,
+    COALESCE(recurring_expenses.total_recurring_expenses, 0) AS total_recurring_expenses
+
+FROM budgets b
+
+LEFT JOIN LATERAL (
+    SELECT 
+        json_agg(
+            json_build_object(
+                'id', g.id,
+                'name', g.name,
+                'monthly_contribution', g.monthly_contribution,
+                'target_amount', g.target_amount
+            )
+        ) AS goals,
+        SUM(g.monthly_contribution)::NUMERIC AS total_monthly_contributions
+    FROM goals g
+    WHERE g.budget_id = b.id
+) AS goals ON true
+
+LEFT JOIN LATERAL (
+    SELECT 
+        json_agg(
+            json_build_object(
+                'id', e.id,
+                'name', e.name,
+                'projected_amount', e.projected_amount,
+                'next_occurrence', e.next_occurrence
+            )
+        ) AS expenses,
+        SUM(e.projected_amount)::NUMERIC AS total_recurring_expenses
+    FROM (
+        SELECT DISTINCT ON (re.name, re.budget_id)
+            re.id,
+            re.name,
+            re.projected_amount,
+            re.next_occurrence
+        FROM recurring_expenses re
+        WHERE re.budget_id = b.id
+        ORDER BY re.name, re.budget_id, re.next_occurrence DESC
+    ) e
+) AS recurring_expenses ON true
+
+WHERE b.user_id = $1
+AND ($2 = '' OR to_tsvector('simple', b.name) @@ plainto_tsquery('simple', $2))
+ORDER BY b.created_at DESC
 LIMIT $3 OFFSET $4
 `
 
@@ -603,20 +653,26 @@ type GetBudgetsForUserParams struct {
 }
 
 type GetBudgetsForUserRow struct {
-	TotalBudgets   int64
-	ID             int64
-	UserID         int64
-	Name           string
-	IsStrict       bool
-	Category       string
-	TotalAmount    string
-	CurrencyCode   string
-	ConversionRate string
-	Description    sql.NullString
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	TotalBudgets              int64
+	ID                        int64
+	UserID                    int64
+	Name                      string
+	IsStrict                  bool
+	Category                  string
+	TotalAmount               string
+	CurrencyCode              string
+	ConversionRate            string
+	Description               sql.NullString
+	CreatedAt                 time.Time
+	UpdatedAt                 time.Time
+	Goals                     json.RawMessage
+	RecurringExpenses         json.RawMessage
+	TotalMonthlyContributions string
+	TotalRecurringExpenses    string
 }
 
+// LATERAL subquery for goals
+// LATERAL subquery for recurring expenses
 func (q *Queries) GetBudgetsForUser(ctx context.Context, arg GetBudgetsForUserParams) ([]GetBudgetsForUserRow, error) {
 	rows, err := q.db.QueryContext(ctx, getBudgetsForUser,
 		arg.UserID,
@@ -644,6 +700,10 @@ func (q *Queries) GetBudgetsForUser(ctx context.Context, arg GetBudgetsForUserPa
 			&i.Description,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Goals,
+			&i.RecurringExpenses,
+			&i.TotalMonthlyContributions,
+			&i.TotalRecurringExpenses,
 		); err != nil {
 			return nil, err
 		}
