@@ -227,5 +227,6 @@ func (app *application) awardRoutes() chi.Router {
 func (app *application) searchOptionRoutes() chi.Router {
 	searchOptionRoutes := chi.NewRouter()
 	searchOptionRoutes.Get("/budget-categories", app.getDistinctBudgetCategoryHandler)
+	searchOptionRoutes.Get("/currencies", app.getAllCurrencyHandler)
 	return searchOptionRoutes
 }

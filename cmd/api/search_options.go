@@ -30,3 +30,20 @@ func (app *application) getDistinctBudgetCategoryHandler(w http.ResponseWriter, 
 		app.serverErrorResponse(w, r, err)
 	}
 }
+
+// getAllCurrencyHandler() is a handler function that returns a list of all currencies.
+// Uses the app.getCurrenciesFromRedis() method to get the data.
+// If there is an error we return a 500 status code and the error message
+func (app *application) getAllCurrencyHandler(w http.ResponseWriter, r *http.Request) {
+	// get the data
+	currencies, err := app.getCurrenciesFromRedis()
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+		return
+	}
+	// write the data
+	err = app.writeJSON(w, http.StatusOK, envelope{"currencies": currencies}, nil)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+	}
+}

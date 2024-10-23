@@ -183,6 +183,25 @@ func (app *application) saveCurrenciesToRedis(rates data.CurrencyRates) error {
 	return nil
 }
 
+// getCurrenciesFromRedis retrieves all currency rates from Redis
+func (app *application) getCurrenciesFromRedis() (data.CurrencyRates, error) {
+	result, err := app.RedisDB.HGetAll(context.Background(), "currency_rates").Result()
+	if err != nil {
+		return data.CurrencyRates{}, fmt.Errorf("failed to get records from Redis: %w", err)
+	}
+
+	conversionRates := make(map[string]float64)
+	for currency, rateStr := range result {
+		rate, err := strconv.ParseFloat(rateStr, 64)
+		if err != nil {
+			return data.CurrencyRates{}, fmt.Errorf("failed to parse rate for currency %s: %w", currency, err)
+		}
+		conversionRates[currency] = rate
+	}
+
+	return data.CurrencyRates{ConversionRates: conversionRates}, nil
+}
+
 // verifyCurrencyInRedis() checks if a currency exists in REDIS. Will be used
 // in tandem with the currency conversion API.
 func (app *application) verifyCurrencyInRedis(currency string) error {

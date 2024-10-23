@@ -296,7 +296,7 @@ func (app *application) getBudgetsForUserHandler(w http.ResponseWriter, r *http.
 	input.Name = app.readString(qs, "name", "")
 	//get the page & pagesizes as ints and set to the embedded struct
 	input.Filters.Page = app.readInt(qs, "page", 1, v)
-	input.Filters.PageSize = app.readInt(qs, "page_size", 20, v)
+	input.Filters.PageSize = app.readInt(qs, "page_size", 10, v)
 	// get the sort values falling back to "id" if it is not provided
 	input.Filters.Sort = app.readString(qs, "sort", "name")
 	// Add the supported sort values for this endpoint to the sort safelist.
