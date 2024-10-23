@@ -57,6 +57,7 @@ func (app *application) routes() http.Handler {
 	v1Router.With(dynamicMiddleware.Then).Mount("/personalfinance", app.personalFinanceRoutes())
 	v1Router.With(dynamicMiddleware.Then).Mount("/feeds", app.feedRoutes())
 	v1Router.With(dynamicMiddleware.Then).Mount("/awards", app.awardRoutes())
+	v1Router.With(dynamicMiddleware.Then).Mount("/search-options", app.searchOptionRoutes())
 
 	// Moount the v1Router to the main base router
 	router.Mount("/v1", v1Router)
@@ -220,4 +221,11 @@ func (app *application) awardRoutes() chi.Router {
 	awardRoutes := chi.NewRouter()
 	awardRoutes.Get("/", app.getAllAwardsForUserByIDHandler)
 	return awardRoutes
+}
+
+// searchOptionRoutes() is a method that returns a chi.Router that contains all the routes for the search options
+func (app *application) searchOptionRoutes() chi.Router {
+	searchOptionRoutes := chi.NewRouter()
+	searchOptionRoutes.Get("/budget-categories", app.getDistinctBudgetCategoryHandler)
+	return searchOptionRoutes
 }

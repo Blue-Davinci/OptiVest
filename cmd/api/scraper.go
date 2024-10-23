@@ -188,7 +188,7 @@ func convertGofeedToRSSFeed(rssFeed *data.RSSFeed, feed *gofeed.Feed, sanitizer 
 			Description: sanitizer.Sanitize(item.Description),
 			Content:     sanitizer.Sanitize(item.Content),
 			PubDate:     sanitizer.Sanitize(item.Published),
-			ImageURL:    imageURL, // sanitizer.Sanitize(imageURL)
+			ImageURL:    imageURL, // sanitizer.Sanitize(imageURL) Note: This breaks some images
 		}
 	}
 }
