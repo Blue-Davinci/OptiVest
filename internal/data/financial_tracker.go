@@ -86,12 +86,12 @@ type Income struct {
 
 // DebtWithPayments represents a debt with its payments
 type DebtWithPayments struct {
-	Debt                  *Debt                  `json:"debt"`
-	Payments              []*EnrichedDebtPayment `json:"payments"`
-	PaymentMetadata       Metadata               `json:"payment_metadata"`
-	TotalPaymentAmount    decimal.Decimal        `json:"total_payment_amount"`
-	TotalInterestPayment  decimal.Decimal        `json:"total_interest_payment"`
-	TotalPrincipalPayment decimal.Decimal        `json:"total_principal_payment"`
+	Debt                   *Debt                  `json:"debt"`
+	Payments               []*EnrichedDebtPayment `json:"payments"`
+	PaymentMetadata        Metadata               `json:"payment_metadata"`
+	TotalPaymentAmount     decimal.Decimal        `json:"total_payment_amount"`
+	TotalInterestPayment   decimal.Decimal        `json:"total_interest_payment"`
+	TotalRemainingBalances decimal.Decimal        `json:"total_principal_payment"`
 }
 
 // Represents a Debt
@@ -718,12 +718,12 @@ func (m *FinancialTrackingModel) GetAllDebtsByUserID(userID int64, debtName stri
 			fmt.Println("Error getting debt payments", err)
 		}
 		populatedDebts = append(populatedDebts, &DebtWithPayments{
-			Debt:                  populateDebt(debt),
-			Payments:              payments,
-			PaymentMetadata:       metadata,
-			TotalPaymentAmount:    decimal.Zero,
-			TotalInterestPayment:  decimal.Zero,
-			TotalPrincipalPayment: decimal.Zero,
+			Debt:                   populateDebt(debt),
+			Payments:               payments,
+			PaymentMetadata:        metadata,
+			TotalPaymentAmount:     decimal.RequireFromString(debt.TotalAmounts),
+			TotalInterestPayment:   decimal.RequireFromString(debt.TotalInterestPaid.String),
+			TotalRemainingBalances: decimal.RequireFromString(debt.TotalRemainingBalances),
 		})
 	}
 	// calculate metadata
