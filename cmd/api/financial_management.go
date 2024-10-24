@@ -748,13 +748,13 @@ func (app *application) getGoalPlansForUserHandler(w http.ResponseWriter, r *htt
 	user := app.contextGetUser(r)
 
 	// Check if the goal plans are cached in REDIS
-	key := fmt.Sprintf("%s%d", data.RedisFinManGoalPlanPrefix, user.ID)
+	redisKey := fmt.Sprintf("%s%d:%d", data.RedisFinManGoalPlanPrefix, user.ID, input.Filters.Page)
 
 	// Initialize unifiedGoalPlans to avoid nil pointer issues
 	unifiedGoalPlans := &data.UnifiedGoalPlanMetadata{}
 
 	// Attempt to retrieve cached data
-	cached, err := getFromCache[*data.UnifiedGoalPlanMetadata](context.Background(), app.RedisDB, key)
+	cached, err := getFromCache[*data.UnifiedGoalPlanMetadata](context.Background(), app.RedisDB, redisKey)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrNoDataFoundInRedis):
@@ -787,7 +787,7 @@ func (app *application) getGoalPlansForUserHandler(w http.ResponseWriter, r *htt
 	}
 
 	// Cache the goal plans in REDIS
-	err = setToCache(context.Background(), app.RedisDB, key, unifiedGoalPlans, 12*time.Hour)
+	err = setToCache(context.Background(), app.RedisDB, redisKey, unifiedGoalPlans, 12*time.Hour)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return

@@ -24,7 +24,8 @@ const (
 )
 
 const (
-	RedisFinTrackDebtSearchPrefix = "fintrack_debt_search"
+	RedisFinTrackDebtSearchPrefix        = "fintrack_debt_search"
+	RedisFinTrackDebtPaymentSearchPrefix = "fintrack_debt_payment_search"
 )
 
 var (

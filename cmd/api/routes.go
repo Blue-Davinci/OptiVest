@@ -164,7 +164,9 @@ func (app *application) debtRoutes() chi.Router {
 	debtRoutes.Patch("/{debtID}", app.updateDebtHandler)
 
 	//installment
+	debtRoutes.Get("/installment/{debtID}", app.getDebtPaymentsByDebtUserIDHandler)
 	debtRoutes.Patch("/installment/{debtID}", app.makeDebtPaymentHandler)
+
 	return debtRoutes
 }
 

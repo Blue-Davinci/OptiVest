@@ -986,6 +986,89 @@ func (app *application) getAllDebtsByUserIDHandler(w http.ResponseWriter, r *htt
 	}
 }
 
+// getDebtPaymentsByDebtUserIDHandler() is a handler method that will return all payments for a debt
+// This endpoint supports pagination
+// This route also provides filtering via start and end dates of the payment dates.
+// These should default to time.Time{} for the start date and time.Now() for the end date if none are provided
+// We return an error if the start date is after the end date and read them from the url parameters
+func (app *application) getDebtPaymentsByDebtUserIDHandler(w http.ResponseWriter, r *http.Request) {
+	// Inline struct for input
+	var input struct {
+		StartDate time.Time
+		EndDate   time.Time
+		data.Filters
+	}
+	// Read and validate the query parameters
+	v := validator.New()
+	qs := r.URL.Query()
+	input.StartDate = app.readDate(qs, "start_date", time.Time{}, v)
+	input.EndDate = app.readDate(qs, "end_date", time.Now(), v)
+	input.Filters.Page = app.readInt(qs, "page", 1, v)
+	input.Filters.PageSize = app.readInt(qs, "page_size", 20, v)
+	input.Filters.Sort = app.readString(qs, "sort", "payment_date")
+	input.Filters.SortSafelist = []string{"payment_date", "-payment_date"}
+	// Perform validation
+	if data.ValidateFilters(v, input.Filters); !v.Valid() {
+		app.failedValidationResponse(w, r, v.Errors)
+		return
+	}
+	// Get DebtID
+	debtID, err := app.readIDParam(r, "debtID")
+	if err != nil || debtID < 1 {
+		app.notFoundResponse(w, r)
+		return
+	}
+	// make redis key by using data.RedisFinTrackDebtPaymentSearchPrefix:userid:debtID:input.StartDate:input.EndDate as the key
+	redisKey := fmt.Sprintf("%s:%d:%d:%s:%s", data.RedisFinTrackDebtPaymentSearchPrefix, app.contextGetUser(r).ID, debtID, input.StartDate.Format(time.RFC3339), input.EndDate.Format(time.RFC3339))
+	// make a struct with []*DebtRepayment and a metadata
+	type paymentEnvelope struct {
+		Payments []*data.EnrichedDebtPayment `json:"payments"`
+		Metadata *data.Metadata              `json:"metadata"`
+	}
+	// Get the payments from the cache
+	cachedPayments, err := getFromCache[*paymentEnvelope](context.Background(), app.RedisDB, redisKey)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrNoDataFoundInRedis):
+			// Do nothing
+		default:
+			app.serverErrorResponse(w, r, err)
+			return
+		}
+	}
+	// If the payments are not in the cache, get them from the database
+	if cachedPayments != nil {
+		// Return cached data if available
+		err = app.writeJSON(w, http.StatusOK, envelope{"payments": cachedPayments}, nil)
+		if err != nil {
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
+	// Get the debt payments from the database
+	payments, metadata, err := app.models.FinancialTrackingManager.GetDebtPaymentsByDebtUserID(app.contextGetUser(r).ID, debtID, input.StartDate, input.EndDate, input.Filters)
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrGeneralRecordNotFound):
+			app.notFoundResponse(w, r)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
+	// save the payments to the cache using the paymentEnvelope struct
+	err = setToCache(context.Background(), app.RedisDB, redisKey, &paymentEnvelope{Payments: payments, Metadata: &metadata}, data.DefaultFinTrackRedisDebtTTL)
+	if err != nil {
+		// just print the error
+		app.logger.Info("error setting cache", zap.String("error", err.Error()))
+	}
+	// Send the response
+	err = app.writeJSON(w, http.StatusOK, envelope{"payments": payments, "metadata": metadata}, nil)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+	}
+}
+
 // makeDebtPaymentHandler() is a handler method that will handle debt payments
 // We fetch the debt by ID, fetch the user input (payment amount, etc.)
 // We check if the payment is late and accrued interest
