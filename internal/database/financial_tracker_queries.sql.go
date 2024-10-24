@@ -249,6 +249,114 @@ func (q *Queries) CreateNewRecurringExpense(ctx context.Context, arg CreateNewRe
 	return i, err
 }
 
+const getAllDebtsByUserID = `-- name: GetAllDebtsByUserID :many
+SELECT 
+    id,
+    user_id,
+    name,
+    amount,
+    remaining_balance,
+    interest_rate,
+    description,
+    due_date,
+    minimum_payment,
+    created_at,
+    updated_at,
+    next_payment_date,
+    estimated_payoff_date,
+    accrued_interest,
+    interest_last_calculated,
+    last_payment_date,
+    total_interest_paid,
+    COUNT(*) OVER() AS total_debts,
+    CAST(SUM(amount) OVER() AS NUMERIC) AS total_amounts,                -- Cast after SUM
+    CAST(SUM(remaining_balance) OVER() AS NUMERIC) AS total_remaining_balances
+FROM debts
+WHERE user_id = $1
+AND ($2 = '' OR to_tsvector('simple', name) @@ plainto_tsquery('simple', $2))
+ORDER BY created_at DESC
+LIMIT $3 OFFSET $4
+`
+
+type GetAllDebtsByUserIDParams struct {
+	UserID  int64
+	Column2 interface{}
+	Limit   int32
+	Offset  int32
+}
+
+type GetAllDebtsByUserIDRow struct {
+	ID                     int64
+	UserID                 int64
+	Name                   string
+	Amount                 string
+	RemainingBalance       string
+	InterestRate           sql.NullString
+	Description            sql.NullString
+	DueDate                time.Time
+	MinimumPayment         string
+	CreatedAt              sql.NullTime
+	UpdatedAt              sql.NullTime
+	NextPaymentDate        time.Time
+	EstimatedPayoffDate    sql.NullTime
+	AccruedInterest        sql.NullString
+	InterestLastCalculated sql.NullTime
+	LastPaymentDate        sql.NullTime
+	TotalInterestPaid      sql.NullString
+	TotalDebts             int64
+	TotalAmounts           string
+	TotalRemainingBalances string
+}
+
+func (q *Queries) GetAllDebtsByUserID(ctx context.Context, arg GetAllDebtsByUserIDParams) ([]GetAllDebtsByUserIDRow, error) {
+	rows, err := q.db.QueryContext(ctx, getAllDebtsByUserID,
+		arg.UserID,
+		arg.Column2,
+		arg.Limit,
+		arg.Offset,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetAllDebtsByUserIDRow
+	for rows.Next() {
+		var i GetAllDebtsByUserIDRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.Name,
+			&i.Amount,
+			&i.RemainingBalance,
+			&i.InterestRate,
+			&i.Description,
+			&i.DueDate,
+			&i.MinimumPayment,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.NextPaymentDate,
+			&i.EstimatedPayoffDate,
+			&i.AccruedInterest,
+			&i.InterestLastCalculated,
+			&i.LastPaymentDate,
+			&i.TotalInterestPaid,
+			&i.TotalDebts,
+			&i.TotalAmounts,
+			&i.TotalRemainingBalances,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getAllExpensesByUserID = `-- name: GetAllExpensesByUserID :many
 SELECT 
     e.id,
@@ -554,6 +662,96 @@ func (q *Queries) GetDebtByID(ctx context.Context, id int64) (Debt, error) {
 		&i.TotalInterestPaid,
 	)
 	return i, err
+}
+
+const getDebtPaymentsByDebtUserID = `-- name: GetDebtPaymentsByDebtUserID :many
+SELECT 
+    id,
+    debt_id,
+    user_id,
+    payment_amount,
+    payment_date,
+    interest_payment,
+    principal_payment,
+    created_at,
+    COUNT(*) OVER() AS total_payments,
+    CAST(SUM(payment_amount) OVER() AS NUMERIC)::NUMERIC AS total_payment_amount,  -- Cast after the SUM
+    CAST(SUM(interest_payment) OVER() AS NUMERIC)::NUMERIC AS total_interest_payment,
+    CAST(SUM(principal_payment) OVER() AS NUMERIC)::NUMERIC AS total_principal_payment
+FROM debtpayments
+WHERE user_id = $1
+AND debt_id = $2
+AND ($3::TIMESTAMP IS NULL OR payment_date >= $3::TIMESTAMP)  -- Cast to TIMESTAMP explicitly
+AND ($4::TIMESTAMP IS NULL OR payment_date <= $4::TIMESTAMP) 
+ORDER BY payment_date DESC
+LIMIT $5 OFFSET $6
+`
+
+type GetDebtPaymentsByDebtUserIDParams struct {
+	UserID  int64
+	DebtID  int64
+	Column3 time.Time
+	Column4 time.Time
+	Limit   int32
+	Offset  int32
+}
+
+type GetDebtPaymentsByDebtUserIDRow struct {
+	ID                    int64
+	DebtID                int64
+	UserID                int64
+	PaymentAmount         string
+	PaymentDate           time.Time
+	InterestPayment       string
+	PrincipalPayment      string
+	CreatedAt             sql.NullTime
+	TotalPayments         int64
+	TotalPaymentAmount    string
+	TotalInterestPayment  string
+	TotalPrincipalPayment string
+}
+
+func (q *Queries) GetDebtPaymentsByDebtUserID(ctx context.Context, arg GetDebtPaymentsByDebtUserIDParams) ([]GetDebtPaymentsByDebtUserIDRow, error) {
+	rows, err := q.db.QueryContext(ctx, getDebtPaymentsByDebtUserID,
+		arg.UserID,
+		arg.DebtID,
+		arg.Column3,
+		arg.Column4,
+		arg.Limit,
+		arg.Offset,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetDebtPaymentsByDebtUserIDRow
+	for rows.Next() {
+		var i GetDebtPaymentsByDebtUserIDRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.DebtID,
+			&i.UserID,
+			&i.PaymentAmount,
+			&i.PaymentDate,
+			&i.InterestPayment,
+			&i.PrincipalPayment,
+			&i.CreatedAt,
+			&i.TotalPayments,
+			&i.TotalPaymentAmount,
+			&i.TotalInterestPayment,
+			&i.TotalPrincipalPayment,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const getExpenseByID = `-- name: GetExpenseByID :one

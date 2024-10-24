@@ -23,8 +23,13 @@ const (
 	FinTrackEnumRecurenceYearly     = database.RecurrenceIntervalEnumYearly
 )
 
+const (
+	RedisFinTrackDebtSearchPrefix = "fintrack_debt_search"
+)
+
 var (
 	DefaultFinTrackDBContextTimeout = 5 * time.Second
+	DefaultFinTrackRedisDebtTTL     = 10 * time.Minute
 )
 
 var (
@@ -78,6 +83,16 @@ type Income struct {
 	UpdatedAt            time.Time       `json:"updated_at"`
 }
 
+// DebtWithPayments represents a debt with its payments
+type DebtWithPayments struct {
+	Debt                  *Debt                  `json:"debt"`
+	Payments              []*EnrichedDebtPayment `json:"payments"`
+	PaymentMetadata       Metadata               `json:"payment_metadata"`
+	TotalPaymentAmount    decimal.Decimal        `json:"total_payment_amount"`
+	TotalInterestPayment  decimal.Decimal        `json:"total_interest_payment"`
+	TotalPrincipalPayment decimal.Decimal        `json:"total_principal_payment"`
+}
+
 // Represents a Debt
 type Debt struct {
 	ID                     int64           `json:"id"`
@@ -97,6 +112,14 @@ type Debt struct {
 	InterestLastCalculated time.Time       `json:"interest_last_calculated"`
 	LastPaymentDate        time.Time       `json:"last_payment_date,omitempty"`
 	TotalInterestPaid      decimal.Decimal `json:"total_interest_paid"`
+}
+
+// Enriched Debt Payment returns a debt payment with the debt details
+type EnrichedDebtPayment struct {
+	DebtPayment           *DebtRepayment  `json:"debt_payment"`
+	TotalPaymentAmount    decimal.Decimal `json:"total_payment_amount"`
+	TotalInterestPayment  decimal.Decimal `json:"total_interest_payment"`
+	TotalPrincipalPayment decimal.Decimal `json:"total_principal_payment"`
 }
 
 // Represents a Debt repayment
@@ -651,6 +674,110 @@ func (m *FinancialTrackingModel) GetDebtByID(userID, debtID int64) (*Debt, error
 	return updatedDebt, nil
 }
 
+// GetAllDebtsByUserID() gets all the debts by a user ID
+// This will will support both pagination and a name search parameter.
+// We return an array of []*DebtWithPayments, passing each debt id to GetDebtPaymentsByDebtUserID() to get the payments
+// a metadata struct and an error if any was found
+func (m *FinancialTrackingModel) GetAllDebtsByUserID(userID int64, debtName string, filters Filters) ([]*DebtWithPayments, Metadata, error) {
+	// set our context
+	ctx, cancel := contextGenerator(context.Background(), DefaultFinTrackDBContextTimeout)
+	defer cancel()
+	// get the debts
+	debts, err := m.DB.GetAllDebtsByUserID(ctx, database.GetAllDebtsByUserIDParams{
+		UserID:  userID,
+		Column2: debtName,
+		Limit:   int32(filters.limit()),
+		Offset:  int32(filters.offset()),
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return nil, Metadata{}, ErrGeneralRecordNotFound
+		default:
+			return nil, Metadata{}, err
+		}
+	}
+	if len(debts) == 0 {
+		return nil, Metadata{}, ErrGeneralRecordNotFound
+	}
+	// set totals
+	totalRecords := 0
+	// populate the debts
+	var populatedDebts []*DebtWithPayments
+	for _, debt := range debts {
+		totalRecords = int(debt.TotalDebts)
+		// get the payments
+		payments, metadata, err := m.GetDebtPaymentsByDebtUserID(
+			userID,
+			debt.ID,
+			time.Time{}, // use the earliest time as the start date
+			time.Now(),  // use today as the end date
+			filters)
+		if err != nil {
+			fmt.Println("Error getting debt payments", err)
+		}
+		populatedDebts = append(populatedDebts, &DebtWithPayments{
+			Debt:                  populateDebt(debt),
+			Payments:              payments,
+			PaymentMetadata:       metadata,
+			TotalPaymentAmount:    decimal.Zero,
+			TotalInterestPayment:  decimal.Zero,
+			TotalPrincipalPayment: decimal.Zero,
+		})
+	}
+	// calculate metadata
+	metadata := calculateMetadata(totalRecords, filters.Page, filters.PageSize)
+	// we are good
+	return populatedDebts, metadata, nil
+}
+
+// GetDebtPaymentsByDebtUserID() gets all the debt payments by a debt ID and user ID
+// This route supports both pagination as well as date search parameters (start and end date)
+// We return an []*EnrichedDebtPayment, a metadata struct and an error if any was found
+func (m *FinancialTrackingModel) GetDebtPaymentsByDebtUserID(userID, debtID int64, startDate, endDate time.Time, filters Filters) ([]*EnrichedDebtPayment, Metadata, error) {
+	// set our context
+	ctx, cancel := contextGenerator(context.Background(), DefaultFinTrackDBContextTimeout)
+	defer cancel()
+	// get the debt payments
+	debtPayments, err := m.DB.GetDebtPaymentsByDebtUserID(ctx, database.GetDebtPaymentsByDebtUserIDParams{
+		DebtID:  debtID,
+		UserID:  userID,
+		Column3: startDate,
+		Column4: endDate,
+		Limit:   int32(filters.limit()),
+		Offset:  int32(filters.offset()),
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return nil, Metadata{}, ErrGeneralRecordNotFound
+		default:
+			return nil, Metadata{}, err
+		}
+	}
+	if len(debtPayments) == 0 {
+		return nil, Metadata{}, ErrGeneralRecordNotFound
+	}
+	// set totals
+	totalRecords := 0
+	// populate the debt payments
+	var populatedDebtPayments []*EnrichedDebtPayment
+	for _, debtPayment := range debtPayments {
+		totalRecords = int(debtPayment.TotalPayments)
+		populatedDebtPayments = append(populatedDebtPayments,
+			&EnrichedDebtPayment{
+				DebtPayment:           populateEnrichedDebtPayment(debtPayment),
+				TotalPaymentAmount:    decimal.RequireFromString(debtPayment.TotalPaymentAmount),
+				TotalInterestPayment:  decimal.RequireFromString(debtPayment.TotalInterestPayment),
+				TotalPrincipalPayment: decimal.RequireFromString(debtPayment.TotalPrincipalPayment),
+			})
+	}
+	// calculate metadata
+	metadata := calculateMetadata(totalRecords, filters.Page, filters.PageSize)
+	// we are good
+	return populatedDebtPayments, metadata, nil
+}
+
 // CreateNewDebtPayment() creates a new debt payment in the debt payments table
 // We return an error if any was found
 func (m *FinancialTrackingModel) CreateNewDebtPayment(userID int64, debtRepayment *DebtRepayment) error {
@@ -717,6 +844,25 @@ func (m *FinancialTrackingModel) GetAllOverdueDebts(filters Filters) ([]*Debt, M
 	return populatedDebts, metadata, nil
 }
 
+// populateDebtPayment() populates a debt payment
+func populateEnrichedDebtPayment(debtPaymentRow interface{}) *DebtRepayment {
+	switch debtPayment := debtPaymentRow.(type) {
+	case database.GetDebtPaymentsByDebtUserIDRow:
+		return &DebtRepayment{
+			ID:               debtPayment.ID,
+			DebtID:           debtPayment.DebtID,
+			UserID:           debtPayment.UserID,
+			PaymentAmount:    decimal.RequireFromString(debtPayment.PaymentAmount),
+			PaymentDate:      debtPayment.PaymentDate,
+			InterestPayment:  decimal.RequireFromString(debtPayment.InterestPayment),
+			PrincipalPayment: decimal.RequireFromString(debtPayment.PrincipalPayment),
+			CreatedAt:        debtPayment.CreatedAt.Time,
+		}
+	default:
+		return nil
+	}
+}
+
 // PopulateDebt populates a debt
 func populateDebt(debtRow interface{}) *Debt {
 	switch debt := debtRow.(type) {
@@ -740,6 +886,25 @@ func populateDebt(debtRow interface{}) *Debt {
 			TotalInterestPaid:      decimal.RequireFromString(debt.TotalInterestPaid.String),
 		}
 	case database.GetAllOverdueDebtsRow:
+		return &Debt{
+			ID:                     debt.ID,
+			UserID:                 debt.UserID,
+			Name:                   debt.Name,
+			Amount:                 decimal.RequireFromString(debt.Amount),
+			RemainingBalance:       decimal.RequireFromString(debt.RemainingBalance),
+			InterestRate:           decimal.RequireFromString(debt.InterestRate.String),
+			Description:            debt.Description.String,
+			DueDate:                debt.DueDate,
+			MinimumPayment:         decimal.RequireFromString(debt.MinimumPayment),
+			CreatedAt:              debt.CreatedAt.Time,
+			UpdatedAt:              debt.UpdatedAt.Time,
+			NextPaymentDate:        debt.NextPaymentDate,
+			EstimatedPayoffDate:    debt.EstimatedPayoffDate.Time,
+			AccruedInterest:        decimal.RequireFromString(debt.AccruedInterest.String),
+			InterestLastCalculated: debt.InterestLastCalculated.Time,
+			TotalInterestPaid:      decimal.RequireFromString(debt.TotalInterestPaid.String),
+		}
+	case database.GetAllDebtsByUserIDRow:
 		return &Debt{
 			ID:                     debt.ID,
 			UserID:                 debt.UserID,

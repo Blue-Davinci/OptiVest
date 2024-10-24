@@ -159,6 +159,7 @@ func (app *application) incomeRouter() chi.Router {
 
 func (app *application) debtRoutes() chi.Router {
 	debtRoutes := chi.NewRouter()
+	debtRoutes.Get("/", app.getAllDebtsByUserIDHandler)
 	debtRoutes.Post("/", app.createNewDebtHandler)
 	debtRoutes.Patch("/{debtID}", app.updateDebtHandler)
 

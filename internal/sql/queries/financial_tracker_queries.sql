@@ -170,6 +170,59 @@ WHERE
     id = $1 AND user_id=$15                                   -- ID of the debt to update
 RETURNING updated_at;
 
+-- name: GetAllDebtsByUserID :many
+SELECT 
+    id,
+    user_id,
+    name,
+    amount,
+    remaining_balance,
+    interest_rate,
+    description,
+    due_date,
+    minimum_payment,
+    created_at,
+    updated_at,
+    next_payment_date,
+    estimated_payoff_date,
+    accrued_interest,
+    interest_last_calculated,
+    last_payment_date,
+    total_interest_paid,
+    COUNT(*) OVER() AS total_debts,
+    CAST(SUM(amount) OVER() AS NUMERIC) AS total_amounts,                -- Cast after SUM
+    CAST(SUM(remaining_balance) OVER() AS NUMERIC) AS total_remaining_balances
+FROM debts
+WHERE user_id = $1
+AND ($2 = '' OR to_tsvector('simple', name) @@ plainto_tsquery('simple', $2))
+ORDER BY created_at DESC
+LIMIT $3 OFFSET $4;
+
+-- name: GetDebtPaymentsByDebtUserID :many
+SELECT 
+    id,
+    debt_id,
+    user_id,
+    payment_amount,
+    payment_date,
+    interest_payment,
+    principal_payment,
+    created_at,
+    COUNT(*) OVER() AS total_payments,
+    CAST(SUM(payment_amount) OVER() AS NUMERIC)::NUMERIC AS total_payment_amount,  -- Cast after the SUM
+    CAST(SUM(interest_payment) OVER() AS NUMERIC)::NUMERIC AS total_interest_payment,
+    CAST(SUM(principal_payment) OVER() AS NUMERIC)::NUMERIC AS total_principal_payment
+FROM debtpayments
+WHERE user_id = $1
+AND debt_id = $2
+AND ($3::TIMESTAMP IS NULL OR payment_date >= $3::TIMESTAMP)  -- Cast to TIMESTAMP explicitly
+AND ($4::TIMESTAMP IS NULL OR payment_date <= $4::TIMESTAMP) 
+ORDER BY payment_date DESC
+LIMIT $5 OFFSET $6;
+
+
+
+
 -- name: GetDebtByID :one
 SELECT 
     id, 

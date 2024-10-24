@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -905,6 +907,80 @@ func (app *application) updateDebtHandler(w http.ResponseWriter, r *http.Request
 
 	// Respond with the updated debt
 	err = app.writeJSON(w, http.StatusOK, envelope{"debt": debt}, nil)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+	}
+}
+
+// getAllDebtsByUserIDHandler() is a handler method that will return all debts for a user
+// This endpoint supports pagination as well as a name search parameter for the debt's name
+func (app *application) getAllDebtsByUserIDHandler(w http.ResponseWriter, r *http.Request) {
+	// Inline struct for input
+	var input struct {
+		Name string
+		data.Filters
+	}
+	// Read and validate the query parameters
+	v := validator.New()
+	qs := r.URL.Query()
+	input.Name = app.readString(qs, "name", "")
+	input.Filters.Page = app.readInt(qs, "page", 1, v)
+	input.Filters.PageSize = app.readInt(qs, "page_size", 20, v)
+	input.Filters.Sort = app.readString(qs, "sort", "created_at")
+	input.Filters.SortSafelist = []string{"created_at", "-created_at"}
+	// Perform validation
+	if data.ValidateFilters(v, input.Filters); !v.Valid() {
+		app.failedValidationResponse(w, r, v.Errors)
+		return
+	}
+	// create a redis key using the data.RedisFinTrackDebtSearchPrefix:userid:input.Name as the key soo that we can cache the results
+	redisKey := fmt.Sprintf("%s:%d:%s", data.RedisFinTrackDebtSearchPrefix, app.contextGetUser(r).ID, input.Name)
+	// make a struct with []*DebtWithPayments and a metadata
+	type debtEnvelope struct {
+		Debts    []*data.DebtWithPayments `json:"debts"`
+		Metadata *data.Metadata           `json:"metadata"`
+	}
+	// Get the debts from the cache
+	cachedDebts, err := getFromCache[*debtEnvelope](context.Background(), app.RedisDB, redisKey)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrNoDataFoundInRedis):
+			// Do nothing
+		default:
+			app.serverErrorResponse(w, r, err)
+			return
+		}
+	}
+	// If the debts are not in the cache, get them from the database
+	if cachedDebts != nil {
+		// Return cached data if available
+		err = app.writeJSON(w, http.StatusOK, envelope{"debts": cachedDebts}, nil)
+		if err != nil {
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
+
+	// Get all debts for the user
+	debts, metadata, err := app.models.FinancialTrackingManager.GetAllDebtsByUserID(app.contextGetUser(r).ID, input.Name, input.Filters)
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrGeneralRecordNotFound):
+			app.notFoundResponse(w, r)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
+	// save the debts to the cache using the debtEnvelope struct
+	err = setToCache(context.Background(), app.RedisDB, redisKey, &debtEnvelope{Debts: debts, Metadata: &metadata}, data.DefaultFinTrackRedisDebtTTL)
+	if err != nil {
+		// just print the error
+		app.logger.Info("error setting cache", zap.String("error", err.Error()))
+	}
+
+	// Send the response
+	err = app.writeJSON(w, http.StatusOK, envelope{"debts": debts, "metadata": metadata}, nil)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 	}
