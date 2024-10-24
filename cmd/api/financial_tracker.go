@@ -941,7 +941,7 @@ func (app *application) getAllDebtsByUserIDHandler(w http.ResponseWriter, r *htt
 		Metadata *data.Metadata           `json:"metadata"`
 	}
 	// Get the debts from the cache
-	cachedDebts, err := getFromCache[*debtEnvelope](context.Background(), app.RedisDB, redisKey)
+	cachedDebts, err := getFromCache[debtEnvelope](context.Background(), app.RedisDB, redisKey)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrNoDataFoundInRedis):
@@ -954,7 +954,7 @@ func (app *application) getAllDebtsByUserIDHandler(w http.ResponseWriter, r *htt
 	// If the debts are not in the cache, get them from the database
 	if cachedDebts != nil {
 		// Return cached data if available
-		err = app.writeJSON(w, http.StatusOK, envelope{"debts": cachedDebts}, nil)
+		err = app.writeJSON(w, http.StatusOK, envelope{"debts": cachedDebts.Debts, "metadata": cachedDebts.Metadata}, nil)
 		if err != nil {
 			app.serverErrorResponse(w, r, err)
 		}
@@ -1026,7 +1026,7 @@ func (app *application) getDebtPaymentsByDebtUserIDHandler(w http.ResponseWriter
 		Metadata *data.Metadata              `json:"metadata"`
 	}
 	// Get the payments from the cache
-	cachedPayments, err := getFromCache[*paymentEnvelope](context.Background(), app.RedisDB, redisKey)
+	cachedPayments, err := getFromCache[paymentEnvelope](context.Background(), app.RedisDB, redisKey)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrNoDataFoundInRedis):
@@ -1039,7 +1039,7 @@ func (app *application) getDebtPaymentsByDebtUserIDHandler(w http.ResponseWriter
 	// If the payments are not in the cache, get them from the database
 	if cachedPayments != nil {
 		// Return cached data if available
-		err = app.writeJSON(w, http.StatusOK, envelope{"payments": cachedPayments}, nil)
+		err = app.writeJSON(w, http.StatusOK, envelope{"payments": cachedPayments.Payments, "metadata": cachedPayments.Metadata}, nil)
 		if err != nil {
 			app.serverErrorResponse(w, r, err)
 		}
