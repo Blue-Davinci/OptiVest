@@ -767,7 +767,13 @@ func (app *application) createNewDebtHandler(w http.ResponseWriter, r *http.Requ
 	// Insert the new debt into the database
 	err = app.models.FinancialTrackingManager.CreateNewDebt(app.contextGetUser(r).ID, debt)
 	if err != nil {
-		app.serverErrorResponse(w, r, err)
+		switch {
+		case errors.Is(err, data.ErrDuplicateDebt):
+			v.AddError("description", "debt with this name already exists")
+			app.failedValidationResponse(w, r, v.Errors)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
 		return
 	}
 
