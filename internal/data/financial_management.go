@@ -710,22 +710,30 @@ func (m FinancialManagerModel) GetGoalsForUserInvestmentHelper(userID int64) (*I
 }
 
 // GetAllGoalsWithProgressionByUserID() retrieves all goal records associated with a user ID
-func (m FinancialManagerModel) GetAllGoalsWithProgressionByUserID(userID int64) ([]*GoalsWithProgression, error) {
+func (m FinancialManagerModel) GetAllGoalsWithProgressionByUserID(userID int64, goalName string, filters Filters) ([]*GoalsWithProgression, Metadata, error) {
 	ctx, cancel := contextGenerator(context.Background(), DefaultFinManDBContextTimeout)
 	defer cancel()
 	// Fetch goals from the database
-	goals, err := m.DB.GetAllGoalsWithProgressionByUserID(ctx, userID)
+	goals, err := m.DB.GetAllGoalsWithProgressionByUserID(ctx, database.GetAllGoalsWithProgressionByUserIDParams{
+		UserID:  userID,
+		Column2: goalName,
+		Limit:   int32(filters.limit()),
+		Offset:  int32(filters.offset()),
+	})
 	if err != nil {
-		return nil, err
+		return nil, Metadata{}, nil
 	}
 	if len(goals) == 0 {
-		return nil, ErrGeneralRecordNotFound
+		return nil, Metadata{}, ErrGeneralRecordNotFound
 	}
 	// initialize our goals with progression
 	goalsWithProgressions := []*GoalsWithProgression{}
+	// total
+	totalGoals := 0
 	// Process each goal
 	for _, goal := range goals {
 		var goalsWithProgression GoalsWithProgression
+		totalGoals = int(goal.TotalTrackedGoals)
 		// populate the goal struct
 		populatedGoal := populateGoal(goal)
 		// fill in the total contributed amount
@@ -736,8 +744,10 @@ func (m FinancialManagerModel) GetAllGoalsWithProgressionByUserID(userID int64) 
 		}
 		goalsWithProgressions = append(goalsWithProgressions, &goalsWithProgression)
 	}
+	// create a metadata
+	metadata := calculateMetadata(totalGoals, filters.Page, filters.PageSize)
 	// everything went well
-	return goalsWithProgressions, nil
+	return goalsWithProgressions, metadata, nil
 }
 
 // GetGoalTrackingHistory() retrieves all goal tracking records associated with a user ID
@@ -764,6 +774,7 @@ func (m FinancialManagerModel) GetGoalTrackingHistory(userID int64, trackingType
 	trackedGoalsSlice := []*EnrichedTrackedGoal{}
 	// Process each goal
 	for _, trackedGoal := range trackedGoals {
+		totalTrackedGoals = int(trackedGoal.TotalTrackedGoals)
 		// make a tracked goal
 		populatedTrackedGoal := populateTrackedGoal(trackedGoal)
 		// append the tracked goal to the slice

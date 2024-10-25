@@ -116,8 +116,6 @@ func (q *Queries) CreateNewGoal(ctx context.Context, arg CreateNewGoalParams) (C
 }
 
 const createNewGoalPlan = `-- name: CreateNewGoalPlan :one
-
-
 INSERT INTO goal_plans (
     user_id, 
     name, 
@@ -146,7 +144,6 @@ type CreateNewGoalPlanRow struct {
 	UpdatedAt sql.NullTime
 }
 
-// Add filtering for a specific user (use user_id placeholder)
 func (q *Queries) CreateNewGoalPlan(ctx context.Context, arg CreateNewGoalPlanParams) (CreateNewGoalPlanRow, error) {
 	row := q.db.QueryRowContext(ctx, createNewGoalPlan,
 		arg.UserID,
@@ -304,14 +301,25 @@ SELECT
     g.status, 
     g.created_at, 
     g.updated_at,
+    COUNT(*) OVER() AS total_tracked_goals,
     -- Join with aggregated contribution data
     COALESCE(gc.total_contributed_amount , 0)::NUMERIC AS total_contributed_amount,
     -- Calculate and cast the percentage progress
     COALESCE((gc.total_contributed_amount / g.target_amount) * 100, 0)::NUMERIC AS progress_percentage
 FROM goals g
 LEFT JOIN goal_contributions gc ON g.id = gc.goal_id
-WHERE g.user_id = $1
+WHERE g.user_id = $1 -- Add filtering for a specific user (use user_id placeholder)
+AND ($2 = '' OR to_tsvector('simple', g.name) @@ plainto_tsquery('simple', $2))
+ORDER BY g.created_at DESC
+LIMIT $3 OFFSET $4
 `
+
+type GetAllGoalsWithProgressionByUserIDParams struct {
+	UserID  int64
+	Column2 interface{}
+	Limit   int32
+	Offset  int32
+}
 
 type GetAllGoalsWithProgressionByUserIDRow struct {
 	ID                     int64
@@ -326,12 +334,18 @@ type GetAllGoalsWithProgressionByUserIDRow struct {
 	Status                 GoalStatus
 	CreatedAt              time.Time
 	UpdatedAt              time.Time
+	TotalTrackedGoals      int64
 	TotalContributedAmount string
 	ProgressPercentage     string
 }
 
-func (q *Queries) GetAllGoalsWithProgressionByUserID(ctx context.Context, userID int64) ([]GetAllGoalsWithProgressionByUserIDRow, error) {
-	rows, err := q.db.QueryContext(ctx, getAllGoalsWithProgressionByUserID, userID)
+func (q *Queries) GetAllGoalsWithProgressionByUserID(ctx context.Context, arg GetAllGoalsWithProgressionByUserIDParams) ([]GetAllGoalsWithProgressionByUserIDRow, error) {
+	rows, err := q.db.QueryContext(ctx, getAllGoalsWithProgressionByUserID,
+		arg.UserID,
+		arg.Column2,
+		arg.Limit,
+		arg.Offset,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -352,6 +366,7 @@ func (q *Queries) GetAllGoalsWithProgressionByUserID(ctx context.Context, userID
 			&i.Status,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TotalTrackedGoals,
 			&i.TotalContributedAmount,
 			&i.ProgressPercentage,
 		); err != nil {

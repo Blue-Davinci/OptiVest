@@ -592,14 +592,14 @@ func (app *application) updatedGoalHandler(w http.ResponseWriter, r *http.Reques
 // and returns a list of goal tracking history for a specific user ID
 func (app *application) getGoalTrackingHistoryHandler(w http.ResponseWriter, r *http.Request) {
 	var input struct {
-		TrackingType string
+		Name string
 		data.Filters
 	}
 	// Validate the query parameters
 	v := validator.New()
 	qs := r.URL.Query()
 	// use our helpers to convert the queries
-	input.TrackingType = app.readString(qs, "tracking_type", "monthly")
+	input.Name = app.readString(qs, "tracking_type", "monthly")
 	//get the page & pagesizes as ints and set to the embedded struct
 	input.Filters.Page = app.readInt(qs, "page", 1, v)
 	input.Filters.PageSize = app.readInt(qs, "page_size", 10, v)
@@ -615,7 +615,7 @@ func (app *application) getGoalTrackingHistoryHandler(w http.ResponseWriter, r *
 	// Get the user from the context
 	user := app.contextGetUser(r)
 	// convert the tracking type to the OCF constant
-	mappedTrackingType, err := app.models.FinancialManager.MapTrackingTypeToConstant(input.TrackingType)
+	mappedTrackingType, err := app.models.FinancialManager.MapTrackingTypeToConstant(input.Name)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrInvalidOCFStatus):
@@ -876,12 +876,35 @@ func (app *application) getBudgetGoalExpenseSummaryHandler(w http.ResponseWriter
 // getAllGoalsWithProgressionByUserIDHandler() is a handler function that handles the retrieval of all goals with progression
 // for a user.
 // We get the user from the context and get all the goals with progression associated with the user.
+// This route supports pagination, filtering and search query via the name parameter.
 func (app *application) getAllGoalsWithProgressionByUserIDHandler(w http.ResponseWriter, r *http.Request) {
+	// input var
+	var input struct {
+		Name string
+		data.Filters
+	}
+	// Validate the query parameters
+	v := validator.New()
+	qs := r.URL.Query()
+	// use our helpers to convert the queries
+	input.Name = app.readString(qs, "name", "")
+	//get the page & pagesizes as ints and set to the embedded struct
+	input.Filters.Page = app.readInt(qs, "page", 1, v)
+	input.Filters.PageSize = app.readInt(qs, "page_size", 10, v)
+	// get the sort values falling back to "id" if it is not provided
+	input.Filters.Sort = app.readString(qs, "sort", "name")
+	// Add the supported sort values for this endpoint to the sort safelist.
+	input.Filters.SortSafelist = []string{"name", "-url"}
+	// Perform validation
+	if data.ValidateFilters(v, input.Filters); !v.Valid() {
+		app.failedValidationResponse(w, r, v.Errors)
+		return
+	}
 	// Get the user from the context
 	user := app.contextGetUser(r)
 
 	// Get the goals with progression for the user
-	goals, err := app.models.FinancialManager.GetAllGoalsWithProgressionByUserID(user.ID)
+	goals, metadata, err := app.models.FinancialManager.GetAllGoalsWithProgressionByUserID(user.ID, input.Name, input.Filters)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -893,7 +916,7 @@ func (app *application) getAllGoalsWithProgressionByUserIDHandler(w http.Respons
 	}
 
 	// Return the goals with a 200 OK response
-	err = app.writeJSON(w, http.StatusOK, envelope{"goals": goals}, nil)
+	err = app.writeJSON(w, http.StatusOK, envelope{"goals": goals, "metadata": metadata}, nil)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 	}

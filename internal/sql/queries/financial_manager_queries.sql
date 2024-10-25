@@ -304,13 +304,17 @@ SELECT
     g.status, 
     g.created_at, 
     g.updated_at,
+    COUNT(*) OVER() AS total_tracked_goals,
     -- Join with aggregated contribution data
     COALESCE(gc.total_contributed_amount , 0)::NUMERIC AS total_contributed_amount,
     -- Calculate and cast the percentage progress
     COALESCE((gc.total_contributed_amount / g.target_amount) * 100, 0)::NUMERIC AS progress_percentage
 FROM goals g
 LEFT JOIN goal_contributions gc ON g.id = gc.goal_id
-WHERE g.user_id = $1; -- Add filtering for a specific user (use user_id placeholder)
+WHERE g.user_id = $1 -- Add filtering for a specific user (use user_id placeholder)
+AND ($2 = '' OR to_tsvector('simple', g.name) @@ plainto_tsquery('simple', $2))
+ORDER BY g.created_at DESC
+LIMIT $3 OFFSET $4;
 
 
 -- name: CreateNewGoalPlan :one
