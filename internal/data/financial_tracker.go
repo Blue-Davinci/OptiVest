@@ -37,6 +37,7 @@ var (
 	ErrInvalidRecurringExpenseTime = errors.New("invalid recurring expense time")
 	ErrDuplicateRecurringExpense   = errors.New("recurring expense already exists")
 	ErrDuplicateDebt               = errors.New("debt with a similar description already exists")
+	ErrInvalidRemainingBalance     = errors.New("remaining balance cannot be less than zero, please check your payment amount")
 )
 
 // Represents an expense
@@ -643,6 +644,8 @@ func (m *FinancialTrackingModel) UpdateDebtByID(userID int64, debt *Debt) error 
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
 			return ErrEditConflict
+		case err.Error() == `pq: new row for relation "debts" violates check constraint "debts_remaining_balance_check"`:
+			return ErrInvalidRemainingBalance
 		default:
 			return err
 		}

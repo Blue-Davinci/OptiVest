@@ -1104,11 +1104,22 @@ func (app *application) makeDebtPaymentHandler(w http.ResponseWriter, r *http.Re
 		app.badRequestResponse(w, r, err)
 		return
 	}
+	// make validator
+	v := validator.New()
 
 	// Step 3: Retrieve the debt record for the user by debt ID
 	debt, err := app.models.FinancialTrackingManager.GetDebtByID(app.contextGetUser(r).ID, debtID)
 	if err != nil {
 		app.notFoundResponse(w, r)
+		return
+	}
+
+	// Step 3.1: Check if the paymentAmount is more than the remaining balance
+	if input.PaymentAmount.GreaterThan(debt.RemainingBalance) {
+		// calculate the allowed payment amount
+		allowedPaymentAmount := debt.RemainingBalance.Add(debt.AccruedInterest)
+		v.AddError("payment_amount", fmt.Sprintf("payment amount is more than the remaining balance. The allowed payment amount is %s", allowedPaymentAmount.String()))
+		app.failedValidationResponse(w, r, v.Errors)
 		return
 	}
 
@@ -1127,8 +1138,6 @@ func (app *application) makeDebtPaymentHandler(w http.ResponseWriter, r *http.Re
 	// Step 5: Calculate the interest and principal portions of the payment
 	interestPayment := debt.AccruedInterest
 	principalPayment := input.PaymentAmount.Sub(interestPayment)
-	// make validator
-	v := validator.New()
 
 	// Step 6: If the payment does not cover the accrued interest, return an error
 	if principalPayment.LessThan(decimal.NewFromFloat(0)) {
@@ -1178,7 +1187,16 @@ func (app *application) makeDebtPaymentHandler(w http.ResponseWriter, r *http.Re
 	// Step 14: Update the debt record in the database with the new balance and dates
 	err = app.models.FinancialTrackingManager.UpdateDebtByID(debt.UserID, debt)
 	if err != nil {
-		app.serverErrorResponse(w, r, err)
+		switch {
+		case errors.Is(err, data.ErrGeneralRecordNotFound):
+			app.notFoundResponse(w, r)
+		case errors.Is(err, data.ErrInvalidRemainingBalance):
+			// calculate balance required to be entered and create a v.AddError
+			v.AddError("payment_amount", "payment amount is more than the remaining balance")
+			app.failedValidationResponse(w, r, v.Errors)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
 		return
 	}
 
