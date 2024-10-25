@@ -587,6 +587,58 @@ func (app *application) updatedGoalHandler(w http.ResponseWriter, r *http.Reques
 	}
 }
 
+// getGoalTrackingHistoryHandler() is a handler function that handles the retrieval of the tracking history of a goal.
+// This route supports pagination, a goal tracking search name
+// and returns a list of goal tracking history for a specific user ID
+func (app *application) getGoalTrackingHistoryHandler(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		TrackingType string
+		data.Filters
+	}
+	// Validate the query parameters
+	v := validator.New()
+	qs := r.URL.Query()
+	// use our helpers to convert the queries
+	input.TrackingType = app.readString(qs, "tracking_type", "monthly")
+	//get the page & pagesizes as ints and set to the embedded struct
+	input.Filters.Page = app.readInt(qs, "page", 1, v)
+	input.Filters.PageSize = app.readInt(qs, "page_size", 10, v)
+	// get the sort values falling back to "id" if it is not provided
+	input.Filters.Sort = app.readString(qs, "sort", "id")
+	// Add the supported sort values for this endpoint to the sort safelist.
+	input.Filters.SortSafelist = []string{"id", "-id"}
+	// Perform validation
+	if data.ValidateFilters(v, input.Filters); !v.Valid() {
+		app.failedValidationResponse(w, r, v.Errors)
+		return
+	}
+	// Get the user from the context
+	user := app.contextGetUser(r)
+	// convert the tracking type to the OCF constant
+	mappedTrackingType, err := app.models.FinancialManager.MapTrackingTypeToConstant(input.TrackingType)
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrInvalidOCFStatus):
+			app.badRequestResponse(w, r, err)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
+	// Get the goal tracking history for the user
+	goalTrackingHistory, metadata, err := app.models.FinancialManager.GetGoalTrackingHistory(user.ID, mappedTrackingType, input.Filters)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+		return
+	}
+	// Return the goal tracking history with a 200 OK response
+	err = app.writeJSON(w, http.StatusOK, envelope{"goal_tracking_history": goalTrackingHistory, "metadata": metadata}, nil)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+	}
+
+}
+
 // createNewGoalPlanHandler() is a handler function that handles the creation of a Goal Plan.
 // This essentially works as a plan "template" for a goal.
 // We validate minimally and just save the plan to the database.

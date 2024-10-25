@@ -888,6 +888,95 @@ func (q *Queries) GetGoalPlansForUser(ctx context.Context, arg GetGoalPlansForUs
 	return items, nil
 }
 
+const getGoalTrackingHistory = `-- name: GetGoalTrackingHistory :many
+WITH goal_tracking_data AS (
+    SELECT
+        gt.id,
+        gt.user_id,
+        g.name AS goal_name,
+        gt.goal_id,
+        gt.tracking_date,
+        gt.contributed_amount,
+        gt.tracking_type,
+        gt.created_at,
+        gt.updated_at,
+        gt.truncated_tracking_date,
+        COUNT(*) OVER(PARTITION BY gt.user_id) AS total_tracked_goals
+    FROM
+        goal_tracking gt
+    LEFT JOIN
+        goals g ON gt.goal_id = g.id
+    WHERE
+        gt.user_id = $1
+        AND ($2 = '' OR to_tsvector('simple', gt.tracking_type::text) @@ plainto_tsquery('simple', $2))
+)
+SELECT id, user_id, goal_name, goal_id, tracking_date, contributed_amount, tracking_type, created_at, updated_at, truncated_tracking_date, total_tracked_goals
+FROM goal_tracking_data
+ORDER BY tracking_date DESC
+LIMIT $3 OFFSET $4
+`
+
+type GetGoalTrackingHistoryParams struct {
+	UserID  int64
+	Column2 interface{}
+	Limit   int32
+	Offset  int32
+}
+
+type GetGoalTrackingHistoryRow struct {
+	ID                    int64
+	UserID                int64
+	GoalName              sql.NullString
+	GoalID                sql.NullInt64
+	TrackingDate          time.Time
+	ContributedAmount     string
+	TrackingType          TrackingTypeEnum
+	CreatedAt             sql.NullTime
+	UpdatedAt             sql.NullTime
+	TruncatedTrackingDate sql.NullTime
+	TotalTrackedGoals     int64
+}
+
+func (q *Queries) GetGoalTrackingHistory(ctx context.Context, arg GetGoalTrackingHistoryParams) ([]GetGoalTrackingHistoryRow, error) {
+	rows, err := q.db.QueryContext(ctx, getGoalTrackingHistory,
+		arg.UserID,
+		arg.Column2,
+		arg.Limit,
+		arg.Offset,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetGoalTrackingHistoryRow
+	for rows.Next() {
+		var i GetGoalTrackingHistoryRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.GoalName,
+			&i.GoalID,
+			&i.TrackingDate,
+			&i.ContributedAmount,
+			&i.TrackingType,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.TruncatedTrackingDate,
+			&i.TotalTrackedGoals,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getGoalsForUserInvestmentHelper = `-- name: GetGoalsForUserInvestmentHelper :many
 SELECT
     name,

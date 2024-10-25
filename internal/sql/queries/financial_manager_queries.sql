@@ -241,6 +241,34 @@ FROM goals
 WHERE user_id = $1
 AND status = 'ongoing';
 
+-- name: GetGoalTrackingHistory :many
+WITH goal_tracking_data AS (
+    SELECT
+        gt.id,
+        gt.user_id,
+        g.name AS goal_name,
+        gt.goal_id,
+        gt.tracking_date,
+        gt.contributed_amount,
+        gt.tracking_type,
+        gt.created_at,
+        gt.updated_at,
+        gt.truncated_tracking_date,
+        COUNT(*) OVER(PARTITION BY gt.user_id) AS total_tracked_goals
+    FROM
+        goal_tracking gt
+    LEFT JOIN
+        goals g ON gt.goal_id = g.id
+    WHERE
+        gt.user_id = $1
+        AND ($2 = '' OR to_tsvector('simple', gt.tracking_type::text) @@ plainto_tsquery('simple', $2))
+)
+SELECT *
+FROM goal_tracking_data
+ORDER BY tracking_date DESC
+LIMIT $3 OFFSET $4;
+
+
 -- name: GetAndSaveAllGoalsForTracking :many
 -- Insert tracked goals that haven't been tracked for more than 1 month
 INSERT INTO goal_tracking (user_id, goal_id, contributed_amount, tracking_type)

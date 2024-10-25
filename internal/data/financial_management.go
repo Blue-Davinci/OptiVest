@@ -189,6 +189,12 @@ type Goal_Summary_Totals struct {
 	TotalSurplus               decimal.Decimal `json:"total_surplus"`
 }
 
+// EnrichedTrackedGoal struct represents an enriched tracked goal
+type EnrichedTrackedGoal struct {
+	GoalName    string      `json:"goal_name"`
+	TrackedGoal TrackedGoal `json:"tracked_goal"`
+}
+
 // Goal Tracking struct represents howwe track our goals
 type TrackedGoal struct {
 	ID                    int64                     `json:"id"`
@@ -732,6 +738,67 @@ func (m FinancialManagerModel) GetAllGoalsWithProgressionByUserID(userID int64) 
 	}
 	// everything went well
 	return goalsWithProgressions, nil
+}
+
+// GetGoalTrackingHistory() retrieves all goal tracking records associated with a user ID
+// This supports pagination and filtering by tracking type  (finmantracking...)
+// It takes the user ID, tracking type, and pagination parameters as parameters
+func (m FinancialManagerModel) GetGoalTrackingHistory(userID int64, trackingType database.TrackingTypeEnum, filters Filters) ([]*EnrichedTrackedGoal, Metadata, error) {
+	ctx, cancel := contextGenerator(context.Background(), DefaultFinManDBContextTimeout)
+	defer cancel()
+	// Fetch goal tracking from the database
+	trackedGoals, err := m.DB.GetGoalTrackingHistory(ctx, database.GetGoalTrackingHistoryParams{
+		UserID:  userID,
+		Column2: trackingType,
+		Limit:   int32(filters.limit()),
+		Offset:  int32(filters.offset()),
+	})
+	if err != nil {
+		return nil, Metadata{}, err
+	}
+	if len(trackedGoals) == 0 {
+		return nil, Metadata{}, ErrGeneralRecordNotFound
+	}
+	// initialize our total values
+	totalTrackedGoals := 0
+	trackedGoalsSlice := []*EnrichedTrackedGoal{}
+	// Process each goal
+	for _, trackedGoal := range trackedGoals {
+		// make a tracked goal
+		populatedTrackedGoal := populateTrackedGoal(trackedGoal)
+		// append the tracked goal to the slice
+		trackedGoalsSlice = append(trackedGoalsSlice, &EnrichedTrackedGoal{
+			GoalName:    trackedGoal.GoalName.String,
+			TrackedGoal: *populatedTrackedGoal,
+		})
+	}
+	// create a metadata
+	metadata := calculateMetadata(totalTrackedGoals, filters.Page, filters.PageSize)
+	// return the tracked goals
+	return trackedGoalsSlice, metadata, nil
+}
+
+// populateTrackedGoal() fills a TrackedGoal struct with data from the database
+// It takes an interface{} as a parameter and returns a pointer to a TrackedGoal struct
+// or nil if the input type does not match any supported types.
+func populateTrackedGoal(trackedGoalRow interface{}) *TrackedGoal {
+	switch trackedGoal := trackedGoalRow.(type) {
+	case database.GetGoalTrackingHistoryRow:
+		return &TrackedGoal{
+			ID:                    trackedGoal.ID,
+			UserID:                trackedGoal.UserID,
+			GoalID:                trackedGoal.GoalID.Int64,
+			TrackingDate:          trackedGoal.TrackingDate,
+			ContributedAmount:     decimal.RequireFromString(trackedGoal.ContributedAmount),
+			TrackingType:          trackedGoal.TrackingType,
+			CreatedAt:             trackedGoal.CreatedAt.Time,
+			UpdatedAt:             trackedGoal.UpdatedAt.Time,
+			TruncatedTrackingDate: trackedGoal.TruncatedTrackingDate.Time,
+		}
+		// Default case: Returns nil if the input type does not match any supported types.
+	default:
+		return nil
+	}
 }
 
 // ============================================================================================================
