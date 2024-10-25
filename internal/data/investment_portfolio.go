@@ -12,6 +12,7 @@ import (
 
 	"github.com/Blue-Davinci/OptiVest/internal/database"
 	"github.com/Blue-Davinci/OptiVest/internal/validator"
+	"github.com/araddon/dateparse"
 	"github.com/shopspring/decimal"
 )
 
@@ -25,25 +26,16 @@ func (ct *CustomTime1) ToTime() time.Time {
 
 func (ct *CustomTime1) UnmarshalJSON(b []byte) error {
 	str := strings.Trim(string(b), `"`)
-	// Try parsing in different formats
-	layouts := []string{
-		time.RFC3339,          // ISO 8601 with timezone (e.g., "2006-01-02T15:04:05Z07:00")
-		"2006-01-02",          // Date only (e.g., "2006-01-02")
-		"2006-01-02 15:04:05", // Date and time without timezone (e.g., "2006-01-02 15:04:05")
-		"2006-01-02T15:04:05", // ISO 8601 without timezone (e.g., "2006-01-02T15:04:05")
-		"02/01/2006",          // Alternative format (e.g., "02/01/2006" for day/month/year)
-		"January 2, 2006",     // Month day, year format (e.g., "January 2, 2006")
+
+	// Use dateparse to automatically parse the date string
+	t, err := dateparse.ParseAny(str)
+	if err != nil {
+		return fmt.Errorf("unable to parse date: %s, error: %w", str, err)
 	}
 
-	var err error
-	for _, layout := range layouts {
-		var t time.Time
-		if t, err = time.Parse(layout, str); err == nil {
-			ct.Time = t
-			return nil
-		}
-	}
-	return fmt.Errorf("unable to parse date: %s", str)
+	// Assign the parsed time to ct.Time
+	ct.Time = t
+	return nil
 }
 
 const (

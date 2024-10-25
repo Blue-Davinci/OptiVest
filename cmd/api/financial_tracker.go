@@ -711,12 +711,12 @@ func (app *application) updateIncomeHandler(w http.ResponseWriter, r *http.Reque
 func (app *application) createNewDebtHandler(w http.ResponseWriter, r *http.Request) {
 	// debt input from user
 	var input struct {
-		Name           string          `json:"name"` // Name of the debt
-		Amount         decimal.Decimal `json:"amount"`
-		InterestRate   decimal.Decimal `json:"interest_rate"`
-		Description    string          `json:"description"`
-		DueDate        time.Time       `json:"due_date"` // YYYY-MM-DD
-		MinimumPayment decimal.Decimal `json:"minimum_payment"`
+		Name           string           `json:"name"` // Name of the debt
+		Amount         decimal.Decimal  `json:"amount"`
+		InterestRate   decimal.Decimal  `json:"interest_rate"`
+		Description    string           `json:"description"`
+		DueDate        data.CustomTime1 `json:"due_date"` // YYYY-MM-DD
+		MinimumPayment decimal.Decimal  `json:"minimum_payment"`
 	}
 
 	// read the request body into the input struct
@@ -733,11 +733,11 @@ func (app *application) createNewDebtHandler(w http.ResponseWriter, r *http.Requ
 		RemainingBalance: input.Amount, // Initially, remaining balance is the total amount
 		InterestRate:     input.InterestRate,
 		Description:      input.Description,
-		DueDate:          input.DueDate,
+		DueDate:          input.DueDate.Time,
 		MinimumPayment:   input.MinimumPayment,
 		CreatedAt:        time.Now(),
 		UpdatedAt:        time.Now(),
-		NextPaymentDate:  input.DueDate, // Set next payment date to the first due date initially
+		NextPaymentDate:  input.DueDate.Time, // Set next payment date to the first due date initially
 	}
 
 	// validate the debt
