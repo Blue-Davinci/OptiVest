@@ -31,6 +31,31 @@ func (app *application) getDistinctBudgetCategoryHandler(w http.ResponseWriter, 
 	}
 }
 
+// getDistinctBudgetIdBudgetNameHandler() is a handler function that returns a list of distinct budget id and budget names for a user.
+// Users the models.SearchOptions.GetDistinctBudgetIdBudgetName() method to get the data.
+// We pass in the user id
+// If there is an error we return a 500 status code and the error message
+func (app *application) getDistinctBudgetIdBudgetNameHandler(w http.ResponseWriter, r *http.Request) {
+	// extract user
+	userID := app.contextGetUser(r).ID
+	// get the data
+	budgetIDNames, err := app.models.SearchOptions.GetDistinctBudgetIdBudgetName(userID)
+	if err != nil {
+		switch {
+		case err == data.ErrGeneralRecordNotFound:
+			app.notFoundResponse(w, r)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
+	// write the data
+	err = app.writeJSON(w, http.StatusOK, envelope{"budget_id_names": budgetIDNames}, nil)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+	}
+}
+
 // getAllCurrencyHandler() is a handler function that returns a list of all currencies.
 // Uses the app.getCurrenciesFromRedis() method to get the data.
 // If there is an error we return a 500 status code and the error message

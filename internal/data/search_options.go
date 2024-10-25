@@ -22,6 +22,11 @@ type BudgetCategorySearchOption struct {
 	Category string `json:"category"`
 }
 
+type BudgetIDNameSearchOption struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+}
+
 func (s SearchOptionsModel) GetDistinctBudgetCategory(userID int64) ([]*BudgetCategorySearchOption, error) {
 	ctx, cancel := contextGenerator(context.Background(), DefaultSearchOptionDBContextTimeout)
 	defer cancel()
@@ -45,6 +50,36 @@ func (s SearchOptionsModel) GetDistinctBudgetCategory(userID int64) ([]*BudgetCa
 		searchOptions = append(searchOptions, &BudgetCategorySearchOption{
 			ID:       i + 1,
 			Category: category,
+		})
+	}
+	// we are good now return
+	return searchOptions, nil
+}
+
+// GetDistincBudgetIdBudgetName returns the distinct budget id and budget name
+func (s SearchOptionsModel) GetDistinctBudgetIdBudgetName(userID int64) ([]*BudgetIDNameSearchOption, error) {
+	ctx, cancel := contextGenerator(context.Background(), DefaultSearchOptionDBContextTimeout)
+	defer cancel()
+	// get data for the search options
+	budgets, err := s.DB.GetDistinctBudgetIdBudgetName(ctx, userID)
+	if err != nil {
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return nil, ErrGeneralRecordNotFound
+		default:
+			return nil, err
+		}
+	}
+	// check length of the data
+	if len(budgets) == 0 {
+		return nil, ErrGeneralRecordNotFound
+	}
+	// fill in our struct
+	var searchOptions []*BudgetIDNameSearchOption
+	for _, budget := range budgets {
+		searchOptions = append(searchOptions, &BudgetIDNameSearchOption{
+			ID:   budget.ID,
+			Name: budget.Name,
 		})
 	}
 	// we are good now return

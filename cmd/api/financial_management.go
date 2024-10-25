@@ -335,14 +335,14 @@ func (app *application) getBudgetsForUserHandler(w http.ResponseWriter, r *http.
 func (app *application) createNewGoalHandler(w http.ResponseWriter, r *http.Request) {
 	var message = data.Warning_Messages
 	var input struct {
-		BudgetID            int64           `json:"budget_id"`
-		Name                string          `json:"name"`
-		CurrentAmount       decimal.Decimal `json:"current_amount"`
-		TargetAmount        decimal.Decimal `json:"target_amount"`
-		MonthlyContribution decimal.Decimal `json:"monthly_contribution"`
-		StartDate           time.Time       `json:"start_date"`
-		EndDate             time.Time       `json:"end_date"`
-		Status              string          `json:"status"`
+		BudgetID            int64            `json:"budget_id"`
+		Name                string           `json:"name"`
+		CurrentAmount       decimal.Decimal  `json:"current_amount"`
+		TargetAmount        decimal.Decimal  `json:"target_amount"`
+		MonthlyContribution decimal.Decimal  `json:"monthly_contribution"`
+		StartDate           data.CustomTime1 `json:"start_date"`
+		EndDate             data.CustomTime1 `json:"end_date"`
+		Status              string           `json:"status"`
 	}
 
 	err := app.readJSON(w, r, &input)
@@ -379,8 +379,8 @@ func (app *application) createNewGoalHandler(w http.ResponseWriter, r *http.Requ
 		CurrentAmount:       input.CurrentAmount,
 		TargetAmount:        input.TargetAmount,
 		MonthlyContribution: input.MonthlyContribution,
-		StartDate:           input.StartDate,
-		EndDate:             input.EndDate,
+		StartDate:           input.StartDate.Time,
+		EndDate:             input.EndDate.Time,
 		Status:              mappedStatus,
 	}
 	// Perform validation

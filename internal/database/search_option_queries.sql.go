@@ -37,3 +37,37 @@ func (q *Queries) GetDistinctBudgetCategory(ctx context.Context, userID int64) (
 	}
 	return items, nil
 }
+
+const getDistinctBudgetIdBudgetName = `-- name: GetDistinctBudgetIdBudgetName :many
+SELECT id, name
+FROM Budgets
+WHERE user_id = $1
+`
+
+type GetDistinctBudgetIdBudgetNameRow struct {
+	ID   int64
+	Name string
+}
+
+func (q *Queries) GetDistinctBudgetIdBudgetName(ctx context.Context, userID int64) ([]GetDistinctBudgetIdBudgetNameRow, error) {
+	rows, err := q.db.QueryContext(ctx, getDistinctBudgetIdBudgetName, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetDistinctBudgetIdBudgetNameRow
+	for rows.Next() {
+		var i GetDistinctBudgetIdBudgetNameRow
+		if err := rows.Scan(&i.ID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
