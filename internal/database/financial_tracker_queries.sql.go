@@ -444,6 +444,120 @@ func (q *Queries) GetAllExpensesByUserID(ctx context.Context, arg GetAllExpenses
 	return items, nil
 }
 
+const getAllIncomesByUserID = `-- name: GetAllIncomesByUserID :many
+WITH income_data AS (
+    SELECT 
+        income.id,
+        income.user_id,
+        income.source,
+        income.original_currency_code,
+        income.amount_original,
+        income.amount,
+        income.exchange_rate,
+        income.description,
+        income.date_received,
+        income.created_at,
+        income.updated_at
+    FROM 
+        income
+    WHERE 
+        income.user_id = $1
+        AND ($2 = '' OR to_tsvector('simple', income.source) @@ plainto_tsquery('simple', $2))
+    ORDER BY 
+        income.date_received DESC
+    LIMIT $3 OFFSET $4
+),
+total_amount AS (
+    SELECT SUM(amount)::NUMERIC AS total_income_amount
+    FROM income
+    WHERE income.user_id = $1
+),
+most_used_currency AS (
+    SELECT original_currency_code
+    FROM income
+    WHERE income.user_id = $1
+    GROUP BY income.original_currency_code
+    ORDER BY COUNT(*) DESC
+    LIMIT 1
+)
+SELECT 
+    i.id, i.user_id, i.source, i.original_currency_code, i.amount_original, i.amount, i.exchange_rate, i.description, i.date_received, i.created_at, i.updated_at,
+    t.total_income_amount,
+    m.original_currency_code AS most_used_currency,
+    COUNT(*) OVER () AS total_rows
+FROM 
+    income_data i
+    CROSS JOIN total_amount t
+    CROSS JOIN most_used_currency m
+`
+
+type GetAllIncomesByUserIDParams struct {
+	UserID  int64
+	Column2 interface{}
+	Limit   int32
+	Offset  int32
+}
+
+type GetAllIncomesByUserIDRow struct {
+	ID                   int64
+	UserID               int64
+	Source               string
+	OriginalCurrencyCode string
+	AmountOriginal       string
+	Amount               string
+	ExchangeRate         string
+	Description          sql.NullString
+	DateReceived         time.Time
+	CreatedAt            sql.NullTime
+	UpdatedAt            sql.NullTime
+	TotalIncomeAmount    string
+	MostUsedCurrency     string
+	TotalRows            int64
+}
+
+func (q *Queries) GetAllIncomesByUserID(ctx context.Context, arg GetAllIncomesByUserIDParams) ([]GetAllIncomesByUserIDRow, error) {
+	rows, err := q.db.QueryContext(ctx, getAllIncomesByUserID,
+		arg.UserID,
+		arg.Column2,
+		arg.Limit,
+		arg.Offset,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetAllIncomesByUserIDRow
+	for rows.Next() {
+		var i GetAllIncomesByUserIDRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.Source,
+			&i.OriginalCurrencyCode,
+			&i.AmountOriginal,
+			&i.Amount,
+			&i.ExchangeRate,
+			&i.Description,
+			&i.DateReceived,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.TotalIncomeAmount,
+			&i.MostUsedCurrency,
+			&i.TotalRows,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getAllOverdueDebts = `-- name: GetAllOverdueDebts :many
 SELECT 
     COUNT(*) OVER() AS total_count,

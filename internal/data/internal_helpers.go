@@ -112,24 +112,26 @@ func DecryptData(encryptedData string, key []byte) (string, error) {
 	return string(decrypted), nil
 }
 
-// convertToDecimal() converts a value to a decimal.Decimal type
-func convertToDecimal(value interface{}) (decimal.Decimal, error) {
-	switch v := value.(type) {
-	case float64:
-		return decimal.NewFromFloat(v), nil
-	case int64:
-		return decimal.NewFromInt(v), nil
-	case []byte:
-		return decimal.NewFromString(string(v))
-	case string:
-		return decimal.NewFromString(v)
-	case nil:
-		return decimal.Zero, nil
-	default:
-		return decimal.Zero, fmt.Errorf("unexpected type %T", v)
-	}
-}
+/*
+/ convertToDecimal() converts a value to a decimal.Decimal type
 
+	func convertToDecimal(value interface{}) (decimal.Decimal, error) {
+		switch v := value.(type) {
+		case float64:
+			return decimal.NewFromFloat(v), nil
+		case int64:
+			return decimal.NewFromInt(v), nil
+		case []byte:
+			return decimal.NewFromString(string(v))
+		case string:
+			return decimal.NewFromString(v)
+		case nil:
+			return decimal.Zero, nil
+		default:
+			return decimal.Zero, fmt.Errorf("unexpected type %T", v)
+		}
+	}
+*/
 func convertNumberToMonth(decimalMonth decimal.Decimal) (string, error) {
 	// Convert decimal.Decimal to int
 	monthNumber := decimalMonth.IntPart() // Get the integer part of the decimal

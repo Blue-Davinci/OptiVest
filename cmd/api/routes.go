@@ -154,6 +154,7 @@ func (app *application) expenseRoutes() chi.Router {
 
 func (app *application) incomeRouter() chi.Router {
 	incomeRoutes := chi.NewRouter()
+	incomeRoutes.Get("/", app.getAllIncomesByUserIDHandler)
 	incomeRoutes.Post("/", app.createNewIncomeHandler)
 	incomeRoutes.Patch("/{incomeID}", app.updateIncomeHandler)
 	return incomeRoutes

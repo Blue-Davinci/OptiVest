@@ -629,6 +629,48 @@ func (app *application) createNewIncomeHandler(w http.ResponseWriter, r *http.Re
 
 }
 
+// getAllIncomesByUserIDHandler() is a handler method that will return all incomes for a user
+// This route supports pagination as well as a source search parameter for the income's source
+func (app *application) getAllIncomesByUserIDHandler(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Name string
+		data.Filters
+	}
+	//validate if queries are provided
+	v := validator.New()
+	// Call r.URL.Query() to get the url.Values map containing the query string data.
+	qs := r.URL.Query()
+	//get the page & pagesizes as ints and set to the embedded struct
+	input.Name = app.readString(qs, "name", "")
+	input.Filters.Page = app.readInt(qs, "page", 1, v)
+	input.Filters.PageSize = app.readInt(qs, "page_size", 20, v)
+	// get the sort values falling back to "created_at" if it is not provided
+	input.Filters.Sort = app.readString(qs, "sort", "created_at")
+	// Add the supported sort values for this endpoint to the sort safelist.
+	input.Filters.SortSafelist = []string{"created_at", "-created_at"}
+	// Perform validation
+	if data.ValidateFilters(v, input.Filters); !v.Valid() {
+		app.failedValidationResponse(w, r, v.Errors)
+		return
+	}
+	// get our incomes
+	incomes, metadata, err := app.models.FinancialTrackingManager.GetAllIncomesByUserID(app.contextGetUser(r).ID, input.Name, input.Filters)
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrGeneralRecordNotFound):
+			app.notFoundResponse(w, r)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
+	// send the response
+	err = app.writeJSON(w, http.StatusOK, envelope{"incomes": incomes, "metadata": metadata}, nil)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+	}
+}
+
 // updateIncomeHandler() Updates an existing Income
 // User must provide the income ID in the url query
 // We first check if the Income exists, if it does not, we return an error

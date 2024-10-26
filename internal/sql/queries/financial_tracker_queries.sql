@@ -111,6 +111,54 @@ RETURNING updated_at;
     $1, $2, $3, $4, $5, $6, $7, $8
 ) RETURNING id, created_at, updated_at;
 
+-- name: GetAllIncomesByUserID :many
+WITH income_data AS (
+    SELECT 
+        income.id,
+        income.user_id,
+        income.source,
+        income.original_currency_code,
+        income.amount_original,
+        income.amount,
+        income.exchange_rate,
+        income.description,
+        income.date_received,
+        income.created_at,
+        income.updated_at
+    FROM 
+        income
+    WHERE 
+        income.user_id = $1
+        AND ($2 = '' OR to_tsvector('simple', income.source) @@ plainto_tsquery('simple', $2))
+    ORDER BY 
+        income.date_received DESC
+    LIMIT $3 OFFSET $4
+),
+total_amount AS (
+    SELECT SUM(amount)::NUMERIC AS total_income_amount
+    FROM income
+    WHERE income.user_id = $1
+),
+most_used_currency AS (
+    SELECT original_currency_code
+    FROM income
+    WHERE income.user_id = $1
+    GROUP BY income.original_currency_code
+    ORDER BY COUNT(*) DESC
+    LIMIT 1
+)
+SELECT 
+    i.*,
+    t.total_income_amount,
+    m.original_currency_code AS most_used_currency,
+    COUNT(*) OVER () AS total_rows
+FROM 
+    income_data i
+    CROSS JOIN total_amount t
+    CROSS JOIN most_used_currency m;
+
+
+
 -- name: CreateNewDebt :one
 INSERT INTO debts (
     user_id, name, amount, remaining_balance, interest_rate, description, 

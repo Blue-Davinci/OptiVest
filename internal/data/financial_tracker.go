@@ -77,6 +77,13 @@ type RecurringExpense struct {
 	UpdatedAt          time.Time                       `json:"updated_at"`          // Last updated timestamp
 }
 
+// EnrichedIncome represents an income with its total amount, total amount in original currency and exchange rate
+type EnrichedIncome struct {
+	Income               *Income         `json:"income"`
+	TotalAmount          decimal.Decimal `json:"total_amount"`
+	MostUsedCurrencyCode string          `json:"most_used_currency_code"`
+}
+
 // Represents an income
 type Income struct {
 	ID                   int64           `json:"id"`
@@ -570,6 +577,50 @@ func (m *FinancialTrackingModel) CreateNewIncome(userID int64, income *Income) e
 	return nil
 }
 
+// GetAllIncomesByUserID() gets all the incomes by a user ID.
+// This route supports pagination and a name search parameter for the income's source
+// We return an array of enriched incomes[] *EnrichedIncome, a metadata struct and an error if any was found
+func (m *FinancialTrackingModel) GetAllIncomesByUserID(userID int64, incomeSource string, filters Filters) ([]*EnrichedIncome, Metadata, error) {
+	// set our context
+	ctx, cancel := contextGenerator(context.Background(), DefaultFinTrackDBContextTimeout)
+	defer cancel()
+	// get the incomes
+	incomes, err := m.DB.GetAllIncomesByUserID(ctx, database.GetAllIncomesByUserIDParams{
+		UserID:  userID,
+		Column2: incomeSource,
+		Limit:   int32(filters.limit()),
+		Offset:  int32(filters.offset()),
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return nil, Metadata{}, ErrGeneralRecordNotFound
+		default:
+			return nil, Metadata{}, err
+		}
+	}
+	if len(incomes) == 0 {
+		return nil, Metadata{}, ErrGeneralRecordNotFound
+	}
+	// set totals
+	totalRecords := 0
+	// populate the incomes
+	var populatedIncomes []*EnrichedIncome
+	for _, income := range incomes {
+		totalRecords = int(income.TotalRows)
+		// get the total amount
+		populatedIncomes = append(populatedIncomes, &EnrichedIncome{
+			Income:               populateIncome(income),
+			TotalAmount:          decimal.RequireFromString(income.TotalIncomeAmount),
+			MostUsedCurrencyCode: income.MostUsedCurrency,
+		})
+	}
+	// calculate metadata
+	metadata := calculateMetadata(totalRecords, filters.Page, filters.PageSize)
+	// we are good
+	return populatedIncomes, metadata, nil
+}
+
 // UpdateIncome() Updates an existing income by th eincomes userID and ID
 // We return an error if any and an updated Income
 func (m *FinancialTrackingModel) UpdateIncomeByID(userID int64, income *Income) error {
@@ -992,6 +1043,20 @@ func populateDebt(debtRow interface{}) *Debt {
 func populateIncome(incomeRow interface{}) *Income {
 	switch income := incomeRow.(type) {
 	case database.Income:
+		return &Income{
+			ID:                   income.ID,
+			UserID:               income.UserID,
+			Source:               income.Source,
+			OriginalCurrencyCode: income.OriginalCurrencyCode,
+			AmountOriginal:       decimal.RequireFromString(income.AmountOriginal),
+			Amount:               decimal.RequireFromString(income.Amount),
+			ExchangeRate:         decimal.RequireFromString(income.ExchangeRate),
+			Description:          income.Description.String,
+			DateReceived:         income.DateReceived,
+			CreatedAt:            income.CreatedAt.Time,
+			UpdatedAt:            income.UpdatedAt.Time,
+		}
+	case database.GetAllIncomesByUserIDRow:
 		return &Income{
 			ID:                   income.ID,
 			UserID:               income.UserID,
