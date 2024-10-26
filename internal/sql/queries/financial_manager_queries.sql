@@ -144,7 +144,7 @@ WITH
     -- Calculate total non-recurring expenses
     NonRecurringExpenses AS (
         SELECT 
-            COALESCE(SUM(e.amount), 0) AS total_expenses
+            COALESCE(SUM(e.amount), 0)::NUMERIC AS total_expenses
         FROM expenses e
         WHERE e.budget_id = $1
         AND e.is_recurring = FALSE
@@ -162,7 +162,7 @@ WITH
                     WHEN r.recurrence_interval = 'monthly' THEN 1
                     ELSE 0
                 END
-            ), 0) AS projected_recurring_expenses
+            ), 0)::NUMERIC AS projected_recurring_expenses
         FROM recurring_expenses r
         WHERE r.budget_id = $1
     ),
@@ -170,14 +170,14 @@ WITH
     -- Calculate total monthly contributions from goals
     MonthlyContributions AS (
         SELECT 
-            COALESCE(SUM(g.monthly_contribution), 0) AS total_monthly_contributions
+            COALESCE(SUM(g.monthly_contribution), 0)::NUMERIC AS total_monthly_contributions
         FROM goals g
         WHERE g.budget_id = $1
     )
 
 -- Final query combining all the calculations
 SELECT 
-    CAST(b.total_amount AS NUMERIC) AS total_amount,
+    CAST(b.total_amount AS NUMERIC)::NUMERIC AS total_amount,
     mc.total_monthly_contributions,
     nr.total_expenses,
     re.projected_recurring_expenses,
@@ -189,7 +189,7 @@ SELECT
             nr.total_expenses + 
             re.projected_recurring_expenses
         ) AS NUMERIC
-    ) AS budget_surplus
+    )::NUMERIC AS budget_surplus
 
 FROM budgets b
 LEFT JOIN MonthlyContributions mc ON TRUE

@@ -480,9 +480,10 @@ func (m FinancialManagerModel) GetBudgetsForUser(userID int64, searchQuery strin
 			return nil, Metadata{}, err
 		}
 		// account for 0 goals by checking for the monthly contribution, if 0, we set empty structs {}
-		if goalSummaryTotals.TotalMonthlyContribution.Equal(decimal.NewFromInt(0)) {
+		/*if goalSummaryTotals.TotalMonthlyContribution.Equal(decimal.NewFromInt(0)) {
 			goalSummaryTotals = &Goal_Summary_Totals{}
 		}
+		*/
 		//enrich our budget
 		enrichedBudget.Budget = *budget
 		enrichedBudget.Goal_Summary = goalSummary
@@ -1042,59 +1043,18 @@ func (m FinancialManagerModel) GetAllGoalSummaryBudgetID(budgetID, userID int64)
 	for _, row := range goals {
 
 		// Check if BudgetTotalAmount is empty and set a default value if needed
-		if row.TotalAmount != "" {
-			goalTotals.TotalBudgetAmount, err = convertToDecimal(row.TotalAmount)
-			if err != nil {
-				fmt.Println("--Error: ", err)
-				return nil, err
-			}
-		} else {
-			goalTotals.TotalBudgetAmount = decimal.NewFromInt(0) // Default to 0 if empty
-		}
+		goalTotals.TotalBudgetAmount = decimal.RequireFromString(row.TotalAmount)
 
 		// Check if TotalMonthlyContributions is empty and set default if necessary
 		// type conversion is necessary as the value is a string
-		if row.TotalMonthlyContributions != "" {
-			goalTotals.TotalMonthlyContribution, err = convertToDecimal(row.TotalMonthlyContributions)
-			if err != nil {
-				fmt.Println("--1Error: ", err)
-				return nil, err
-			}
-		} else {
-			goalTotals.TotalMonthlyContribution = decimal.NewFromInt(0) // Default to 0 if empty
-		}
-
+		goalTotals.TotalMonthlyContribution = decimal.RequireFromString(row.TotalMonthlyContributions.String)
 		// Total expenses, convert to string}
-		if row.TotalExpenses != "" {
-			goalTotals.TotalExpenses, err = convertToDecimal(row.TotalExpenses)
-			if err != nil {
-				fmt.Println("--2Error: ", err)
-				return nil, err
-			}
-		} else {
-			goalTotals.TotalExpenses = decimal.NewFromInt(0) // Default to 0 if empty
-		}
+		goalTotals.TotalExpenses = decimal.RequireFromString(row.TotalExpenses.String)
 		// projected recurring expenses, convert to string
-		if row.ProjectedRecurringExpenses != "" {
-			goalTotals.ProjectedRecurringExpenses, err = convertToDecimal(row.ProjectedRecurringExpenses)
-			if err != nil {
-				fmt.Println("--3Error: ", err)
-				return nil, err
-			}
-		} else {
-			goalTotals.ProjectedRecurringExpenses = decimal.NewFromInt(0) // Default to 0 if empty
-		}
+		goalTotals.ProjectedRecurringExpenses = decimal.RequireFromString(row.ProjectedRecurringExpenses.String)
 
 		// Check if BudgetSurplus is empty and set default if necessary
-		if row.BudgetSurplus != "" {
-			goalTotals.TotalSurplus, err = decimal.NewFromString(row.BudgetSurplus)
-			if err != nil {
-				fmt.Println("--4Error: ", err)
-				return nil, err
-			}
-		} else {
-			goalTotals.TotalSurplus = decimal.NewFromInt(0) // Default to 0 if empty
-		}
+		goalTotals.TotalSurplus = decimal.RequireFromString(row.BudgetSurplus)
 	}
 	fmt.Println("Goal Totals: ", goalTotals.TotalSurplus)
 	// Return the goal summaries and totals
