@@ -312,3 +312,48 @@ ORDER BY
     e.date_occurred DESC
 LIMIT 
     $3 OFFSET $4; 
+
+-- name: GetAllRecurringExpensesByUserID :many
+SELECT 
+    re.id,
+    re.user_id,
+    re.budget_id,
+    b.name AS budget_name,
+    re.amount,
+    re.name,
+    re.description,
+    re.recurrence_interval,
+    re.projected_amount,
+    re.next_occurrence,
+    re.created_at,
+    re.updated_at,
+    COALESCE(SUM(e.amount), 0)::NUMERIC AS total_expenses,
+    COUNT(*) OVER() AS total_count
+FROM 
+    recurring_expenses re
+JOIN 
+    budgets b 
+ON 
+    re.budget_id = b.id 
+    AND re.user_id = b.user_id  -- Ensures budget belongs to the same user
+LEFT JOIN 
+    expenses e 
+ON 
+    re.user_id = e.user_id
+    AND re.budget_id = e.budget_id
+    AND re.name = e.name 
+    AND e.is_recurring = TRUE
+WHERE 
+    re.user_id = $1 
+AND ($2 = '' OR to_tsvector('simple', re.name) @@ plainto_tsquery('simple', $2))
+GROUP BY 
+    re.id, re.user_id, re.budget_id, b.name, re.amount, 
+    re.name, re.description, re.recurrence_interval, 
+    re.projected_amount, re.next_occurrence, 
+    re.created_at, re.updated_at
+ORDER BY 
+    re.created_at DESC   
+LIMIT 
+    $3  -- Limit value for pagination
+OFFSET 
+    $4; -- Offset value for pagination

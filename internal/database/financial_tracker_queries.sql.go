@@ -540,6 +540,119 @@ func (q *Queries) GetAllOverdueDebts(ctx context.Context, arg GetAllOverdueDebts
 	return items, nil
 }
 
+const getAllRecurringExpensesByUserID = `-- name: GetAllRecurringExpensesByUserID :many
+SELECT 
+    re.id,
+    re.user_id,
+    re.budget_id,
+    b.name AS budget_name,
+    re.amount,
+    re.name,
+    re.description,
+    re.recurrence_interval,
+    re.projected_amount,
+    re.next_occurrence,
+    re.created_at,
+    re.updated_at,
+    COALESCE(SUM(e.amount), 0)::NUMERIC AS total_expenses,
+    COUNT(*) OVER() AS total_count
+FROM 
+    recurring_expenses re
+JOIN 
+    budgets b 
+ON 
+    re.budget_id = b.id 
+    AND re.user_id = b.user_id  -- Ensures budget belongs to the same user
+LEFT JOIN 
+    expenses e 
+ON 
+    re.user_id = e.user_id
+    AND re.budget_id = e.budget_id
+    AND re.name = e.name 
+    AND e.is_recurring = TRUE
+WHERE 
+    re.user_id = $1 
+AND ($2 = '' OR to_tsvector('simple', re.name) @@ plainto_tsquery('simple', $2))
+GROUP BY 
+    re.id, re.user_id, re.budget_id, b.name, re.amount, 
+    re.name, re.description, re.recurrence_interval, 
+    re.projected_amount, re.next_occurrence, 
+    re.created_at, re.updated_at
+ORDER BY 
+    re.created_at DESC   
+LIMIT 
+    $3  -- Limit value for pagination
+OFFSET 
+    $4
+`
+
+type GetAllRecurringExpensesByUserIDParams struct {
+	UserID  int64
+	Column2 interface{}
+	Limit   int32
+	Offset  int32
+}
+
+type GetAllRecurringExpensesByUserIDRow struct {
+	ID                 int64
+	UserID             int64
+	BudgetID           int64
+	BudgetName         string
+	Amount             string
+	Name               string
+	Description        sql.NullString
+	RecurrenceInterval RecurrenceIntervalEnum
+	ProjectedAmount    string
+	NextOccurrence     time.Time
+	CreatedAt          sql.NullTime
+	UpdatedAt          sql.NullTime
+	TotalExpenses      string
+	TotalCount         int64
+}
+
+func (q *Queries) GetAllRecurringExpensesByUserID(ctx context.Context, arg GetAllRecurringExpensesByUserIDParams) ([]GetAllRecurringExpensesByUserIDRow, error) {
+	rows, err := q.db.QueryContext(ctx, getAllRecurringExpensesByUserID,
+		arg.UserID,
+		arg.Column2,
+		arg.Limit,
+		arg.Offset,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetAllRecurringExpensesByUserIDRow
+	for rows.Next() {
+		var i GetAllRecurringExpensesByUserIDRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.BudgetID,
+			&i.BudgetName,
+			&i.Amount,
+			&i.Name,
+			&i.Description,
+			&i.RecurrenceInterval,
+			&i.ProjectedAmount,
+			&i.NextOccurrence,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.TotalExpenses,
+			&i.TotalCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getAllRecurringExpensesDueForProcessing = `-- name: GetAllRecurringExpensesDueForProcessing :many
 SELECT
     COUNT(*) OVER() AS total_count,

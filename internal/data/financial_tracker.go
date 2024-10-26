@@ -55,6 +55,13 @@ type Expense struct {
 	UpdatedAt    time.Time       `json:"updated_at"`
 }
 
+// EnrichedRecurringExpense represents ta recurring expense with various totals and budget name
+type EnrichedRecurringExpense struct {
+	BudgetName         string            `json:"budget_name"`
+	RecurringExpense   *RecurringExpense `json:"recurring_expense"`
+	OverallTotalAmount decimal.Decimal   `json:"overall_total_amount"`
+}
+
 // Represents a recurring expense
 type RecurringExpense struct {
 	ID                 int64                           `json:"id"`                  // Unique ID for the recurring expense
@@ -325,6 +332,54 @@ func (m *FinancialTrackingModel) GetAllExpensesByUserID(userID int64, expenseNam
 	for _, expense := range expenses {
 		totalRecords = int(expense.TotalCount)
 		populatedExpenses = append(populatedExpenses, populateExpense(expense))
+	}
+	// calculate metadata
+	metadata := calculateMetadata(totalRecords, filters.Page, filters.PageSize)
+	// we are good
+	return populatedExpenses, metadata, nil
+}
+
+// GetAllRecurringExpensesByUserID() gets all the recurring expenses by a user ID
+// This route supports pagination
+// We return an array of []* EnrichedRecurringExpense, a metadata struct and an error if any was found
+func (m *FinancialTrackingModel) GetAllRecurringExpensesByUserID(userID int64, recurringExpenseName string, filters Filters) ([]*EnrichedRecurringExpense, Metadata, error) {
+	// set our context
+	ctx, cancel := contextGenerator(context.Background(), DefaultFinTrackDBContextTimeout)
+	defer cancel()
+	// get the expenses
+	recurringExpenses, err := m.DB.GetAllRecurringExpensesByUserID(ctx, database.GetAllRecurringExpensesByUserIDParams{
+		UserID:  userID,
+		Column2: recurringExpenseName,
+		Limit:   int32(filters.limit()),
+		Offset:  int32(filters.offset()),
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return nil, Metadata{}, ErrGeneralRecordNotFound
+		default:
+			return nil, Metadata{}, err
+		}
+	}
+	if len(recurringExpenses) == 0 {
+		return nil, Metadata{}, ErrGeneralRecordNotFound
+	}
+	// set totals
+	totalRecords := 0
+	// populate the expenses
+	var populatedExpenses []*EnrichedRecurringExpense
+	for _, expense := range recurringExpenses {
+		totalRecords = int(expense.TotalCount)
+		// get the budget name
+		budget, err := m.DB.GetBudgetByID(ctx, expense.BudgetID)
+		if err != nil {
+			fmt.Println("Error getting budget by ID", err)
+		}
+		populatedExpenses = append(populatedExpenses, &EnrichedRecurringExpense{
+			BudgetName:         budget.Name,
+			RecurringExpense:   populateRecurringExpense(expense),
+			OverallTotalAmount: decimal.RequireFromString(expense.TotalExpenses),
+		})
 	}
 	// calculate metadata
 	metadata := calculateMetadata(totalRecords, filters.Page, filters.PageSize)
@@ -959,6 +1014,20 @@ func populateIncome(incomeRow interface{}) *Income {
 func populateRecurringExpense(recurringExpensRow interface{}) *RecurringExpense {
 	switch recurringExpense := recurringExpensRow.(type) {
 	case database.RecurringExpense:
+		return &RecurringExpense{
+			ID:                 recurringExpense.ID,
+			UserID:             recurringExpense.UserID,
+			BudgetID:           recurringExpense.BudgetID,
+			Amount:             decimal.RequireFromString(recurringExpense.Amount),
+			Name:               recurringExpense.Name,
+			Description:        recurringExpense.Description.String,
+			RecurrenceInterval: recurringExpense.RecurrenceInterval,
+			NextOccurrence:     recurringExpense.NextOccurrence,
+			ProjectedAmount:    decimal.RequireFromString(recurringExpense.ProjectedAmount),
+			CreatedAt:          recurringExpense.CreatedAt.Time,
+			UpdatedAt:          recurringExpense.UpdatedAt.Time,
+		}
+	case database.GetAllRecurringExpensesByUserIDRow:
 		return &RecurringExpense{
 			ID:                 recurringExpense.ID,
 			UserID:             recurringExpense.UserID,

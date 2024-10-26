@@ -144,6 +144,7 @@ func (app *application) expenseRoutes() chi.Router {
 	expenseRoutes.Post("/", app.createNewExpenseHandler)
 	expenseRoutes.Patch("/{expenseID}", app.updateExpenseByIDHandler)
 	expenseRoutes.Post("/recurring", app.createNewRecurringExpenseHandler)
+	expenseRoutes.Get("/recurring", app.getAllRecurringExpensesByUserIDHandler)
 	expenseRoutes.Patch("/recurring/{expenseID}", app.updateRecurringExpenseByIDHandler)
 
 	expenseRoutes.Post("/receipts", app.getOCRDRecieptDataAnalysisHandler)
