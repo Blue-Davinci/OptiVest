@@ -252,7 +252,7 @@ func (app *application) getAllStockInvestmentByUserIDHandler(w http.ResponseWrit
 	// save the stock in our cache using data.DefaultInvestmentPortfolioSummaryTTL(currently 10mins)
 	err = setToCache(ctx, app.RedisDB, redisKey, &stockData{Stock: stock, Metadata: metadata}, data.DefaultInvestmentPortfolioSummaryTTL)
 	if err != nil {
-		app.logger.Info("Error caching data:", zap.Error(err)) // Log but don't stop execution
+		app.logger.Info("Error caching stock data:", zap.Error(err)) // Log but don't stop execution
 	}
 	// send response
 	err = app.writeJSON(w, http.StatusOK, envelope{"stock": stock, "metadata": metadata}, nil)
@@ -445,11 +445,44 @@ func (app *application) getAllBondInvestmentByUserIDHandler(w http.ResponseWrite
 		app.failedValidationResponse(w, r, v.Errors)
 		return
 	}
+	// make redis key with data.RedisInvestmentPortfolioBondPrefix, user.ID, input.Name, input.Filters.Page and input.Filters.PageSize
+	redisKey := fmt.Sprintf("%s:%d:%s:%d:%d", data.RedisInvestmentPortfolioBondPrefix, app.contextGetUser(r).ID, input.Name, input.Filters.Page, input.Filters.PageSize)
+	ctx := context.Background()
+	// set the struct we will need which will include the bond ([]*data.EnrichedBondInvestment) and metadata (*data.Metadata)
+	type bondData struct {
+		Bond     []*data.EnrichedBondInvestment
+		Metadata data.Metadata
+	}
+	// see if the bond is already saved in our cache
+	cachedResponse, err := getFromCache[bondData](ctx, app.RedisDB, redisKey)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrNoDataFoundInRedis):
+			// ignore to proceed with other check
+		default:
+			app.serverErrorResponse(w, r, err)
+			return
+		}
+	}
+	// if we have a cached response, we can return it
+	if cachedResponse != nil {
+		err = app.writeJSON(w, http.StatusOK, envelope{"bond": cachedResponse.Bond, "metadata": cachedResponse.Metadata}, nil)
+		if err != nil {
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
 	// get our bond information
 	bond, metadata, err := app.models.InvestmentPortfolioManager.GetAllBondInvestmentByUserID(app.contextGetUser(r).ID, input.Name, input.Filters)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
+	}
+
+	// save the bond in our cache using data.DefaultInvestmentPortfolioSummaryTTL(currently 10mins)
+	err = setToCache(ctx, app.RedisDB, redisKey, &bondData{Bond: bond, Metadata: metadata}, data.DefaultInvestmentPortfolioSummaryTTL)
+	if err != nil {
+		app.logger.Info("Error caching bond data:", zap.Error(err)) // Log but don't stop execution
 	}
 	// send response
 	err = app.writeJSON(w, http.StatusOK, envelope{"bond": bond, "metadata": metadata}, nil)
@@ -902,7 +935,7 @@ func (app *application) getAllInvestmentInfoByUserIDHandler(w http.ResponseWrite
 	// set the cache
 	err = setToCache(ctx, app.RedisDB, redisKey, &investmentAnalysis, data.DefaultInvestmentPortfolioSummaryTTL)
 	if err != nil {
-		app.logger.Info("Error caching data:", zap.Error(err)) // Log but don't stop execution
+		app.logger.Info("Error caching inestment data:", zap.Error(err)) // Log but don't stop execution
 	}
 
 	// output this infor
