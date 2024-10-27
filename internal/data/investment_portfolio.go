@@ -42,6 +42,8 @@ const (
 	DefaultInvPortContextTimeout          = 5 * time.Second
 	DefaultInvestmentPortfolioSummaryTTL  = 10 * time.Minute
 	RedisInvestmentPortfolioSummaryPrefix = "investment_portfolio_summary:"
+	RedisInvestmentPortfolioStockPrefix   = "investment_portfolio_stock"
+	RedisInvestmentPortfolioBondPrefix    = "investment_portfolio_bond"
 	BondDefaultStartDate                  = "2021-01-01"
 )
 
