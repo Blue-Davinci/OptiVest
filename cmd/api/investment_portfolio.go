@@ -989,3 +989,74 @@ func (app *application) performInvestmentPortfolioAnalysis(investmentAnalysis *d
 	app.logger.Info("Investment portfolio analysis completed successfully.")
 	return nil
 }
+
+// getAllAlternativeInvestmentByUserIDHandler() is a handler responsible for getting all alternative investments by user ID
+// This route supports both pagination and searching via the Name parameter for specific symbols
+// We get the user ID from the context, we then proceed to get all alternative investments
+func (app *application) getAllAlternativeInvestmentByUserIDHandler(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Name string
+		data.Filters
+	}
+	//validate if queries are provided
+	v := validator.New()
+	// Call r.URL.Query() to get the url.Values map containing the query string data.
+	qs := r.URL.Query()
+	//get the page & pagesizes as ints and set to the embedded struct
+	input.Name = app.readString(qs, "name", "")
+	input.Filters.Page = app.readInt(qs, "page", 1, v)
+	input.Filters.PageSize = app.readInt(qs, "page_size", 20, v)
+	// get the sort values falling back to "created_at" if it is not provided
+	input.Filters.Sort = app.readString(qs, "sort", "created_at")
+	// Add the supported sort values for this endpoint to the sort safelist.
+	input.Filters.SortSafelist = []string{"created_at", "-created_at"}
+	// Perform validation
+	if data.ValidateFilters(v, input.Filters); !v.Valid() {
+		app.failedValidationResponse(w, r, v.Errors)
+		return
+	}
+	// make redis key with data.RedisInvestmentPortfolioAlternativePrefix, user.ID, input.Name, input.Filters.Page and input.Filters.PageSize
+	redisKey := fmt.Sprintf("%s:%d:%s:%d:%d", data.RedisInvestmentPortfolioAlternativePrefix, app.contextGetUser(r).ID, input.Name, input.Filters.Page, input.Filters.PageSize)
+	app.logger.Info("Redis Key:", zap.String("key", redisKey))
+	ctx := context.Background()
+	// set the struct we will need which will include the alternative ([]*data.EnrichedAlternativeInvestment) and metadata (*data.Metadata)
+	type alternativeData struct {
+		Alternative []*data.EnrichedAlternativeInvestment
+		Metadata    data.Metadata
+	}
+	// see if the alternative is already saved in our cache
+	cachedResponse, err := getFromCache[alternativeData](ctx, app.RedisDB, redisKey)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrNoDataFoundInRedis):
+			// ignore to proceed with other check
+		default:
+			app.serverErrorResponse(w, r, err)
+			return
+		}
+	}
+	// if we have a cached response, we can return it
+	if cachedResponse != nil {
+		err = app.writeJSON(w, http.StatusOK, envelope{"alternative": cachedResponse.Alternative, "metadata": cachedResponse.Metadata}, nil)
+		if err != nil {
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
+	// get our alternative information
+	alternative, metadata, err := app.models.InvestmentPortfolioManager.GetAllAlternativeInvestmentByUserID(app.contextGetUser(r).ID, input.Name, input.Filters)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+		return
+	}
+	// save the alternative in our cache using data.DefaultInvestmentPortfolioSummaryTTL(currently 10mins)
+	err = setToCache(ctx, app.RedisDB, redisKey, &alternativeData{Alternative: alternative, Metadata: metadata}, data.DefaultInvestmentPortfolioSummaryTTL)
+	if err != nil {
+		app.logger.Info("Error caching alternative data:", zap.Error(err)) // Log but don't stop execution
+	}
+	// send response
+	err = app.writeJSON(w, http.StatusOK, envelope{"alternative": alternative, "metadata": metadata}, nil)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+	}
+}

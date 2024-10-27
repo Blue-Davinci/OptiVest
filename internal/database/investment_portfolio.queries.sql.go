@@ -432,6 +432,146 @@ func (q *Queries) DeleteStockInvestmentByID(ctx context.Context, arg DeleteStock
 	return id, err
 }
 
+const getAllAlternativeInvestmentByUserID = `-- name: GetAllAlternativeInvestmentByUserID :many
+SELECT 
+    ai.id AS investment_id,
+    ai.investment_type,
+    ai.investment_name,
+    ai.is_business,
+    ai.quantity,
+    ai.annual_revenue,
+    ai.acquired_at,
+    ai.profit_margin,
+    ai.valuation,
+    ai.valuation_updated_at,
+    ai.location,
+    ai.created_at AS investment_created_at,
+    ai.updated_at AS investment_updated_at,
+
+    -- Total count of alternative investments for the user
+    (SELECT COUNT(*) 
+     FROM alternative_investments ai2 
+     WHERE ai2.user_id = $1) AS total_alternative_investments,
+
+    -- Sum of all transaction amounts for the specific alternative investment
+    (SELECT COALESCE(SUM(it.transaction_amount), 0)::NUMERIC
+     FROM investment_transactions it
+     WHERE it.investment_id = ai.id 
+       AND it.investment_type = 'Alternative'
+       AND it.user_id = ai.user_id) AS total_transaction_sum,
+
+    -- Sum of all valuations for the specific alternative investment type for this user
+    (SELECT COALESCE(SUM(ai2.valuation), 0)::NUMERIC
+     FROM alternative_investments ai2
+     WHERE ai2.user_id = ai.user_id
+       AND ai2.investment_type = ai.investment_type) AS total_valuation_sum,
+
+    -- Transaction details as JSON array, matching InvestmentTransaction struct
+    COALESCE((
+        SELECT json_agg(json_build_object(
+                'id', it.id,
+                'user_id', it.user_id,
+                'investment_type', it.investment_type,
+                'investment_id', it.investment_id,
+                'transaction_type', it.transaction_type,
+                'transaction_date', it.transaction_date,
+                'transaction_amount', it.transaction_amount,
+                'quantity', it.quantity,
+                'created_at', it.created_at,
+                'updated_at', it.updated_at
+            ))
+        FROM investment_transactions it
+        WHERE it.investment_id = ai.id 
+          AND it.investment_type = 'Alternative'
+          AND it.user_id = ai.user_id
+    ), '[]'::json) AS transactions
+
+FROM 
+    alternative_investments ai
+
+WHERE 
+    ai.user_id = $1
+    AND ($2 = '' OR to_tsvector('simple', ai.investment_type || ' ' || COALESCE(ai.investment_name, '')) @@ plainto_tsquery('simple', $2))
+
+ORDER BY 
+    ai.updated_at DESC  
+LIMIT $3
+OFFSET $4
+`
+
+type GetAllAlternativeInvestmentByUserIDParams struct {
+	UserID  int64
+	Column2 interface{}
+	Limit   int32
+	Offset  int32
+}
+
+type GetAllAlternativeInvestmentByUserIDRow struct {
+	InvestmentID                int64
+	InvestmentType              string
+	InvestmentName              sql.NullString
+	IsBusiness                  bool
+	Quantity                    sql.NullString
+	AnnualRevenue               sql.NullString
+	AcquiredAt                  time.Time
+	ProfitMargin                sql.NullString
+	Valuation                   string
+	ValuationUpdatedAt          sql.NullTime
+	Location                    sql.NullString
+	InvestmentCreatedAt         sql.NullTime
+	InvestmentUpdatedAt         sql.NullTime
+	TotalAlternativeInvestments int64
+	TotalTransactionSum         string
+	TotalValuationSum           string
+	Transactions                interface{}
+}
+
+func (q *Queries) GetAllAlternativeInvestmentByUserID(ctx context.Context, arg GetAllAlternativeInvestmentByUserIDParams) ([]GetAllAlternativeInvestmentByUserIDRow, error) {
+	rows, err := q.db.QueryContext(ctx, getAllAlternativeInvestmentByUserID,
+		arg.UserID,
+		arg.Column2,
+		arg.Limit,
+		arg.Offset,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetAllAlternativeInvestmentByUserIDRow
+	for rows.Next() {
+		var i GetAllAlternativeInvestmentByUserIDRow
+		if err := rows.Scan(
+			&i.InvestmentID,
+			&i.InvestmentType,
+			&i.InvestmentName,
+			&i.IsBusiness,
+			&i.Quantity,
+			&i.AnnualRevenue,
+			&i.AcquiredAt,
+			&i.ProfitMargin,
+			&i.Valuation,
+			&i.ValuationUpdatedAt,
+			&i.Location,
+			&i.InvestmentCreatedAt,
+			&i.InvestmentUpdatedAt,
+			&i.TotalAlternativeInvestments,
+			&i.TotalTransactionSum,
+			&i.TotalValuationSum,
+			&i.Transactions,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getAllBondInvestmentByUserID = `-- name: GetAllBondInvestmentByUserID :many
 SELECT 
     bi.id AS bond_id,

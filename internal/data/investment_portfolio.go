@@ -39,12 +39,13 @@ func (ct *CustomTime1) UnmarshalJSON(b []byte) error {
 }
 
 const (
-	DefaultInvPortContextTimeout          = 5 * time.Second
-	DefaultInvestmentPortfolioSummaryTTL  = 10 * time.Minute
-	RedisInvestmentPortfolioSummaryPrefix = "investment_portfolio_summary:"
-	RedisInvestmentPortfolioStockPrefix   = "investment_portfolio_stock"
-	RedisInvestmentPortfolioBondPrefix    = "investment_portfolio_bond"
-	BondDefaultStartDate                  = "2021-01-01"
+	DefaultInvPortContextTimeout              = 5 * time.Second
+	DefaultInvestmentPortfolioSummaryTTL      = 10 * time.Minute
+	RedisInvestmentPortfolioSummaryPrefix     = "investment_portfolio_summary:"
+	RedisInvestmentPortfolioStockPrefix       = "investment_portfolio_stock"
+	RedisInvestmentPortfolioBondPrefix        = "investment_portfolio_bond"
+	RedisInvestmentPortfolioAlternativePrefix = "investment_portfolio_alternative"
+	BondDefaultStartDate                      = "2021-01-01"
 )
 
 var (
@@ -235,12 +236,21 @@ type EnrichedStockInvestment struct {
 	TotalPurchaseSum     decimal.Decimal          `json:"total_purchase_sum"`
 }
 
+// EnrichedBondInvestment struct to hold the enriched bond investment
 type EnrichedBondInvestment struct {
 	Bond                 *BondInvestment          `json:"bond"`
 	Transactions         []*InvestmentTransaction `json:"transactions"`
 	Analysis             *BondAnalysisStatistics  `json:"analysis"`
 	TotalTransactionsSum decimal.Decimal          `json:"total_transactions_sum"`
 	TotalPurchaseSum     decimal.Decimal          `json:"total_purchase_sum"`
+}
+
+// EnrichedAlternativeInvestment struct to hold the enriched alternative investment
+type EnrichedAlternativeInvestment struct {
+	Alternative          *AlternativeInvestment   `json:"alternative"`
+	Transactions         []*InvestmentTransaction `json:"transactions"`
+	TotalTransactionsSum decimal.Decimal          `json:"total_transactions_sum"`
+	TotalValuationSum    decimal.Decimal          `json:"total_valuation_sum"`
 }
 
 func ValidateURLID(v *validator.Validator, stockID int64, fieldName string) {
@@ -828,6 +838,66 @@ func (m InvestmentPortfolioModel) DeleteAlternativeInvestmentByID(userID, altern
 	return deletedAlternativeID, nil
 }
 
+// GetAllAlternativeInvestmentByUserID() retrieves all alternative investments by user id.
+// This route supports both pagination as well as a name search for the investment name.
+// We return an []*enrickedalternativeinvestment, metadata and an error if there was an issue retrieving the alternative investments.
+// For the alternative transactions, we will unmarshal to the transaction investments.
+func (m InvestmentPortfolioModel) GetAllAlternativeInvestmentByUserID(userID int64, investmentName string, filters Filters) ([]*EnrichedAlternativeInvestment, Metadata, error) {
+	ctx, cancel := contextGenerator(context.Background(), DefaultInvPortContextTimeout)
+	defer cancel()
+	// Retrieve the alternative investments from the database.
+	alternativeInvestments, err := m.DB.GetAllAlternativeInvestmentByUserID(ctx, database.GetAllAlternativeInvestmentByUserIDParams{
+		UserID:  userID,
+		Column2: investmentName,
+		Limit:   int32(filters.limit()),
+		Offset:  int32(filters.offset()),
+	})
+	if err != nil {
+		switch {
+		case err == sql.ErrNoRows:
+			return nil, Metadata{}, ErrGeneralRecordNotFound
+		default:
+			return nil, Metadata{}, err
+		}
+	}
+	// check length
+	if len(alternativeInvestments) == 0 {
+		return nil, Metadata{}, ErrGeneralRecordNotFound
+	}
+
+	var enrichedAlternativeInvestments []*EnrichedAlternativeInvestment
+	// totals
+	totalCount := 0
+	for _, alternativeInvestment := range alternativeInvestments {
+		totalCount = int(alternativeInvestment.TotalAlternativeInvestments)
+		alternative := populateAlternativeInvestment(alternativeInvestment)
+		// Unmarshal transactions to an array of JSON objects
+		var investmentTransactions []*InvestmentTransaction
+		transactionsData, ok := alternativeInvestment.Transactions.([]byte)
+		if !ok {
+			fmt.Println("error asserting alternative transactions to []byte")
+			continue
+		}
+		err := json.Unmarshal(transactionsData, &investmentTransactions)
+		if err != nil {
+			fmt.Println("error unmarshalling alternative transactions: ", err)
+		}
+
+		// Populate the enriched alternative investment struct
+		enrichedAlternativeInvestments = append(enrichedAlternativeInvestments, &EnrichedAlternativeInvestment{
+			Alternative:          alternative,
+			Transactions:         investmentTransactions,
+			TotalTransactionsSum: decimal.RequireFromString(alternativeInvestment.TotalTransactionSum),
+			TotalValuationSum:    decimal.RequireFromString(alternativeInvestment.TotalValuationSum),
+		})
+	}
+
+	// calculate metadata
+	metadata := calculateMetadata(filters.Page, filters.PageSize, totalCount)
+	// Return the enriched alternative investments, metadata and nil if there was no error.
+	return enrichedAlternativeInvestments, metadata, nil
+}
+
 // GetAlternativeInvestmentByAlternativeID() retrieves an alternative investment by alternative id.
 // We take in an alternative id.
 // We return a pointer to an alternative investment and an error if there was an issue retrieving the alternative investment.
@@ -1147,7 +1217,24 @@ func populateAlternativeInvestment(alternativeInvestmentRow interface{}) *Altern
 			CreatedAt:          alternativeInvestment.CreatedAt.Time,
 			UpdatedAt:          alternativeInvestment.UpdatedAt.Time,
 		}
+	case database.GetAllAlternativeInvestmentByUserIDRow:
+		return &AlternativeInvestment{
+			ID:                 alternativeInvestment.InvestmentID,
+			InvestmentType:     alternativeInvestment.InvestmentType,
+			InvestmentName:     alternativeInvestment.InvestmentName.String,
+			IsBusiness:         alternativeInvestment.IsBusiness,
+			Quantity:           decimal.RequireFromString(alternativeInvestment.Quantity.String),
+			AnnualRevenue:      decimal.RequireFromString(alternativeInvestment.AnnualRevenue.String),
+			AcquiredAt:         alternativeInvestment.AcquiredAt,
+			ProfitMargin:       decimal.RequireFromString(alternativeInvestment.ProfitMargin.String),
+			Valuation:          decimal.RequireFromString(alternativeInvestment.Valuation),
+			ValuationUpdatedAt: alternativeInvestment.ValuationUpdatedAt.Time,
+			Location:           alternativeInvestment.Location.String,
+			CreatedAt:          alternativeInvestment.InvestmentCreatedAt.Time,
+			UpdatedAt:          alternativeInvestment.InvestmentUpdatedAt.Time,
+		}
 	default:
+		fmt.Println("error in populateAlternativeInvestment")
 		return nil
 	}
 }

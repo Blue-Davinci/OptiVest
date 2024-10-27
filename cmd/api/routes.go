@@ -186,6 +186,7 @@ func (app *application) investmentPortfolioRoutes() chi.Router {
 	investmentPortfolioRoutes.Patch("/bonds/{bondID}", app.updateBondInvestmentHandler)
 	investmentPortfolioRoutes.Delete("/bonds/{bondID}", app.deleteBondInvestmentByIDHandler)
 	// alternative investments
+	investmentPortfolioRoutes.Get("/alternative", app.getAllAlternativeInvestmentByUserIDHandler)
 	investmentPortfolioRoutes.Post("/alternative", app.createNewAlternativeInvestmentHandler)
 	investmentPortfolioRoutes.Patch("/alternative/{alternativeID}", app.updateAlternativeInvestmentHandler)
 	investmentPortfolioRoutes.Delete("/alternative/{alternativeID}", app.deleteAlternativeInvestmentByIDHandler)

@@ -647,6 +647,18 @@ type Budget struct {
 	UpdatedAt      time.Time
 }
 
+type ContactU struct {
+	ID        int64
+	UserID    sql.NullInt64
+	Name      string
+	Email     string
+	Subject   sql.NullString
+	Message   string
+	Status    sql.NullString
+	CreatedAt sql.NullTime
+	UpdatedAt sql.NullTime
+}
+
 type Debt struct {
 	ID                     int64
 	UserID                 int64
