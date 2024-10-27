@@ -68,6 +68,89 @@ DELETE FROM stock_investments
 WHERE id = $1 AND user_id = $2
 RETURNING id;
 
+-- name: GetAllStockInvestmentByUserID :many
+SELECT 
+    si.id AS stock_id,
+    si.stock_symbol,
+    si.quantity,
+    si.purchase_price,
+    si.current_value,
+    si.sector,
+    si.purchase_date,
+    si.dividend_yield,
+    si.dividend_yield_updated_at,
+    si.created_at AS stock_created_at,
+    si.updated_at AS stock_updated_at,
+
+    -- Total count of stocks for the user
+    (SELECT COUNT(*) 
+     FROM stock_investments si2 
+     WHERE si2.user_id = $1) AS total_stocks,
+
+    -- Sum of all transactions (transaction_amount) for the specific stock
+    (SELECT COALESCE(SUM(it.transaction_amount), 0)::NUMERIC
+     FROM investment_transactions it
+     WHERE it.investment_id = si.id 
+       AND it.investment_type = 'Stock'
+       AND it.user_id = si.user_id) AS total_transaction_sum,
+
+    -- Sum of all purchase prices for the specific stock
+    (SELECT COALESCE(SUM(si2.purchase_price * si2.quantity), 0)::NUMERIC
+     FROM stock_investments si2
+     WHERE si2.user_id = si.user_id
+       AND si2.stock_symbol = si.stock_symbol) AS total_purchase_price_sum,
+
+    -- Transaction details as JSON array, matching InvestmentTransaction struct
+COALESCE((
+    SELECT json_agg(json_build_object(
+            'id', it.id,
+            'user_id', it.user_id,
+            'investment_type', it.investment_type,
+            'investment_id', it.investment_id,
+            'transaction_type', it.transaction_type,
+            'transaction_date', it.transaction_date,
+            'transaction_amount', it.transaction_amount,
+            'quantity', it.quantity,
+            'created_at', it.created_at,
+            'updated_at', it.updated_at
+        ))
+    FROM investment_transactions it
+    WHERE it.investment_id = si.id 
+      AND it.investment_type = 'Stock'
+      AND it.user_id = si.user_id
+), '[]'::json) AS transactions,
+
+    -- Stock analysis details as JSON object, matching StockAnalysis struct
+COALESCE((
+        SELECT json_build_object(
+            'stock_symbol', sa.stock_symbol,
+            'quantity', si.quantity,
+            'purchase_price', si.purchase_price,
+            'sector', si.sector,
+            'dividend_yield', si.dividend_yield,
+            'returns', sa.returns,
+            'sharpe_ratio', sa.sharpe_ratio,
+            'sortino_ratio', sa.sortino_ratio,
+            'sentiment_label', sa.sentiment_label,
+            'sector_performance', sa.sector_performance
+        )
+        FROM stock_analysis sa
+        WHERE sa.stock_symbol = si.stock_symbol 
+          AND sa.user_id = si.user_id
+), '{}'::json) AS stock_analysis
+
+FROM 
+    stock_investments si
+
+WHERE 
+    si.user_id = $1
+    AND ($2 = '' OR to_tsvector('simple', si.stock_symbol) @@ plainto_tsquery('simple', $2))
+
+ORDER BY 
+    si.updated_at DESC  
+LIMIT $3
+OFFSET $4;
+
 
 -- name: CreateNewBondInvestment :one
 INSERT INTO bond_investments (
@@ -116,6 +199,90 @@ WHERE id = $1;
 DELETE FROM bond_investments
 WHERE id = $1 AND user_id = $2
 RETURNING id;
+
+-- name: GetAllBondInvestmentByUserID :many
+SELECT 
+    bi.id AS bond_id,
+    bi.bond_symbol,
+    bi.quantity,
+    bi.purchase_price,
+    bi.current_value,
+    bi.coupon_rate,
+    bi.maturity_date,
+    bi.purchase_date,
+    bi.created_at AS bond_created_at,
+    bi.updated_at AS bond_updated_at,
+
+    -- Total count of bonds for the user
+    (SELECT COUNT(*) 
+     FROM bond_investments bi2 
+     WHERE bi2.user_id = $1) AS total_bonds,
+
+    -- Sum of all transactions (transaction_amount) for the specific bond
+    (SELECT COALESCE(SUM(it.transaction_amount), 0)::NUMERIC
+     FROM investment_transactions it
+     WHERE it.investment_id = bi.id 
+       AND it.investment_type = 'Bond'
+       AND it.user_id = bi.user_id) AS total_transaction_sum,
+
+    -- Sum of all purchase prices for the specific bond
+    (SELECT COALESCE(SUM(bi2.purchase_price * bi2.quantity), 0)::NUMERIC
+     FROM bond_investments bi2
+     WHERE bi2.user_id = bi.user_id
+       AND bi2.bond_symbol = bi.bond_symbol) AS total_purchase_price_sum,
+
+    -- Transaction details as JSON array, matching InvestmentTransaction struct
+    COALESCE((
+        SELECT json_agg(json_build_object(
+                'id', it.id,
+                'user_id', it.user_id,
+                'investment_type', it.investment_type,
+                'investment_id', it.investment_id,
+                'transaction_type', it.transaction_type,
+                'transaction_date', it.transaction_date,
+                'transaction_amount', it.transaction_amount,
+                'quantity', it.quantity,
+                'created_at', it.created_at,
+                'updated_at', it.updated_at
+            ))
+        FROM investment_transactions it
+        WHERE it.investment_id = bi.id 
+          AND it.investment_type = 'Bond'
+          AND it.user_id = bi.user_id
+    ), '[]'::json) AS transactions,
+
+    -- Bond analysis details as JSON object, matching BondAnalysisStatistics struct
+COALESCE((
+    SELECT json_build_object(
+        'ytm', ba.ytm,
+        'current_yield', ba.current_yield,
+        'macaulay_duration', ba.macaulay_duration,
+        'convexity', ba.convexity,
+        'bond_returns', ba.bond_returns,
+        'annual_return', ba.annual_return,
+        'bond_volatility', ba.bond_volatility,
+        'sharpe_ratio', ba.sharpe_ratio,
+        'sortino_ratio', ba.sortino_ratio,
+        'risk_free_rate', ba.risk_free_rate,
+        'analysis_date', ba.analysis_date
+    )
+    FROM bond_analysis ba
+    WHERE ba.bond_symbol = bi.bond_symbol 
+      AND ba.user_id = bi.user_id
+), '{}'::json) AS bond_analysis
+
+FROM 
+    bond_investments bi
+
+WHERE 
+    bi.user_id = $1
+    AND ($2 = '' OR to_tsvector('simple', bi.bond_symbol) @@ plainto_tsquery('simple', $2))
+
+ORDER BY 
+    bi.updated_at DESC  
+LIMIT $3
+OFFSET $4;
+
 
 -- name: CreateNewAlternativeInvestment :one
 INSERT INTO alternative_investments (
@@ -340,4 +507,5 @@ FROM bond_data
 UNION ALL
 SELECT *
 FROM alternative_investment_data;
+
 

@@ -176,10 +176,12 @@ func (app *application) debtRoutes() chi.Router {
 func (app *application) investmentPortfolioRoutes() chi.Router {
 	investmentPortfolioRoutes := chi.NewRouter()
 	// stocks
+	investmentPortfolioRoutes.Get("/stocks", app.getAllStockInvestmentByUserIDHandler)
 	investmentPortfolioRoutes.Post("/stocks", app.createNewStockInvestmentHandler)
 	investmentPortfolioRoutes.Patch("/stocks/{stockID}", app.updateStockInvestmentHandler)
 	investmentPortfolioRoutes.Delete("/stocks/{stockID}", app.deleteStockInvestmentByIDHandler)
 	// bonds
+	investmentPortfolioRoutes.Get("/bonds", app.getAllBondInvestmentByUserIDHandler)
 	investmentPortfolioRoutes.Post("/bonds", app.createNewBondInvestmentHandler)
 	investmentPortfolioRoutes.Patch("/bonds/{bondID}", app.updateBondInvestmentHandler)
 	investmentPortfolioRoutes.Delete("/bonds/{bondID}", app.deleteBondInvestmentByIDHandler)

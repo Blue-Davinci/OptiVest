@@ -432,6 +432,159 @@ func (q *Queries) DeleteStockInvestmentByID(ctx context.Context, arg DeleteStock
 	return id, err
 }
 
+const getAllBondInvestmentByUserID = `-- name: GetAllBondInvestmentByUserID :many
+SELECT 
+    bi.id AS bond_id,
+    bi.bond_symbol,
+    bi.quantity,
+    bi.purchase_price,
+    bi.current_value,
+    bi.coupon_rate,
+    bi.maturity_date,
+    bi.purchase_date,
+    bi.created_at AS bond_created_at,
+    bi.updated_at AS bond_updated_at,
+
+    -- Total count of bonds for the user
+    (SELECT COUNT(*) 
+     FROM bond_investments bi2 
+     WHERE bi2.user_id = $1) AS total_bonds,
+
+    -- Sum of all transactions (transaction_amount) for the specific bond
+    (SELECT COALESCE(SUM(it.transaction_amount), 0)::NUMERIC
+     FROM investment_transactions it
+     WHERE it.investment_id = bi.id 
+       AND it.investment_type = 'Bond'
+       AND it.user_id = bi.user_id) AS total_transaction_sum,
+
+    -- Sum of all purchase prices for the specific bond
+    (SELECT COALESCE(SUM(bi2.purchase_price * bi2.quantity), 0)::NUMERIC
+     FROM bond_investments bi2
+     WHERE bi2.user_id = bi.user_id
+       AND bi2.bond_symbol = bi.bond_symbol) AS total_purchase_price_sum,
+
+    -- Transaction details as JSON array, matching InvestmentTransaction struct
+    COALESCE((
+        SELECT json_agg(json_build_object(
+                'id', it.id,
+                'user_id', it.user_id,
+                'investment_type', it.investment_type,
+                'investment_id', it.investment_id,
+                'transaction_type', it.transaction_type,
+                'transaction_date', it.transaction_date,
+                'transaction_amount', it.transaction_amount,
+                'quantity', it.quantity,
+                'created_at', it.created_at,
+                'updated_at', it.updated_at
+            ))
+        FROM investment_transactions it
+        WHERE it.investment_id = bi.id 
+          AND it.investment_type = 'Bond'
+          AND it.user_id = bi.user_id
+    ), '[]'::json) AS transactions,
+
+    -- Bond analysis details as JSON object, matching BondAnalysisStatistics struct
+COALESCE((
+    SELECT json_build_object(
+        'ytm', ba.ytm,
+        'current_yield', ba.current_yield,
+        'macaulay_duration', ba.macaulay_duration,
+        'convexity', ba.convexity,
+        'bond_returns', ba.bond_returns,
+        'annual_return', ba.annual_return,
+        'bond_volatility', ba.bond_volatility,
+        'sharpe_ratio', ba.sharpe_ratio,
+        'sortino_ratio', ba.sortino_ratio,
+        'risk_free_rate', ba.risk_free_rate,
+        'analysis_date', ba.analysis_date
+    )
+    FROM bond_analysis ba
+    WHERE ba.bond_symbol = bi.bond_symbol 
+      AND ba.user_id = bi.user_id
+), '{}'::json) AS bond_analysis
+
+FROM 
+    bond_investments bi
+
+WHERE 
+    bi.user_id = $1
+    AND ($2 = '' OR to_tsvector('simple', bi.bond_symbol) @@ plainto_tsquery('simple', $2))
+
+ORDER BY 
+    bi.updated_at DESC  
+LIMIT $3
+OFFSET $4
+`
+
+type GetAllBondInvestmentByUserIDParams struct {
+	UserID  int64
+	Column2 interface{}
+	Limit   int32
+	Offset  int32
+}
+
+type GetAllBondInvestmentByUserIDRow struct {
+	BondID                int64
+	BondSymbol            string
+	Quantity              string
+	PurchasePrice         string
+	CurrentValue          string
+	CouponRate            sql.NullString
+	MaturityDate          time.Time
+	PurchaseDate          time.Time
+	BondCreatedAt         sql.NullTime
+	BondUpdatedAt         sql.NullTime
+	TotalBonds            int64
+	TotalTransactionSum   string
+	TotalPurchasePriceSum string
+	Transactions          interface{}
+	BondAnalysis          interface{}
+}
+
+func (q *Queries) GetAllBondInvestmentByUserID(ctx context.Context, arg GetAllBondInvestmentByUserIDParams) ([]GetAllBondInvestmentByUserIDRow, error) {
+	rows, err := q.db.QueryContext(ctx, getAllBondInvestmentByUserID,
+		arg.UserID,
+		arg.Column2,
+		arg.Limit,
+		arg.Offset,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetAllBondInvestmentByUserIDRow
+	for rows.Next() {
+		var i GetAllBondInvestmentByUserIDRow
+		if err := rows.Scan(
+			&i.BondID,
+			&i.BondSymbol,
+			&i.Quantity,
+			&i.PurchasePrice,
+			&i.CurrentValue,
+			&i.CouponRate,
+			&i.MaturityDate,
+			&i.PurchaseDate,
+			&i.BondCreatedAt,
+			&i.BondUpdatedAt,
+			&i.TotalBonds,
+			&i.TotalTransactionSum,
+			&i.TotalPurchasePriceSum,
+			&i.Transactions,
+			&i.BondAnalysis,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getAllInvestmentInfoByUserID = `-- name: GetAllInvestmentInfoByUserID :many
 WITH stock_data AS (
     SELECT 'stock' AS investment_type, 
@@ -581,6 +734,161 @@ func (q *Queries) GetAllInvestmentsByUserID(ctx context.Context, userID int64) (
 	for rows.Next() {
 		var i GetAllInvestmentsByUserIDRow
 		if err := rows.Scan(&i.InvestmentType, &i.Investments); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getAllStockInvestmentByUserID = `-- name: GetAllStockInvestmentByUserID :many
+SELECT 
+    si.id AS stock_id,
+    si.stock_symbol,
+    si.quantity,
+    si.purchase_price,
+    si.current_value,
+    si.sector,
+    si.purchase_date,
+    si.dividend_yield,
+    si.dividend_yield_updated_at,
+    si.created_at AS stock_created_at,
+    si.updated_at AS stock_updated_at,
+
+    -- Total count of stocks for the user
+    (SELECT COUNT(*) 
+     FROM stock_investments si2 
+     WHERE si2.user_id = $1) AS total_stocks,
+
+    -- Sum of all transactions (transaction_amount) for the specific stock
+    (SELECT COALESCE(SUM(it.transaction_amount), 0)::NUMERIC
+     FROM investment_transactions it
+     WHERE it.investment_id = si.id 
+       AND it.investment_type = 'Stock'
+       AND it.user_id = si.user_id) AS total_transaction_sum,
+
+    -- Sum of all purchase prices for the specific stock
+    (SELECT COALESCE(SUM(si2.purchase_price * si2.quantity), 0)::NUMERIC
+     FROM stock_investments si2
+     WHERE si2.user_id = si.user_id
+       AND si2.stock_symbol = si.stock_symbol) AS total_purchase_price_sum,
+
+    -- Transaction details as JSON array, matching InvestmentTransaction struct
+COALESCE((
+    SELECT json_agg(json_build_object(
+            'id', it.id,
+            'user_id', it.user_id,
+            'investment_type', it.investment_type,
+            'investment_id', it.investment_id,
+            'transaction_type', it.transaction_type,
+            'transaction_date', it.transaction_date,
+            'transaction_amount', it.transaction_amount,
+            'quantity', it.quantity,
+            'created_at', it.created_at,
+            'updated_at', it.updated_at
+        ))
+    FROM investment_transactions it
+    WHERE it.investment_id = si.id 
+      AND it.investment_type = 'Stock'
+      AND it.user_id = si.user_id
+), '[]'::json) AS transactions,
+
+    -- Stock analysis details as JSON object, matching StockAnalysis struct
+COALESCE((
+        SELECT json_build_object(
+            'stock_symbol', sa.stock_symbol,
+            'quantity', si.quantity,
+            'purchase_price', si.purchase_price,
+            'sector', si.sector,
+            'dividend_yield', si.dividend_yield,
+            'returns', sa.returns,
+            'sharpe_ratio', sa.sharpe_ratio,
+            'sortino_ratio', sa.sortino_ratio,
+            'sentiment_label', sa.sentiment_label,
+            'sector_performance', sa.sector_performance
+        )
+        FROM stock_analysis sa
+        WHERE sa.stock_symbol = si.stock_symbol 
+          AND sa.user_id = si.user_id
+), '{}'::json) AS stock_analysis
+
+FROM 
+    stock_investments si
+
+WHERE 
+    si.user_id = $1
+    AND ($2 = '' OR to_tsvector('simple', si.stock_symbol) @@ plainto_tsquery('simple', $2))
+
+ORDER BY 
+    si.updated_at DESC  
+LIMIT $3
+OFFSET $4
+`
+
+type GetAllStockInvestmentByUserIDParams struct {
+	UserID  int64
+	Column2 interface{}
+	Limit   int32
+	Offset  int32
+}
+
+type GetAllStockInvestmentByUserIDRow struct {
+	StockID                int64
+	StockSymbol            string
+	Quantity               string
+	PurchasePrice          string
+	CurrentValue           string
+	Sector                 sql.NullString
+	PurchaseDate           time.Time
+	DividendYield          sql.NullString
+	DividendYieldUpdatedAt sql.NullTime
+	StockCreatedAt         sql.NullTime
+	StockUpdatedAt         sql.NullTime
+	TotalStocks            int64
+	TotalTransactionSum    string
+	TotalPurchasePriceSum  string
+	Transactions           interface{}
+	StockAnalysis          interface{}
+}
+
+func (q *Queries) GetAllStockInvestmentByUserID(ctx context.Context, arg GetAllStockInvestmentByUserIDParams) ([]GetAllStockInvestmentByUserIDRow, error) {
+	rows, err := q.db.QueryContext(ctx, getAllStockInvestmentByUserID,
+		arg.UserID,
+		arg.Column2,
+		arg.Limit,
+		arg.Offset,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetAllStockInvestmentByUserIDRow
+	for rows.Next() {
+		var i GetAllStockInvestmentByUserIDRow
+		if err := rows.Scan(
+			&i.StockID,
+			&i.StockSymbol,
+			&i.Quantity,
+			&i.PurchasePrice,
+			&i.CurrentValue,
+			&i.Sector,
+			&i.PurchaseDate,
+			&i.DividendYield,
+			&i.DividendYieldUpdatedAt,
+			&i.StockCreatedAt,
+			&i.StockUpdatedAt,
+			&i.TotalStocks,
+			&i.TotalTransactionSum,
+			&i.TotalPurchasePriceSum,
+			&i.Transactions,
+			&i.StockAnalysis,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

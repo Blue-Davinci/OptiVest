@@ -561,11 +561,11 @@ func (app *application) getAllRecurringExpensesByUserIDHandler(w http.ResponseWr
 // We than validate the income and save it to the database.
 func (app *application) createNewIncomeHandler(w http.ResponseWriter, r *http.Request) {
 	var input struct {
-		Source       string          `json:"source"`
-		CurrencyCode string          `json:"currency_code"`
-		Amount       decimal.Decimal `json:"amount_original"`
-		Description  string          `json:"description"`
-		DateReceived time.Time       `json:"date_received"`
+		Source       string           `json:"source"`
+		CurrencyCode string           `json:"currency_code"`
+		Amount       decimal.Decimal  `json:"amount_original"`
+		Description  string           `json:"description"`
+		DateReceived data.CustomTime1 `json:"date_received"`
 	}
 	// read the request body into the input struct
 	err := app.readJSON(w, r, &input)
@@ -582,7 +582,7 @@ func (app *application) createNewIncomeHandler(w http.ResponseWriter, r *http.Re
 		OriginalCurrencyCode: input.CurrencyCode,
 		AmountOriginal:       input.Amount,
 		Description:          input.Description,
-		DateReceived:         input.DateReceived,
+		DateReceived:         input.DateReceived.Time,
 	}
 	// create a validator
 	v := validator.New()

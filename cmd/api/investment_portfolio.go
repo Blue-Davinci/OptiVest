@@ -190,6 +190,45 @@ func (app *application) deleteStockInvestmentByIDHandler(w http.ResponseWriter, 
 	}
 }
 
+// getAllStockInvestmentByUserIDHandler() is a handler responsible for getting all stock investments by user ID
+// This route supports both pagination and searching via the Name parameter for specific symbols
+// We get the user ID from the context, we then proceed to get all stock investments
+func (app *application) getAllStockInvestmentByUserIDHandler(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Name string
+		data.Filters
+	}
+	//validate if queries are provided
+	v := validator.New()
+	// Call r.URL.Query() to get the url.Values map containing the query string data.
+	qs := r.URL.Query()
+	//get the page & pagesizes as ints and set to the embedded struct
+	input.Name = app.readString(qs, "name", "")
+	input.Filters.Page = app.readInt(qs, "page", 1, v)
+	input.Filters.PageSize = app.readInt(qs, "page_size", 20, v)
+	// get the sort values falling back to "created_at" if it is not provided
+	input.Filters.Sort = app.readString(qs, "sort", "created_at")
+	// Add the supported sort values for this endpoint to the sort safelist.
+	input.Filters.SortSafelist = []string{"created_at", "-created_at"}
+	// Perform validation
+	if data.ValidateFilters(v, input.Filters); !v.Valid() {
+		app.failedValidationResponse(w, r, v.Errors)
+		return
+	}
+	// get our stock information
+	stock, metadata, err := app.models.InvestmentPortfolioManager.GetAllStockInvestmentByUserID(app.contextGetUser(r).ID, input.Name, input.Filters)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+		return
+	}
+	// send response
+	err = app.writeJSON(w, http.StatusOK, envelope{"stock": stock, "metadata": metadata}, nil)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+	}
+
+}
+
 // createNewBondInvestmentHandler() is a handler responsible for the creation of a new bond investment
 // straight forward, we verify the data the user provides, if everything is okay, we proceed with
 // a save using CreateNewBondInvestment()
@@ -343,6 +382,44 @@ func (app *application) deleteBondInvestmentByIDHandler(w http.ResponseWriter, r
 	// send response
 	message := fmt.Sprintf("bond investment with ID %d deleted successfully", deletedBondID)
 	err = app.writeJSON(w, http.StatusOK, envelope{"message": message}, nil)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+	}
+}
+
+// getAllBondInvestmentByUserIDHandler() is a handler responsible for getting all bond investments by user ID
+// This route supports both pagination and searching via the Name parameter for specific symbols
+// We get the user ID from the context, we then proceed to get all bond investments
+func (app *application) getAllBondInvestmentByUserIDHandler(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Name string
+		data.Filters
+	}
+	//validate if queries are provided
+	v := validator.New()
+	// Call r.URL.Query() to get the url.Values map containing the query string data.
+	qs := r.URL.Query()
+	//get the page & pagesizes as ints and set to the embedded struct
+	input.Name = app.readString(qs, "name", "")
+	input.Filters.Page = app.readInt(qs, "page", 1, v)
+	input.Filters.PageSize = app.readInt(qs, "page_size", 20, v)
+	// get the sort values falling back to "created_at" if it is not provided
+	input.Filters.Sort = app.readString(qs, "sort", "created_at")
+	// Add the supported sort values for this endpoint to the sort safelist.
+	input.Filters.SortSafelist = []string{"created_at", "-created_at"}
+	// Perform validation
+	if data.ValidateFilters(v, input.Filters); !v.Valid() {
+		app.failedValidationResponse(w, r, v.Errors)
+		return
+	}
+	// get our bond information
+	bond, metadata, err := app.models.InvestmentPortfolioManager.GetAllBondInvestmentByUserID(app.contextGetUser(r).ID, input.Name, input.Filters)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+		return
+	}
+	// send response
+	err = app.writeJSON(w, http.StatusOK, envelope{"bond": bond, "metadata": metadata}, nil)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 	}
@@ -554,12 +631,12 @@ func (app *application) deleteAlternativeInvestmentByIDHandler(w http.ResponseWr
 func (app *application) createNewInvestmentTransactionHandler(w http.ResponseWriter, r *http.Request) {
 	// input for user input
 	var input struct {
-		InvestmentType    string          `json:"investment_type"`
-		InvestmentID      int64           `json:"investment_id"`
-		TransactionType   string          `json:"transaction_type"`
-		TransactionAmount decimal.Decimal `json:"transaction_amount"`
-		TransactionDate   time.Time       `json:"transaction_date"`
-		Quantity          decimal.Decimal `json:"quantity"`
+		InvestmentType    string           `json:"investment_type"`
+		InvestmentID      int64            `json:"investment_id"`
+		TransactionType   string           `json:"transaction_type"`
+		TransactionAmount decimal.Decimal  `json:"transaction_amount"`
+		TransactionDate   data.CustomTime1 `json:"transaction_date"`
+		Quantity          decimal.Decimal  `json:"quantity"`
 	}
 	// decode to input
 	err := app.readJSON(w, r, &input)

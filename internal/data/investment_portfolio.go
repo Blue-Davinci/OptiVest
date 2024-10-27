@@ -170,7 +170,7 @@ type InvestmentTransaction struct {
 	InvestmentType    database.InvestmentTypeEnum  `json:"investment_type"`    // Type of investment (Stock, Bond, Alternative)
 	InvestmentID      int64                        `json:"investment_id"`      // ID of the investment
 	TransactionType   database.TransactionTypeEnum `json:"transaction_type"`   // Type of transaction (buy, sell, other)
-	TransactionDate   time.Time                    `json:"transaction_date"`   // Date of the transaction
+	TransactionDate   CustomTime1                  `json:"transaction_date"`   // Date of the transaction
 	TransactionAmount decimal.Decimal              `json:"transaction_amount"` // Amount involved in the transaction
 	Quantity          decimal.Decimal              `json:"quantity"`           // Number of units bought/sold
 	CreatedAt         time.Time                    `json:"created_at"`         // Record creation timestamp
@@ -179,15 +179,17 @@ type InvestmentTransaction struct {
 
 // BondAnalysisStatistics struct to hold the bond analysis statistics
 type BondAnalysisStatistics struct {
-	YTM              decimal.Decimal
-	CurrentYield     decimal.Decimal
-	MacaulayDuration decimal.Decimal
-	Convexity        decimal.Decimal
-	BondReturns      []decimal.Decimal
-	AnnualReturn     decimal.Decimal
-	BondVolatility   decimal.Decimal
-	SharpeRatio      decimal.Decimal
-	SortinoRatio     decimal.Decimal
+	YTM              decimal.Decimal   `json:"ytm"`
+	CurrentYield     decimal.Decimal   `json:"current_yield"`
+	MacaulayDuration decimal.Decimal   `json:"macaulay_duration"`
+	Convexity        decimal.Decimal   `json:"convexity"`
+	BondReturns      []decimal.Decimal `json:"returns"`
+	AnnualReturn     decimal.Decimal   `json:"annual_return"`
+	BondVolatility   decimal.Decimal   `json:"bond_volatility"`
+	SharpeRatio      decimal.Decimal   `json:"sharpe_ratio"`
+	SortinoRatio     decimal.Decimal   `json:"sortino_ratio"`
+	RiskFreeRate     decimal.Decimal   `json:"risk_free_rate,omitempty"`
+	AnalysisDate     time.Time         `json:"analysis_date,omitempty"`
 }
 
 // StockAnalysisStatistics struct to hold the stock analysis statistics
@@ -220,6 +222,23 @@ type InvestmentSummary struct {
 	SortinoRatio      decimal.Decimal `json:"sortino_ratio"`
 	SectorPerformance decimal.Decimal `json:"sector_performance"`
 	SentimentLabel    string          `json:"sentiment_label"`
+}
+
+// EnrichedStockInvestment struct to hold the enriched stock investment
+type EnrichedStockInvestment struct {
+	Stock                *StockInvestment         `json:"stock"`
+	Transactions         []*InvestmentTransaction `json:"transactions"`
+	Analysis             *StockAnalysis           `json:"analysis"`
+	TotalTransactionsSum decimal.Decimal          `json:"total_transactions_sum"`
+	TotalPurchaseSum     decimal.Decimal          `json:"total_purchase_sum"`
+}
+
+type EnrichedBondInvestment struct {
+	Bond                 *BondInvestment          `json:"bond"`
+	Transactions         []*InvestmentTransaction `json:"transactions"`
+	Analysis             *BondAnalysisStatistics  `json:"analysis"`
+	TotalTransactionsSum decimal.Decimal          `json:"total_transactions_sum"`
+	TotalPurchaseSum     decimal.Decimal          `json:"total_purchase_sum"`
 }
 
 func ValidateURLID(v *validator.Validator, stockID int64, fieldName string) {
@@ -280,7 +299,7 @@ func ValidateInvestmentTransaction(v *validator.Validator, transaction *Investme
 	// investment id
 	ValidateURLID(v, transaction.InvestmentID, "investment_id")
 	// transaction date
-	ValidatePurchaseDate(v, transaction.TransactionDate, "transaction_date")
+	ValidatePurchaseDate(v, transaction.TransactionDate.Time, "transaction_date")
 	ValidateAmount(v, transaction.TransactionAmount, "transaction_amount")
 	ValidateAmount(v, transaction.Quantity, "quantity")
 }
@@ -441,6 +460,80 @@ func (m InvestmentPortfolioModel) DeleteStockInvestmentByID(userID, stockID int6
 	return deletedStockID, nil
 }
 
+// GetAllStockInvestmentByUserID() retrieves all stock investments by user id.
+// This route supports both pagination as well as a name search for the stock symbol.
+// We return an []*enrickedstockinvestment, metadata and an error if there was an issue retrieving the stock investments.
+// For the stock transactions, we will unmarshal to the transaction investments. For the stock analysis, we will unmarshal to the stock analysis.
+func (m InvestmentPortfolioModel) GetAllStockInvestmentByUserID(userID int64, stockSymbol string, filters Filters) ([]*EnrichedStockInvestment, Metadata, error) {
+	ctx, cancel := contextGenerator(context.Background(), DefaultInvPortContextTimeout)
+	defer cancel()
+	// Retrieve the stock investments from the database.
+	stockInvestments, err := m.DB.GetAllStockInvestmentByUserID(ctx, database.GetAllStockInvestmentByUserIDParams{
+		UserID:  userID,
+		Column2: stockSymbol,
+		Limit:   int32(filters.limit()),
+		Offset:  int32(filters.offset()),
+	})
+	if err != nil {
+		switch {
+		case err == sql.ErrNoRows:
+			return nil, Metadata{}, ErrGeneralRecordNotFound
+		default:
+			return nil, Metadata{}, err
+		}
+	}
+	// check length
+	if len(stockInvestments) == 0 {
+		return nil, Metadata{}, ErrGeneralRecordNotFound
+	}
+
+	var enrichedStockInvestments []*EnrichedStockInvestment
+	// totals
+	totalCount := 0
+	for _, stockInvestment := range stockInvestments {
+		totalCount = int(stockInvestment.TotalStocks)
+		stock := populateStockInvestment(stockInvestment)
+
+		// Unmarshal stock_analysis to a map (single JSON object)
+		var stockAnalysis *StockAnalysis
+		analysisData, ok := stockInvestment.StockAnalysis.([]byte)
+		if !ok {
+			fmt.Println("error asserting stock analysis to []byte")
+			continue
+		}
+		err := json.Unmarshal(analysisData, &stockAnalysis)
+		if err != nil {
+			fmt.Println("error unmarshalling stock analysis: ", err)
+		}
+
+		// Unmarshal transactions to an array of JSON objects
+		var investmentTransactions []*InvestmentTransaction
+		transactionsData, ok := stockInvestment.Transactions.([]byte)
+		if !ok {
+			fmt.Println("error asserting stock transactions to []byte")
+			continue
+		}
+		err = json.Unmarshal(transactionsData, &investmentTransactions)
+		if err != nil {
+			fmt.Println("error unmarshalling stock transactions: ", err)
+		}
+
+		// Populate the enriched stock investment struct
+		enrichedStockInvestments = append(enrichedStockInvestments, &EnrichedStockInvestment{
+			Stock:                stock,
+			Transactions:         investmentTransactions,
+			Analysis:             stockAnalysis,
+			TotalTransactionsSum: decimal.RequireFromString(stockInvestment.TotalPurchasePriceSum),
+			TotalPurchaseSum:     decimal.RequireFromString(stockInvestment.TotalPurchasePriceSum),
+		})
+	}
+
+	// calculate metadata
+	metadata := calculateMetadata(filters.Page, filters.PageSize, totalCount)
+	// Return the enriched stock investments, metadata and nil if there was no error.
+	return enrichedStockInvestments, metadata, nil
+}
+
 // CreateNewBondInvestment() creates a new bond investment in the database.
 // We take in a user id, and a pointer to a bond investment.
 // We return an error if there was an issue creating the bond investment.
@@ -546,6 +639,79 @@ func (m InvestmentPortfolioModel) DeleteBondInvestmentByID(userID, bondID int64)
 	}
 	// Return the bond ID of the deleted bond investment and nil if there was no error.
 	return deletedBondID, nil
+}
+
+// GetAllBondInvestmentByUserID() retrieves all bond investments by user id.
+// This route supports both pagination as well as a name search for the bond symbol.
+// We return an []*enrickedbondinvestment, metadata and an error if there was an issue retrieving the bond investments.
+// For the bond transactions, we will unmarshal to the transaction investments. For the bond analysis, we will unmarshal to the bond analysis.
+func (m InvestmentPortfolioModel) GetAllBondInvestmentByUserID(userID int64, bondSymbol string, filters Filters) ([]*EnrichedBondInvestment, Metadata, error) {
+	ctx, cancel := contextGenerator(context.Background(), DefaultInvPortContextTimeout)
+	defer cancel()
+	// Retrieve the bond investments from the database.
+	bondInvestments, err := m.DB.GetAllBondInvestmentByUserID(ctx, database.GetAllBondInvestmentByUserIDParams{
+		UserID:  userID,
+		Column2: bondSymbol,
+		Limit:   int32(filters.limit()),
+		Offset:  int32(filters.offset()),
+	})
+	if err != nil {
+		switch {
+		case err == sql.ErrNoRows:
+			return nil, Metadata{}, ErrGeneralRecordNotFound
+		default:
+			return nil, Metadata{}, err
+		}
+	}
+	// check length
+	if len(bondInvestments) == 0 {
+		return nil, Metadata{}, ErrGeneralRecordNotFound
+	}
+
+	var enrichedBondInvestments []*EnrichedBondInvestment
+	// totals
+	totalCount := 0
+	for _, bondInvestment := range bondInvestments {
+		totalCount = int(bondInvestment.TotalBonds)
+		bond := populateBondInvestment(bondInvestment)
+		// Unmarshal bond_analysis to a map (single JSON object)
+		var bondAnalysis *BondAnalysisStatistics
+		analysisData, ok := bondInvestment.BondAnalysis.([]byte)
+		if !ok {
+			fmt.Println("error asserting bond analysis to []byte")
+			continue
+		}
+		err := json.Unmarshal(analysisData, &bondAnalysis)
+		if err != nil {
+			fmt.Println("error unmarshalling bond analysis 1: ", err)
+		}
+
+		// Unmarshal transactions to an array of JSON objects
+		var investmentTransactions []*InvestmentTransaction
+		transactionsData, ok := bondInvestment.Transactions.([]byte)
+		if !ok {
+			fmt.Println("error asserting bond transactions to []byte")
+			continue
+		}
+		err = json.Unmarshal(transactionsData, &investmentTransactions)
+		if err != nil {
+			fmt.Println("error unmarshalling bond transactions 2: ", err)
+		}
+
+		// Populate the enriched bond investment struct
+		enrichedBondInvestments = append(enrichedBondInvestments, &EnrichedBondInvestment{
+			Bond:                 bond,
+			Transactions:         investmentTransactions,
+			Analysis:             bondAnalysis,
+			TotalTransactionsSum: decimal.RequireFromString(bondInvestment.TotalPurchasePriceSum),
+			TotalPurchaseSum:     decimal.RequireFromString(bondInvestment.TotalPurchasePriceSum),
+		})
+	}
+
+	// calculate metadata
+	metadata := calculateMetadata(filters.Page, filters.PageSize, totalCount)
+	// Return the enriched bond investments, metadata and nil if there was no error.
+	return enrichedBondInvestments, metadata, nil
 }
 
 // GetBondByBondID() retrieves a bond investment by bond id.
@@ -694,7 +860,7 @@ func (m InvestmentPortfolioModel) CreateNewInvestmentTransaction(userID int64, i
 		InvestmentType:    investmentTransaction.InvestmentType,
 		InvestmentID:      investmentTransaction.InvestmentID,
 		TransactionType:   investmentTransaction.TransactionType,
-		TransactionDate:   investmentTransaction.TransactionDate,
+		TransactionDate:   investmentTransaction.TransactionDate.Time,
 		TransactionAmount: investmentTransaction.TransactionAmount.String(),
 		Quantity:          investmentTransaction.Quantity.String(),
 	})
@@ -1003,6 +1169,19 @@ func populateBondInvestment(bondInvestmentRow interface{}) *BondInvestment {
 			CreatedAt:     bondInvestment.CreatedAt.Time,
 			UpdatedAt:     bondInvestment.UpdatedAt.Time,
 		}
+	case database.GetAllBondInvestmentByUserIDRow:
+		return &BondInvestment{
+			ID:            bondInvestment.BondID,
+			BondSymbol:    bondInvestment.BondSymbol,
+			Quantity:      decimal.RequireFromString(bondInvestment.Quantity),
+			PurchasePrice: decimal.RequireFromString(bondInvestment.PurchasePrice),
+			CurrentValue:  decimal.RequireFromString(bondInvestment.CurrentValue),
+			CouponRate:    decimal.RequireFromString(bondInvestment.CouponRate.String),
+			MaturityDate:  bondInvestment.MaturityDate,
+			PurchaseDate:  bondInvestment.PurchaseDate,
+			CreatedAt:     bondInvestment.BondCreatedAt.Time,
+			UpdatedAt:     bondInvestment.BondUpdatedAt.Time,
+		}
 	default:
 		return nil
 	}
@@ -1027,6 +1206,20 @@ func populateStockInvestment(stockInvestmentRow interface{}) *StockInvestment {
 			DividendYieldUpdatedAt: stockInvestment.DividendYieldUpdatedAt.Time,
 			CreatedAt:              stockInvestment.CreatedAt.Time,
 			UpdatedAt:              stockInvestment.UpdatedAt.Time,
+		}
+	case database.GetAllStockInvestmentByUserIDRow:
+		return &StockInvestment{
+			ID:                     stockInvestment.StockID,
+			StockSymbol:            stockInvestment.StockSymbol,
+			Quantity:               decimal.RequireFromString(stockInvestment.Quantity),
+			PurchasePrice:          decimal.RequireFromString(stockInvestment.PurchasePrice),
+			CurrentValue:           decimal.RequireFromString(stockInvestment.CurrentValue),
+			Sector:                 stockInvestment.Sector.String,
+			PurchaseDate:           stockInvestment.PurchaseDate,
+			DividendYield:          decimal.RequireFromString(stockInvestment.DividendYield.String),
+			DividendYieldUpdatedAt: stockInvestment.DividendYieldUpdatedAt.Time,
+			CreatedAt:              stockInvestment.StockCreatedAt.Time,
+			UpdatedAt:              stockInvestment.StockUpdatedAt.Time,
 		}
 	default:
 		return nil
