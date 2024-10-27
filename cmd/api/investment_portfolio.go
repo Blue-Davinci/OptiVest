@@ -33,13 +33,13 @@ import (
 func (app *application) createNewStockInvestmentHandler(w http.ResponseWriter, r *http.Request) {
 	// input for user input
 	var input struct {
-		StockSymbol   string          `json:"stock_symbol"`
-		Quantity      decimal.Decimal `json:"quantity"`
-		PurchasePrice decimal.Decimal `json:"purchase_price"`
-		CurrentValue  decimal.Decimal `json:"current_value"`
-		Sector        string          `json:"sector"`
-		PurchaseDate  time.Time       `json:"purchase_date"`
-		DividendYield decimal.Decimal `json:"dividend_yield"`
+		StockSymbol   string           `json:"stock_symbol"`
+		Quantity      decimal.Decimal  `json:"quantity"`
+		PurchasePrice decimal.Decimal  `json:"purchase_price"`
+		CurrentValue  decimal.Decimal  `json:"current_value"`
+		Sector        string           `json:"sector"`
+		PurchaseDate  data.CustomTime1 `json:"purchase_date"`
+		DividendYield decimal.Decimal  `json:"dividend_yield"`
 	}
 	// decode to inout
 	err := app.readJSON(w, r, &input)
@@ -59,7 +59,7 @@ func (app *application) createNewStockInvestmentHandler(w http.ResponseWriter, r
 		PurchasePrice: input.PurchasePrice,
 		CurrentValue:  input.CurrentValue,
 		Sector:        input.Sector,
-		PurchaseDate:  input.PurchaseDate,
+		PurchaseDate:  input.PurchaseDate.Time,
 		DividendYield: input.DividendYield,
 	}
 	// validations
@@ -268,13 +268,13 @@ func (app *application) getAllStockInvestmentByUserIDHandler(w http.ResponseWrit
 func (app *application) createNewBondInvestmentHandler(w http.ResponseWriter, r *http.Request) {
 	// create input var
 	var input struct {
-		BondSymbol    string          `json:"bond_symbol"`
-		Quantity      decimal.Decimal `json:"quantity"`
-		PurchasePrice decimal.Decimal `json:"purchase_price"`
-		CurrentValue  decimal.Decimal `json:"current_value"`
-		CouponRate    decimal.Decimal `json:"coupon_rate"`
-		MaturityDate  time.Time       `json:"maturity_date"`
-		PurchaseDate  time.Time       `json:"purchase_date"`
+		BondSymbol    string           `json:"bond_symbol"`
+		Quantity      decimal.Decimal  `json:"quantity"`
+		PurchasePrice decimal.Decimal  `json:"purchase_price"`
+		CurrentValue  decimal.Decimal  `json:"current_value"`
+		CouponRate    decimal.Decimal  `json:"coupon_rate"`
+		MaturityDate  data.CustomTime1 `json:"maturity_date"`
+		PurchaseDate  data.CustomTime1 `json:"purchase_date"`
 	}
 	// decode to input
 	err := app.readJSON(w, r, &input)
@@ -291,8 +291,8 @@ func (app *application) createNewBondInvestmentHandler(w http.ResponseWriter, r 
 		PurchasePrice: input.PurchasePrice,
 		CurrentValue:  input.CurrentValue,
 		CouponRate:    input.CouponRate,
-		MaturityDate:  input.MaturityDate,
-		PurchaseDate:  input.PurchaseDate,
+		MaturityDate:  input.MaturityDate.Time,
+		PurchaseDate:  input.PurchaseDate.Time,
 	}
 	// make a validator
 	v := validator.New()
@@ -499,15 +499,15 @@ func (app *application) getAllBondInvestmentByUserIDHandler(w http.ResponseWrite
 func (app *application) createNewAlternativeInvestmentHandler(w http.ResponseWriter, r *http.Request) {
 	// create input var
 	var input struct {
-		InvestmentType string          `json:"investment_type"`
-		InvesmentName  string          `json:"investment_name"`
-		IsBusiness     bool            `json:"is_business"`
-		Quantity       decimal.Decimal `json:"quantity"`
-		AnnualRevenue  decimal.Decimal `json:"annual_revenue"` // must only for business
-		AcquiredAt     time.Time       `json:"acquired_at"`
-		ProfitMargin   decimal.Decimal `json:"profit_margin"` // must only for business
-		Valuation      decimal.Decimal `json:"valuation"`
-		Location       string          `json:"location"`
+		InvestmentType string           `json:"investment_type"`
+		InvesmentName  string           `json:"investment_name"`
+		IsBusiness     bool             `json:"is_business"`
+		Quantity       decimal.Decimal  `json:"quantity"`
+		AnnualRevenue  decimal.Decimal  `json:"annual_revenue"` // must only for business
+		AcquiredAt     data.CustomTime1 `json:"acquired_at"`
+		ProfitMargin   decimal.Decimal  `json:"profit_margin"` // must only for business
+		Valuation      decimal.Decimal  `json:"valuation"`
+		Location       string           `json:"location"`
 	}
 	// decode to input
 	err := app.readJSON(w, r, &input)
@@ -524,7 +524,7 @@ func (app *application) createNewAlternativeInvestmentHandler(w http.ResponseWri
 		IsBusiness:     input.IsBusiness,
 		Quantity:       input.Quantity,
 		AnnualRevenue:  input.AnnualRevenue,
-		AcquiredAt:     input.AcquiredAt,
+		AcquiredAt:     input.AcquiredAt.Time,
 		ProfitMargin:   input.ProfitMargin,
 		Valuation:      input.Valuation,
 		Location:       input.Location,
