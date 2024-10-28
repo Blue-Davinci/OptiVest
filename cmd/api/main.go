@@ -207,12 +207,9 @@ func main() {
 	flag.StringVar(&cfg.encryption.key, "encryption-key", os.Getenv("OPTIVEST_DATA_ENCRYPTION_KEY"), "Encryption key")
 	// CORS configuration
 	flag.Func("cors-trusted-origins", "Trusted CORS origins (space separated)", func(val string) error {
-		defaultCorsTrustedOrigins := "http://localhost:5173"
-		if val == "" {
-			val = defaultCorsTrustedOrigins
-		}
 		cfg.cors.trustedOrigins = strings.Fields(val)
 		return nil
+
 	})
 	// Scraper settings
 	flag.IntVar(&cfg.scraper.nooffeedstofetch, "scraper-routines", 5, "Number of feeds to fetch concurrently")

@@ -15,6 +15,10 @@ import (
 	"go.uber.org/zap"
 )
 
+var (
+	allowedWSOrigins = []string{"http://localhost:5173", ""}
+)
+
 // wsHandler() is a method that will handle the WebSocket connections for our application.
 // It will upgrade the connection to a WebSocket connection and then authenticate the user
 // that is trying to connect to the WebSocket. If the user is authenticated, we will then
@@ -23,20 +27,53 @@ import (
 // We will also load any pending notifications for the user and send them to the user via the
 // WebSocket connection.
 func (app *application) wsHandler(w http.ResponseWriter, r *http.Request) {
+	app.logger.Info(("Allowed Origins: "), zap.Strings("allowedWSOrigins", allowedWSOrigins))
+	// Set up the WebSocket upgrader with the CheckOrigin function
+	app.WebSocketUpgrader = websocket.Upgrader{
+		CheckOrigin: func(r *http.Request) bool {
+			origin := r.Header.Get("Origin")
+			app.logger.Info("WebSocket connection attempt", zap.String("origin", origin))
+			for _, allowedOrigins := range allowedWSOrigins {
+				if origin == allowedOrigins {
+					return true
+				}
+			}
+			return false
+		},
+	}
+
+	// Upgrade the HTTP connection to a WebSocket connection
 	conn, err := app.WebSocketUpgrader.Upgrade(w, r, nil)
 	if err != nil {
 		app.logger.Error("WebSocket upgrade error", zap.Error(err))
-		// Call the error response function without the connection
-		app.wsWebSocketUpgradeError(nil) // Pass nil since the connection upgrade failed
+		app.wsWebSocketUpgradeError(nil)
 		return
 	}
-	// Check if we have reached the maximum number of connections
+
+	// Limit WebSocket connections if necessary
 	if app.limitWsConnections() {
 		app.wsMaxConnectionsResponse(conn)
 		return
 	}
+
+	// Listen for the initial authentication message
+	_, message, err := conn.ReadMessage()
+	if err != nil {
+		app.logger.Error("Error reading initial message", zap.Error(err))
+		return
+	}
+	// Parse the message to check for the token
+	var authMessage struct {
+		Type  string `json:"type"`
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(message, &authMessage); err != nil {
+		app.logger.Error("Invalid authentication message format", zap.Error(err))
+		return
+	}
+	app.logger.Info("Authentication message received", zap.String("type", authMessage.Type), zap.String("token", authMessage.Token))
 	// Authenticate the user
-	user, err := app.authenticateWSUser(r)
+	user, err := app.authenticateWSUser(authMessage.Token)
 	if err != nil || user == nil {
 		app.wsInvalidAuthenticationResponse(conn)
 		return
@@ -351,10 +388,15 @@ func (app *application) publishNotification(userID int64, notificationContent da
 // It will use the same logic as the authenticate middleware. but will be used for the websocket
 // routes.
 // We will return a user and an error if there is an issue taking in a http.Request
-func (app *application) authenticateWSUser(r *http.Request) (*data.User, error) {
-	user, err := app.aunthenticatorHelper(r)
+func (app *application) authenticateWSUser(token string) (*data.User, error) {
+	user, err := app.models.Users.GetForToken(data.ScopeAuthentication, token, app.config.encryption.key)
 	if err != nil {
-		return nil, err
+		switch {
+		case errors.Is(err, data.ErrGeneralRecordNotFound):
+			return nil, ErrInvalidAuthentication
+		default:
+			return nil, ErrInvalidAuthentication
+		}
 	}
 	if user == data.AnonymousUser {
 		app.logger.Info("Anonymous user detected")
@@ -367,14 +409,14 @@ func (app *application) authenticateWSUser(r *http.Request) (*data.User, error) 
 func (app *application) simulateGoalCompletionNotifications() {
 	pendingKey := fmt.Sprintf("%s:%d", data.RedisNotManPendingNotificationKey, 1)
 	for {
-		time.Sleep(5 * time.Second) // Simulate goal completion
+		time.Sleep(15 * time.Second) // Simulate goal completion
 		// send notification vial pubishNotification
 		notificationContent := data.NotificationContent{
 			NotificationID: 1,
 			Message:        "Congratulations! You have completed your goal.",
 			Meta: data.NotificationMeta{
-				Url:      "https://example.com/goals/1",
-				ImageUrl: "https://example.com/images/goal.png",
+				Url:      "http://localhost:5173/dashboard/notifications",
+				ImageUrl: "https://images.unsplash.com/photo-1727886684068-957132ac7e08?q=80&w=1472&auto=format&fit=crop&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D",
 				Tags:     "goal,completed",
 			},
 		}

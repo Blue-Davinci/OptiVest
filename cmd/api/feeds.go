@@ -7,6 +7,7 @@ import (
 
 	"github.com/Blue-Davinci/OptiVest/internal/data"
 	"github.com/Blue-Davinci/OptiVest/internal/validator"
+	"go.uber.org/zap"
 )
 
 // createNewFeedHandler() is a handler rresponsible for creating a new feed
@@ -243,6 +244,53 @@ func (app *application) getAllRSSPostWithFavoriteTagsHandler(w http.ResponseWrit
 	}
 	// send the response
 	err = app.writeJSON(w, http.StatusOK, envelope{"metadata": metadata, "posts": posts}, nil)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+	}
+
+	notificationContent := data.NotificationContent{
+		NotificationID: 1,
+		Message:        "Congratulations! You have gotten your first posts!.",
+		Meta: data.NotificationMeta{
+			Url:      "http://localhost:5173/dashboard/notifications",
+			ImageUrl: "https://images.unsplash.com/photo-1729429943621-90bc7c346e13?w=500&auto=format&fit=crop&q=60&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxmZWF0dXJlZC1waG90b3MtZmVlZHw4fHx8ZW58MHx8fHx8",
+			Tags:     "goal,completed",
+		},
+	}
+	err = app.publishNotification(1, notificationContent)
+	if err != nil {
+		app.logger.Info("error publishing notification", zap.Error(err))
+	}
+}
+
+// getRssFeedPostByIDHandler() is a handler responsible for getting a post by its ID
+// We will recieve the post ID from the URL, validate it, and send it back
+func (app *application) getRssFeedPostByIDHandler(w http.ResponseWriter, r *http.Request) {
+	// get the post ID from the URL
+	postID, err := app.readIDParam(r, "postID")
+	if err != nil {
+		app.notFoundResponse(w, r)
+		return
+	}
+	// validate the post ID
+	v := validator.New()
+	if data.ValidateURLID(v, postID, "postID"); !v.Valid() {
+		app.failedValidationResponse(w, r, v.Errors)
+		return
+	}
+	// get the post
+	post, err := app.models.FeedManager.GetRssFeedPostByID(postID)
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrGeneralRecordNotFound):
+			app.notFoundResponse(w, r)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
+	// send the response
+	err = app.writeJSON(w, http.StatusOK, envelope{"post": post}, nil)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 	}
