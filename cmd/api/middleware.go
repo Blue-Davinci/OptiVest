@@ -173,25 +173,25 @@ func (app *application) rateLimit(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 	})
 }
-
 func (app *application) metrics(next http.Handler) http.Handler {
 	// Initialize the new expvar variables when the middleware chain is first built.
 	totalRequestsReceived := expvar.NewInt("total_requests_received")
 	totalResponsesSent := expvar.NewInt("total_responses_sent")
 	totalProcessingTimeMicroseconds := expvar.NewInt("total_processing_time_μs")
-	// This will hold the response codes themselves
 	totalResponsesSentByStatus := expvar.NewMap("total_responses_sent_by_status")
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Use the Add() method to increment the number of requests received by 1.
-		totalRequestsReceived.Add(1)
-		// Use httpsnoop to capture the response statuses and executing the next handler in the chain
-		metrics := httpsnoop.CaptureMetrics(next, w, r)
-		// On the way back up the middleware chain, increment the number of responses sent by 1.
-		totalResponsesSent.Add(1)
-		// Get response time from httpsnoop and increment the total processing time by that amount.
-		totalProcessingTimeMicroseconds.Add(metrics.Duration.Microseconds())
-		// Increment the number of responses sent with the status code.
-		totalResponsesSentByStatus.Add(strconv.Itoa(metrics.Code), 1)
 
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Increment the number of requests received by 1.
+		totalRequestsReceived.Add(1)
+
+		// Use httpsnoop to capture metrics while passing along the original response writer.
+		metrics := httpsnoop.CaptureMetrics(next, w, r)
+
+		// Increment the total responses sent.
+		totalResponsesSent.Add(1)
+		// Increment the processing time.
+		totalProcessingTimeMicroseconds.Add(metrics.Duration.Microseconds())
+		// Increment the count for the response status code.
+		totalResponsesSentByStatus.Add(strconv.Itoa(metrics.Code), 1)
 	})
 }

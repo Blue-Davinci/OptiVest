@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/Blue-Davinci/OptiVest/internal/data"
@@ -844,13 +845,20 @@ func (app *application) investmentPrtfolioAnalysisHandler(w http.ResponseWriter,
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
 			// ignore to proceed with other check
 		default:
+			app.logger.Info(("================ Error getting all investments by user ID: %v"), zap.Error(err))
 			app.serverErrorResponse(w, r, err)
 			return
 		}
 	}
 	err = app.performInvestmentPortfolioAnalysis(investmentAnalysis, user)
 	if err != nil {
-		app.serverErrorResponse(w, r, err)
+		switch {
+		case errors.Is(err, data.ErrFailedToGetBondData):
+			// ignore to proceed with other check
+		default:
+			app.serverErrorResponse(w, r, err)
+			return
+		}
 	}
 	// build LLm only if we have goals and investments. For investment analysis length of investmentAnalysis.stockAnalysis and investmentAnalysis.bondAnalysis
 	// for investmentanalysis if both are empty then we can't proceed
@@ -861,7 +869,8 @@ func (app *application) investmentPrtfolioAnalysisHandler(w http.ResponseWriter,
 
 	analyzedLLMResponse, err := app.buildInvestmentPortfolioLLMRequest(user, goals, investmentAnalysis)
 	if err != nil {
-		app.serverErrorResponse(w, r, err)
+		//app.serverErrorResponse(w, r, err)
+		app.logger.Info("Error building LLM request:", zap.Error(err))
 	}
 	// output this infor
 	err = app.writeJSON(w, http.StatusOK,
@@ -979,7 +988,12 @@ func (app *application) performInvestmentPortfolioAnalysis(investmentAnalysis *d
 
 			// Update the bond analysis
 			if err := app.updateBondAnalysis(user.ID, bond, riskFreeRate); err != nil {
-				return err
+				// if error includes "failed to get" then return data.ErrFailedToGetBondData
+				if strings.Contains(err.Error(), "failed to get") {
+					return data.ErrFailedToGetBondData
+				} else {
+					return err
+				}
 			}
 		}
 	}

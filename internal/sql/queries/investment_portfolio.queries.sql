@@ -136,7 +136,9 @@ COALESCE((
         )
         FROM stock_analysis sa
         WHERE sa.stock_symbol = si.stock_symbol 
-          AND sa.user_id = si.user_id
+        AND sa.user_id = si.user_id
+        ORDER BY sa.analysis_date DESC
+        LIMIT 1
 ), '{}'::json) AS stock_analysis
 
 FROM 
@@ -269,6 +271,8 @@ COALESCE((
     FROM bond_analysis ba
     WHERE ba.bond_symbol = bi.bond_symbol 
       AND ba.user_id = bi.user_id
+    ORDER BY ba.analysis_date DESC
+    LIMIT 1
 ), '{}'::json) AS bond_analysis
 
 FROM 

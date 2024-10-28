@@ -78,6 +78,7 @@ func (app *application) buildInvestmentPortfolioLLMRequest(user *data.User, goal
 	if err != nil {
 		return nil, err
 	}
+	app.logger.Info("Done building LLM request for investment portfolio")
 	// save the analyzed portfolio to the database using CreateLLMAnalysisResponse
 	err = app.models.InvestmentPortfolioManager.CreateLLMAnalysisResponse(user.ID, analyzedPortfolio)
 	if err != nil {

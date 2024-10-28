@@ -50,6 +50,8 @@ const (
 
 var (
 	ErrInvalidInvestmentType = errors.New("invalid transaction type")
+	ErrFailedToGetBondData   = errors.New("failed to get bond data")
+	ErrFailedToGetStockData  = errors.New("failed to get stock data")
 )
 
 const (

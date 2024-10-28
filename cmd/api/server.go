@@ -21,7 +21,7 @@ func (app *application) server() error {
 		Handler:      app.routes(),
 		IdleTimeout:  time.Minute,
 		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 30 * time.Second,
+		WriteTimeout: 60 * time.Second,
 	}
 	// make a channel to listen for shutdown signals
 	shutdownChan := make(chan error)

@@ -61,7 +61,8 @@ func GETRequest[T any](c *Optivet_Client, url string, headers map[string]string)
 
 	// Check if the response status is not 2xx
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return result, errors.New("non-2xx response code")
+		message := fmt.Sprintf("non-2xx response code: %d | url: %s", resp.StatusCode, url)
+		return result, errors.New(message)
 	}
 
 	// Read the response body
@@ -147,7 +148,7 @@ func POSTRequest[T any](c *Optivet_Client, url string, headers map[string]string
 func (app *application) LLMRequest(url string, headers map[string]string, body string) (string, error) {
 	// Convert the body to bytes directly without marshaling again
 	jsonBody := []byte(body)
-	clientC := NewClient(30*time.Second, 3)
+	clientC := NewClient(60*time.Second, 3)
 
 	// Create a new POST request using retryablehttp
 	req, err := retryablehttp.NewRequest("POST", url, bytes.NewBuffer(jsonBody))
