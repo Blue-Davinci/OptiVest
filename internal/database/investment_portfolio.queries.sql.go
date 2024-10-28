@@ -752,7 +752,7 @@ bond_data AS (
 ),
 alternative_investment_data AS (
     SELECT 'alternative' AS investment_type, 
-           investment_name AS symbol,  -- Use investment_name as the symbol for alternative investments
+           COALESCE(investment_name, 'N\A') AS symbol,  -- Use investment_name as the symbol for alternative investments
            COALESCE(NULL::TEXT, 'No Returns') AS returns, -- Default to 'No Returns' if NULL
            COALESCE(NULL::DECIMAL(10, 4), 0) AS sharpe_ratio,  -- Default to 0 if NULL
            COALESCE(NULL::DECIMAL(10, 4), 0) AS sortino_ratio,  -- Default to 0 if NULL
