@@ -219,7 +219,7 @@ func (app *application) getAllRSSPostWithFavoriteTagsHandler(w http.ResponseWrit
 	is_educational := app.readBoolean(qs, "is_educational", false, v) // get our is_educational parameter
 	//get the page & pagesizes as ints and set to the embedded struct
 	input.Filters.Page = app.readInt(qs, "page", 1, v)
-	input.Filters.PageSize = app.readInt(qs, "page_size", 20, v)
+	input.Filters.PageSize = app.readInt(qs, "page_size", 18, v)
 	// We don't use any sort for this endpoint
 	input.Filters.Sort = app.readString(qs, "", "")
 	// None of the sort values are supported for this endpoint

@@ -344,7 +344,7 @@ func (m FeedManagerModel) CreateNewFavoriteOnPost(userID int64, rssFavoritePost 
 	})
 	if err != nil {
 		switch {
-		case err.Error() != `pq: duplicate key value violates unique constraint "favorite_posts_post_id_key"`:
+		case err.Error() == `pq: duplicate key value violates unique constraint "favorite_posts_post_id_key"`:
 			return ErrDuplicateFavorite
 		default:
 			return err
