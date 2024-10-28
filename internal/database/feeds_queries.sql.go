@@ -302,9 +302,17 @@ FROM
     rssfeed_posts p
 LEFT JOIN 
     favorite_posts fp ON p.id = fp.post_id AND fp.user_id = $1  -- Check if the post is in the favorites table for the user
+JOIN 
+    feeds f ON p.feed_id = f.id  -- Join with feeds table to access feed_category
 WHERE 
     ($2 = '' OR to_tsvector('simple', p.itemtitle) @@ plainto_tsquery('simple', $2))  -- Full-text search for item title
     AND ($3 = 0 OR p.feed_id = $3)  -- Filter by feed_id if provided, return all posts if feed_id is NULL
+    AND (  -- Filter posts based on feed category
+        CASE 
+            WHEN $6 = 'finance education' THEN f.feed_category = 'finance education'
+            ELSE f.feed_category <> 'finance education'
+        END
+    )
 ORDER BY 
     p.created_at DESC
 LIMIT $4 OFFSET $5
@@ -316,6 +324,7 @@ type GetAllRSSPostWithFavoriteTagParams struct {
 	Column3 interface{}
 	Limit   int32
 	Offset  int32
+	Column6 interface{}
 }
 
 type GetAllRSSPostWithFavoriteTagRow struct {
@@ -344,6 +353,7 @@ func (q *Queries) GetAllRSSPostWithFavoriteTag(ctx context.Context, arg GetAllRS
 		arg.Column3,
 		arg.Limit,
 		arg.Offset,
+		arg.Column6,
 	)
 	if err != nil {
 		return nil, err

@@ -204,8 +204,9 @@ func (app *application) deleteFeedByIDHandler(w http.ResponseWriter, r *http.Req
 func (app *application) getAllRSSPostWithFavoriteTagsHandler(w http.ResponseWriter, r *http.Request) {
 	// make a struct to hold what we would want from the queries
 	var input struct {
-		Name    string
-		Feed_ID int64
+		Name          string
+		FeedID        int
+		IsEducational bool // this will be used to filter out educational posts
 		data.Filters
 	}
 	//validate if queries are provided
@@ -213,8 +214,9 @@ func (app *application) getAllRSSPostWithFavoriteTagsHandler(w http.ResponseWrit
 	// Call r.URL.Query() to get the url.Values map containing the query string data.
 	qs := r.URL.Query()
 	// get our parameters
-	input.Name = app.readString(qs, "name", "") // get our name parameter
-	feed_id := app.readInt(qs, "feedID", 0, v)  // get our feed_id parameter
+	input.Name = app.readString(qs, "name", "")                       // get our name parameter
+	input.FeedID = app.readInt(qs, "feedID", 0, v)                    // get our feed_id parameter
+	is_educational := app.readBoolean(qs, "is_educational", false, v) // get our is_educational parameter
 	//get the page & pagesizes as ints and set to the embedded struct
 	input.Filters.Page = app.readInt(qs, "page", 1, v)
 	input.Filters.PageSize = app.readInt(qs, "page_size", 20, v)
@@ -230,8 +232,9 @@ func (app *application) getAllRSSPostWithFavoriteTagsHandler(w http.ResponseWrit
 	// get all the posts
 	posts, metadata, err := app.models.FeedManager.GetAllRSSPostWithFavoriteTag(
 		app.contextGetUser(r).ID,
-		int64(feed_id),
+		int64(input.FeedID),
 		input.Name,
+		app.postCategoryDecider(is_educational),
 		input.Filters,
 	)
 	if err != nil {

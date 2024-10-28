@@ -403,7 +403,7 @@ func (m FeedManagerModel) GetRssFeedPostByID(postID int64) (*RSSFeed, error) {
 // GetAllRSSPostWithFavoriteTag() is a method that will return all posts with a favorite tag
 // This will return a slice of *RSSPostWithFavoriteTag, a metadata struct and an error
 // It supports both search and pagination
-func (m FeedManagerModel) GetAllRSSPostWithFavoriteTag(userID, feedID int64, itemName string, filters Filters) ([]*RSSPostWithFavoriteTag, Metadata, error) {
+func (m FeedManagerModel) GetAllRSSPostWithFavoriteTag(userID, feedID int64, itemName, postCategory string, filters Filters) ([]*RSSPostWithFavoriteTag, Metadata, error) {
 	ctx, cancel := contextGenerator(context.Background(), DefaultFinManDBContextTimeout)
 	defer cancel()
 	// get all posts
@@ -413,6 +413,7 @@ func (m FeedManagerModel) GetAllRSSPostWithFavoriteTag(userID, feedID int64, ite
 		Column3: feedID,
 		Limit:   int32(filters.limit()),
 		Offset:  int32(filters.offset()),
+		Column6: postCategory,
 	})
 	if err != nil {
 		return nil, Metadata{}, err

@@ -593,6 +593,13 @@ func (app *application) calculateYearsToMaturity(bondMD data.CustomTime1) int {
 	return yearsToMaturity
 }
 
+func (app *application) postCategoryDecider(isEducational bool) string {
+	if isEducational {
+		return "finance education"
+	}
+	return "finance"
+}
+
 // processOCRRequestHelper() is a helper function that will process the OCR request
 // We will send a POST request to the OCR.Space API endpoint to get the text from the image
 // We will then return the OCRResponse
