@@ -113,7 +113,7 @@ goose postgres postgres://aggregate:password@localhost/aggregate  up
 
 5. **Download and Setup the MIcroService:** Follow the instructions highlighted [here](https://github.com/Blue-Davinci/OptiVest_Finance_Predictor_Micro_Service_V1) to get the micro-service up and running.
 
-6. **Environment Variable Setups:** OptiVest uses a few external APIs. You will need to set them up and make an `.env` containin the following templates:
+6. **Environment Variable Setups:** OptiVest uses a few external APIs. You will need to set them up and make an `.env` containing the following templates:
 ```bash
 # DSN Link to our Postgres database
 OPTIVEST_DB_DSN=postgres://optivest:yourpassword@localhost/optivest?sslmode=disable
@@ -142,50 +142,209 @@ OPTIVEST_PREDICTOR_API_KEY=xxx
 # OCR.Space API
 OPTIVEST_OCRSPACE_API_KEY=xxxx
 ```
+**The above .env is self explanatory for each API needed**
 
+5. **Build the project:** You can build the project using the makefile's command:
 
-And repeat
+    ```bash
+    make build/api
+    ```
+    This will create an executable file in the current directory.
+    <b>Note: The generated executable is for the windows environment</b>
+      <b>- However, You can find the linux build command within the makefile!</b>
 
+6. **Run the project:** You can run the project using the `go run` or use <b>`MakeFile`</b> and do:
+
+    ```bash
+    make run/api
+    ```
+
+7. **MakeFile Help:** For additional supported commands run `make help`:
+
+  ```makefile
+  make help
+  ```
+**output:**
+```bash
+Usage:
+run/api: Run the API server
+run/api/origins: Run the API server with CORS origins
+db/psql            -  connect to the db using psql
+build/api          -  build the cmd/api application
 ```
-until finished
+
+### Description
+
+The application accepts command-line flags for configuration, establishes a connection pool to a database, and publishes variables for monitoring the application. The published variables include the application version, the number of active goroutines and the current Unix timestamp.
+  - This will start the application. You should be able to access it at `http://localhost:4000`.
+
+<hr />
+You can view the **parameters** by utilizing the `-help` command. Here is a rundown of 
+the available commands for a quick lookup (INCOMPLETE, use help for full list).
+
+```bash
+- api-author string
+        API author (default "Blue_Davinci")
+  -api-default-currency string
+        Default currency (default "USD")
+  -api-key-alphavantage string
+        Alpha Vantage API key (default "NYRXRLGLWY29115K")
+  -api-key-exchangerates string
+        Exchange-Rate API Key (default "2bd6d65a467e533704e0a7fb")
+  -api-key-fmp string
+        FMP API Key (default "LtEBinivcBs2uzHNg1PHXJIRj5KsLmxJ")
+  -api-key-fred string
+        FRED API Key (default "1c78299c9778f33eeacf2f85261f9183")
+  -api-key-ocrspace string
+        OCR.Space API Key (default "K82853087188957")
+  -api-key-optivestmicroservice string
+        OptiVest Microservice API Key (default "xJ8u4Kz7wA9vT3gPzB2dF1mLq8N5cY6s")
+  -api-key-sambanova string
+        Sambanova API Key (default "4044b951-1161-4165-b025-8a7bc6f46155")
+  -api-name string
+        API name (default "OptiVest")
+  -api-url-alphavantage string
+        Alpha Vantage API URL (default "https://www.alphavantage.co/query?")
+  -api-url-exchangerates string
+        Exchange-Rate API URL (default "https://v6.exchangerate-api.com/v6")
+  -api-url-fmp string
+        FMP API URL (default "https://financialmodelingprep.com/api/v3")
+  -api-url-fred string
+        FRED API URL (default "https://api.stlouisfed.org/fred/series/observations?")
+  -api-url-ocrspace string
+        OCR.Space API URL (default "https://api.ocr.space/parse/image")
+  -api-url-optivestmicroservice string
+        OptiVest Microservice API URL (default "http://127.0.0.1:8000/v1/predict")
+  -api-url-sambanova string
+        Sambanova API URL (default "https://fast-api.snova.ai/v1/chat/completions")
+  -cors-trusted-origins value
+        Trusted CORS origins (space separated)
+  -db-dsn string
+        PostgreSQL DSN (default "postgres://optivest:pa55word@localhost/optivest?sslmode=disable")
+  -db-max-idle-conns int
+        PostgreSQL max idle connections (default 25)
+  -db-max-idle-time string
+        PostgreSQL max connection idle time (default "15m")
+  -db-max-open-conns int
+        PostgreSQL max open connections (default 25)
+  -encryption-key string
+        Encryption key (default "330d12d2eacd444bd87126221c91150a09cbaee8529a387282e1e910c8be3868")
+  -env string
+        Environment (development|staging|production) (default "development")
+  -expired-notification-burst-limit int
+        Batch Limit for Expired Notification Tracker (default 100)
+  -frontend-activation-url string
+        Frontend Activation URL (default "http://localhost:5173/verify?token=")
+  -frontend-callback-url string
+        Frontend Callback URL (default "https://adapted-healthy-monitor.ngrok-free.app/v1")
+  -frontend-login-url string
+        Frontend Login URL (default "http://localhost:5173/login")
+  -frontend-password-reset-url string
+        Frontend Password Reset URL (default "http://localhost:5173/passwordreset/password?token=")
+  -frontend-url string
+        Frontend URL (default "http://localhost:5173")
+  -http-client-retrymax int
+        HTTP client maximum retries (default 3)
+  -http-client-timeout duration
+        HTTP client timeout (default 10s)
 ```
 
-End with an example of getting some data out of the system or using it for a little demo.
+Using `make run`, will run the API with a default connection string located 
+in `cmd\api\.env`. If you're using `powershell`, you need to load the values otherwise you will get
+a `cannot load env file` error. Use the PS code below to load it or change the env variable:
+
+```powershell
+$env:OPTIVEST_DB_DSN=(Get-Content -Path .\cmd\api\.env | Where-Object { $_ -match "OPTIVEST_DB_DSN" } | ForEach-Object { $($_.Split("=", 2)[1]) })
+```
+
+Alternatively, in unix systems you can make a .envrc file and load it directly in the makefile by importing like so:
+```makefile
+include .envrc
+```
+
+A succesful run will output something like this:
+
+```bash
+make run/api
+Running API server..
+go run ./cmd/api
+{"level":"info","time":"2024-1","caller":"api/main.go:374","msg":"Loading Environment Variables","path":"cmd\\api\\.env"}
+{"level":"info","time":"2024-1]","caller":"api/main.go:268","msg":"Redis connection established","addr":"localhost:6379"}
+{"level":"info","time":"2024-1","caller":"api/main.go:277","msg":"database connection pool established","dsn":"postgres://optivest:yourpassword@localhost/optivest?sslmode=disable"}
+{"level":"info","time":"2024-1","caller":"api/helpers.go:215","msg":"currency certified, using cached currencies","currency":"USD"}
+{"level":"info","time":"2024-1-2","caller":"api/main.go:337","msg":"Starting Schedulers"}
+{"level":"info","time":"2024-0-2","caller":"api/schedulers.go:64","msg":"Starting the recurring expenses tracking cron job..","time":"2024-00-2"}
+{"level":"info","time":"2024-1","caller":"api/schedulers.go:199","msg":"Tracking recurring expenses","time":"2024-1 EAT m=+0.533360001"}
+```
+
+<hr />
+
+### API Endpoints <a name = "endpoints"></a>
+A full ist is documented using swagger, but here is a quick runwdown:
+1. **GET /v1/healthcheck:** Checks the health of the application. Returns a 200 OK status code if the application is running correctly.
+
+2. **POST /v1/users:** Registers a new user.
+
+3. **PUT /v1/users/activated:** Activates a user.
+
+4. **POST /v1/api/authentication:** Creates an authentication token.
+
+5. **GET /debug/vars:** Provides debug variables from the `expvar` package. 
+
 
 ## 🔧 Running the tests <a name = "tests"></a>
 
-Explain how to run the automated tests for this system.
+The project has existing tests represented by files ending with the word `"_test"` e.g `internal_helpers_test.go`
 
 ### Break down into end to end tests
 
-Explain what these tests test and why
+Each test file contains a myriad of tests to run on various entities mainly functions.
+The test files are organized into `structs of tests` and their corresponding test logic.
 
-```
-Give an example
-```
+You can run them directly from the vscode test UI. Below represents test results for the scraper:
 
-### And coding style tests
-
-Explain what these tests test and why
-
+```bash
+=== RUN   Test_generateSecurityKey
+=== RUN   Test_generateSecurityKey/Valid_AES-128_key_(16_bytes)
+--- PASS: Test_generateSecurityKey/Valid_AES-128_key_(16_bytes) (0.00s)
+=== RUN   Test_generateSecurityKey/Valid_AES-192_key_(24_bytes)
+--- PASS: Test_generateSecurityKey/Valid_AES-192_key_(24_bytes) (0.00s)
+=== RUN   Test_generateSecurityKey/Valid_AES-256_key_(32_bytes)
+--- PASS: Test_generateSecurityKey/Valid_AES-256_key_(32_bytes) (0.00s)
+=== RUN   Test_generateSecurityKey/Invalid_key_length_(0_bytes)
+--- PASS: Test_generateSecurityKey/Invalid_key_length_(0_bytes) (0.00s)
+=== RUN   Test_generateSecurityKey/Invalid_key_length_(-1_bytes)
+--- PASS: Test_generateSecurityKey/Invalid_key_length_(-1_bytes) (0.00s)
+--- PASS: Test_generateSecurityKey (0.00s)
+PASS
+ok      github.com/Blue-Davinci/OptiVest/internal/data  0.674s
 ```
-Give an example
-```
+- <b>All other tests follow a similar prologue.</b>
 
 ## 🎈 Usage <a name="usage"></a>
+As earlier mentioned, the api uses a myriad of flags which you can use to launch the application.
+An example of launching the application with your `smtp server's setting` includes:
+```bash
+make build/api ## build api using the makefile
+./bin/api.exe -smtp-username=pigbearman -smtp-password=algor ## run the built api with your own values
 
-Add notes about how to use the system.
+Direct Run: 
+go run main.go
+```
+
 
 ## 🚀 Deployment <a name = "deployment"></a>
 
-Add additional notes about how to deploy this on a live system.
+**(Will Be Added Soon.)**
 
 ## ⛏️ Built Using <a name = "built_using"></a>
-
-- [MongoDB](https://www.mongodb.com/) - Database
-- [Express](https://expressjs.com/) - Server Framework
-- [VueJs](https://vuejs.org/) - Web Framework
-- [NodeJs](https://nodejs.org/en/) - Server Environment
+- [Go](https://golang.org/) - Backend
+- [PostgreSQL](https://www.postgresql.org/) - Database
+- [Redis](https://redis.io/) - Cacheing
+- [Paystack](https://paystack.com) - Payment processing
+- [SQLC](https://github.com/kyleconroy/sqlc) - Generate type safe Go from SQL
+- [Goose](https://github.com/pressly/goose) - Database migration tool
+- [HTML/CSS](https://developer.mozilla.org/en-US/docs/Web/HTML) - Templates
 
 ## ✍️ Authors <a name = "authors"></a>
 
@@ -197,4 +356,9 @@ See also the list of [contributors](https://github.com/Blue-Davinci/OptiVest/con
 
 - Hat tip to anyone whose code was used
 - Inspiration
-- References
+
+## 📚 References <a name = "references"></a>
+
+- [Go Documentation](https://golang.org/doc/): Official Go documentation and tutorials.
+- [PostgreSQL Documentation](https://www.postgresql.org/docs/): Official PostgreSQL documentation.
+- [SQLC Documentation](https://docs.sqlc.dev/en/latest/): Official SQLC documentation and guides.
