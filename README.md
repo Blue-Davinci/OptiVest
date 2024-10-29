@@ -16,7 +16,8 @@
 
 ---
 
-<p align="center"> Optivest <b>[Back-End]: </b> This is the backend sister project of the OptiVest Project.
+<p align="center"> Optivest <b>[Back-End]: </b> This is the backend sister project of OptiVest Project. To Check out the Frontend, go <a href="https://github.com/Blue-Davinci/OptiVest-Frontend">here</a>
+
     <br> 
 </p>
 
