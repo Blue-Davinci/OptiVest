@@ -1,6 +1,6 @@
 <p align="center">
   <a href="" rel="noopener">
- <img width=200px height=200px src="https://i.ibb.co/2tkXm7R/optivest-high-resolution-logo-transparent.png" alt="Project logo"></a>
+ <img width=250px height=190px src="https://i.ibb.co/2tkXm7R/optivest-high-resolution-logo-transparent.png" alt="Project logo"></a>
 </p>
 
 <h3 align="center">OptiVest</h3>
@@ -98,6 +98,51 @@ A step by step series of examples that tell you how to get a development env run
     ```bash
     go mod download
     ```
+4. **Set up the database:** The project uses a PostgreSQL database. You'll need to create a new database and update the connection string in your configuration file or environment variables.
+We use `GOOSE` for all the data migrations and `SQLC` as the abstraction layer for the DB. To proceed
+with the migration, navigate to the `Schema` director:
+```bash
+cd internal\sql\schema
+```
+- Then proceed by using the `goose {connection string} up` to execute an <b>Up migration</b> as shown:
+- <b>Note:</b> You can use your own environment variable or load it from the env file.
+
+```bash
+goose postgres postgres://aggregate:password@localhost/aggregate  up
+```
+
+5. **Download and Setup the MIcroService:** Follow the instructions highlighted [here](https://github.com/Blue-Davinci/OptiVest_Finance_Predictor_Micro_Service_V1) to get the micro-service up and running.
+
+6. **Environment Variable Setups:** OptiVest uses a few external APIs. You will need to set them up and make an `.env` containin the following templates:
+```bash
+# DSN Link to our Postgres database
+OPTIVEST_DB_DSN=postgres://optivest:yourpassword@localhost/optivest?sslmode=disable
+# For deployment: , comment the above and uncomment the below DSN
+#OPTIVEST_DB_DSN=postgres://optivest:yourpassword@host.docker.internal/optivest?sslmode=disable
+OPTIVEST_DATA_ENCRYPTION_KEY=xxxxxxx
+
+# Mailer configuration
+OPTIVEST_SMTP_HOST=xxxxx
+OPTIVEST_SMTP_USERNAME=xxxxxx
+OPTIVEST_SMTP_PASSWORD=xxxxxxx
+OPTIVEST_SMTP_SENDER=Optivest <no-reply@optivest.tech>
+
+# Exchange Rate API
+OPTIVEST_EXCHANGERATE_API_KEY=xxxxxxxxx
+# Alpha Vantage API
+OPTIVEST_ALPHAVANTAGE_API_KEY=xxxxxx
+# Fred API
+OPTIVEST_FRED_API_KEY=xxx
+# Financial Modeling Prep API
+OPTIVEST_FINANCIALMODELINGPREP_API_KEY=xxxxx
+# Samba Nova LLM API
+OPTIVEST_SAMBA_NOVA_LLM_API_KEY=xxxx
+# Optivest Predictor Microservice
+OPTIVEST_PREDICTOR_API_KEY=xxx
+# OCR.Space API
+OPTIVEST_OCRSPACE_API_KEY=xxxx
+```
+
 
 And repeat
 
