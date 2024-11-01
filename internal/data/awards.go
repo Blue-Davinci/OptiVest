@@ -42,6 +42,22 @@ func (m AwardManagerModel) CreateNewUserAward(userID int64, awardID int32) (time
 	return createdAt, nil
 }
 
+// GetAwardByAwardID() is a method that returns an award by ID
+// We accept an award ID
+// We return an award and an error if there is one
+func (m AwardManagerModel) GetAwardByAwardID(awardID int32) (*Award, error) {
+	ctx, cancel := contextGenerator(context.Background(), DefaultAwManDBContextTimeout)
+	defer cancel()
+	// get an award by ID
+	awardRow, err := m.DB.GetAwardByAwardID(ctx, awardID)
+	if err != nil {
+		return nil, err
+	}
+	// populate award
+	award := populateAward(awardRow)
+	return award, nil
+}
+
 // GetAllAwards() is a method that returns all the awards
 // We return a *slice of awards and an error if there is one
 func (m AwardManagerModel) GetAllAwards() ([]*Award, error) {

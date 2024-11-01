@@ -13,6 +13,7 @@ import (
 
 	"github.com/Blue-Davinci/OptiVest/internal/data"
 	"github.com/Blue-Davinci/OptiVest/internal/database"
+	"github.com/lib/pq"
 	"go.uber.org/zap"
 )
 
@@ -35,6 +36,9 @@ func (app *application) ServeSSE(w http.ResponseWriter, r *http.Request) {
 
 	// Load and send pending notifications
 	go app.loadAndSendPendingNotifications(userID)
+
+	// Listen for award notifications
+	go app.listenToAwardNotifications()
 
 	// Simulate data
 	go app.SimulateData(1)
@@ -113,12 +117,13 @@ func (app *application) loadAndProcessRedisData(ctx context.Context, userID int6
 func (app *application) loadAndProcessDBData(userID int64, processed *map[int64]bool) error {
 	pendingNotifications, err := app.models.NotificationManager.GetUnreadNotifications(userID)
 	if err != nil {
-		return err
-	}
-	// check length
-	if len(pendingNotifications) == 0 {
-		app.logger.Info("No pending notifications found", zap.Int64("userID", userID))
-		return data.ErrGeneralRecordNotFound
+		switch {
+		case errors.Is(err, data.ErrGeneralRecordNotFound):
+			app.logger.Info("No pending notifications found in database for user:", zap.Int64("userID", userID))
+			return nil // not really an error, just no notifications found
+		default:
+			return err
+		}
 	}
 
 	for _, notification := range pendingNotifications {
@@ -274,6 +279,8 @@ func (app *application) PublishNotificationToRedis(userID int64, notificationTyp
 	if err != nil {
 		return err
 	}
+	// set the notification ID
+	notification.NotificationID = savedNotification.ID
 	// we are going to publish the notification to the user's Redis channel
 	notificationJSON, err := json.Marshal(notification)
 	if err != nil {
@@ -303,6 +310,74 @@ func (app *application) ListenForRedisPubSubUserMessages(userID int64) {
 	}
 }
 
+func (app *application) listenToAwardNotifications() {
+	app.logger.Info("Starting PostgreSQL listener on channel 'new_award'")
+
+	// Initialize the PostgreSQL listener
+	listener := pq.NewListener(app.config.db.dsn, 10*time.Second, time.Minute, func(event pq.ListenerEventType, err error) {
+		if err != nil {
+			app.logger.Error("PostgreSQL award listener error", zap.Error(err))
+		}
+	})
+
+	// Listen to the 'new_award' channel
+	err := listener.Listen("new_award")
+	if err != nil {
+		app.logger.Error("Error listening to PostgreSQL notifications", zap.Error(err))
+		return
+	}
+
+	// Goroutine to process notifications as they arrive
+	go func() {
+		for {
+			select {
+			case notification := <-listener.Notify:
+				if notification != nil {
+					// Parse the JSON payload from the notification
+					var payload struct {
+						AwardID int32 `json:"award_id"`
+						UserID  int64 `json:"user_id"`
+					}
+					// Unmarshal the JSON payload
+					err := json.Unmarshal([]byte(notification.Extra), &payload)
+					if err != nil {
+						app.logger.Error("Failed to parse notification payload", zap.Error(err))
+						continue
+					}
+					// convert the award ID to int32
+					// get the award by award ID
+					award, err := app.models.AwardManager.GetAwardByAwardID(payload.AwardID)
+					if err != nil {
+						app.logger.Error("Failed to get award by award ID", zap.Error(err))
+						continue
+					}
+
+					// Log the received award and user IDs
+					app.logger.Info(fmt.Sprintf("New award notification received: Award ID %d, User ID %d", payload.AwardID, payload.UserID))
+					// Prepare the notification content
+					notificationContent := data.NotificationContent{
+						Message: fmt.Sprintf("A new award has been granted!<br>Award_Name: %s<br>Award_Description: %s<br>Award_Points: %d",
+							award.Code, award.Description, award.Points),
+						Meta: data.NotificationMeta{
+							Url:      app.config.frontend.awardurl,
+							ImageUrl: award.AwardImageUrl,
+							Tags:     "award",
+						},
+					}
+
+					// Publish the notification to Redis for the user
+					err = app.PublishNotificationToRedis(payload.UserID, "new_award", notificationContent)
+					if err != nil {
+						app.logger.Error("Error publishing award notification to Redis", zap.Error(err))
+					}
+				}
+			case <-time.After(90 * time.Second): // Ping the listener every 90 seconds to prevent timeout
+				listener.Ping()
+			}
+		}
+	}()
+}
+
 // BroadcastMessage sends a message to all connected clients
 func (app *application) BroadcastNotification(notification data.NotificationContent) {
 	app.Mutex.Lock()
@@ -321,23 +396,14 @@ func (app *application) BroadcastNotification(notification data.NotificationCont
 
 // SimulateData simulates data and publishes messages to a user-specific channel in Redis
 func (app *application) SimulateData(userID int64) {
-	channel := fmt.Sprintf("%s:%d", data.RedisNotManNotificationKey, userID)
 	for {
 		time.Sleep(7 * time.Second)
-		notificationID := rand.Int63()
 		notification := data.NotificationContent{
-			NotificationID: notificationID,
-			Message:        fmt.Sprintf("Simulated data: %d", rand.Intn(100)),
-			Meta:           data.NotificationMeta{Url: "https://example.com", Tags: "simulation"},
+			Message: fmt.Sprintf("Simulated data: %d", rand.Intn(100)),
+			Meta:    data.NotificationMeta{Url: "https://example.com", Tags: "simulation"},
 		}
 
-		notificationJSON, err := json.Marshal(notification)
-		if err != nil {
-			app.logger.Error("Failed to marshal simulated notification", zap.Error(err))
-			continue
-		}
-
-		err = app.RedisDB.Publish(context.Background(), channel, string(notificationJSON)).Err()
+		err := app.PublishNotificationToRedis(userID, data.NotificationTypeDefault, notification)
 		if err != nil {
 			app.logger.Info("Error publishing simulated data:", zap.Error(err))
 		}
@@ -346,21 +412,14 @@ func (app *application) SimulateData(userID int64) {
 
 // SimulateDataWithRedisPubSub simulates data and publishes messages to a user-specific Redis pub/sub channel
 func (app *application) SimulateDataWithRedisPubSub(userID int64) {
-	forceFirstSimilarNotification := true
 	for {
-		notificationID := rand.Int63()
-		if forceFirstSimilarNotification { // Force a similar notification to test deduplication
-			notificationID = 1
-			forceFirstSimilarNotification = false
-		}
 		// Sleep to simulate a delay between notifications
 		time.Sleep(10 * time.Second)
 
 		// Create a simulated notification
 		notification := data.NotificationContent{
-			NotificationID: notificationID,
-			Message:        fmt.Sprintf("Redis Simulation data: %d", rand.Intn(100)),
-			Meta:           data.NotificationMeta{Url: "https://example.com", Tags: "simulation"},
+			Message: fmt.Sprintf("Redis Simulation data: %d", rand.Intn(100)),
+			Meta:    data.NotificationMeta{Url: "https://example.com", Tags: "simulation"},
 		}
 
 		err := app.PublishNotificationToRedis(userID, data.NotificationTypeDefault, notification)

@@ -108,3 +108,31 @@ func (q *Queries) GetAllAwardsForUserByID(ctx context.Context, userID int64) ([]
 	}
 	return items, nil
 }
+
+const getAwardByAwardID = `-- name: GetAwardByAwardID :one
+SELECT 
+    id,
+    code,
+    description,
+    award_image_url,
+    points,
+    created_at,
+    updated_at
+FROM awards
+WHERE id = $1
+`
+
+func (q *Queries) GetAwardByAwardID(ctx context.Context, id int32) (Award, error) {
+	row := q.db.QueryRowContext(ctx, getAwardByAwardID, id)
+	var i Award
+	err := row.Scan(
+		&i.ID,
+		&i.Code,
+		&i.Description,
+		&i.AwardImageUrl,
+		&i.Points,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}

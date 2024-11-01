@@ -4,6 +4,18 @@ INSERT INTO user_awards (user_id, award_id)
 VALUES ($1, $2)
 RETURNING created_at;
 
+-- name: GetAwardByAwardID :one
+SELECT 
+    id,
+    code,
+    description,
+    award_image_url,
+    points,
+    created_at,
+    updated_at
+FROM awards
+WHERE id = $1;
+
 -- name: GetAllAwardsForUserByID :many
 SELECT a.*
 FROM awards a

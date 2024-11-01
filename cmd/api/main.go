@@ -110,6 +110,7 @@ type config struct {
 		loginurl         string
 		passwordreseturl string
 		callback_url     string
+		awardurl         string
 	}
 	scheduler struct {
 		trackMonthlyGoalsCron        *cron.Cron
@@ -228,6 +229,7 @@ func main() {
 	flag.StringVar(&cfg.frontend.activationurl, "frontend-activation-url", "http://localhost:5173/verify?token=", "Frontend Activation URL")
 	flag.StringVar(&cfg.frontend.passwordreseturl, "frontend-password-reset-url", "http://localhost:5173/passwordreset/password?token=", "Frontend Password Reset URL")
 	flag.StringVar(&cfg.frontend.callback_url, "frontend-callback-url", "https://adapted-healthy-monitor.ngrok-free.app/v1", "Frontend Callback URL")
+	flag.StringVar(&cfg.frontend.awardurl, "frontend-award-url", "http://localhost:5173/awards", "Frontend Award URL")
 	// Limit configuration
 	flag.IntVar(&cfg.limit.monthlyGoalProcessingBatchLimit, "monthly-goal-batch-limit", 100, "Batching Limit for Monthly Goal Processing")
 	flag.IntVar(&cfg.limit.recurringExpenseTrackerBurstLimit, "recurring-expense-burst-limit", 100, "Batch Limit for Recurring Expense Tracker")
