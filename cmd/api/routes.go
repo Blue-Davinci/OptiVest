@@ -8,10 +8,20 @@ import (
 	"github.com/justinas/alice"
 )
 
-func (app *application) wsRoutes() http.Handler {
+func (app *application) sseRoutes() http.Handler {
 	router := chi.NewRouter()
+	router.Use(cors.Handler(cors.Options{
+		AllowedOrigins:   app.config.cors.trustedOrigins,
+		AllowedMethods:   []string{"GET"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
+		ExposedHeaders:   []string{"link"},
+		AllowCredentials: false,
+		MaxAge:           300, // Maximum value not ignored bycls any of major browsers
+	}))
+	//Use alice to make a global middleware chain.
+	sseMiddleware := alice.New(app.recoverPanic, app.authenticate, app.requireAuthenticatedUser, app.requireActivatedUser).Then
 
-	router.Get("/ws", app.wsHandler)
+	router.With(sseMiddleware).Get("/sse", app.ServeSSE)
 	return router
 }
 

@@ -138,7 +138,7 @@ type application struct {
 	RedisDB           *redis.Client
 	Mutex             sync.Mutex
 	WebSocketUpgrader websocket.Upgrader
-	Clients           map[int64]*websocket.Conn
+	Clients           map[int64]chan string
 }
 
 func main() {
@@ -290,7 +290,7 @@ func main() {
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
 		},
-		Clients: make(map[int64]*websocket.Conn),
+		Clients: make(map[int64]chan string),
 	}
 	err = app.startupFunction()
 	if err != nil {

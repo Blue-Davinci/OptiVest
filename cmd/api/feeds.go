@@ -7,7 +7,6 @@ import (
 
 	"github.com/Blue-Davinci/OptiVest/internal/data"
 	"github.com/Blue-Davinci/OptiVest/internal/validator"
-	"go.uber.org/zap"
 )
 
 // createNewFeedHandler() is a handler rresponsible for creating a new feed
@@ -257,10 +256,7 @@ func (app *application) getAllRSSPostWithFavoriteTagsHandler(w http.ResponseWrit
 			Tags:     "goal,completed",
 		},
 	}
-	err = app.publishNotification(1, notificationContent)
-	if err != nil {
-		app.logger.Info("error publishing notification", zap.Error(err))
-	}
+	app.PublishNotificationToRedis(app.contextGetUser(r).ID, data.NotificationTypeFeeds, notificationContent)
 }
 
 // getRssFeedPostByIDHandler() is a handler responsible for getting a post by its ID

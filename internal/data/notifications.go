@@ -17,12 +17,20 @@ type NotificationManagerModel struct {
 
 const (
 	RedisNotManPendingNotificationKey = "pending_notifications"
+	RedisNotManNotificationKey        = "notifications"
 )
 
 const (
 	DefualtNotManContextTimeout         = 3 * time.Second
 	DefaultNotificationTimeout          = 30 * time.Second
 	DefaultRedisNotificationTTLDuration = 1 * time.Hour
+)
+
+const (
+	NotificationTypeDefault             = "default"
+	NotificationTypeFeeds               = "feeds"
+	NotificationTypeFinancialTracking   = "financial_tracking"
+	NotificationTypeFinancialManagement = "financial_management"
 )
 
 const (

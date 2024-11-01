@@ -97,7 +97,7 @@ func (app *application) serveWS() {
 	app.logger.Info("starting websocket server", zap.Int("addr", app.config.ws.port))
 	server := &http.Server{
 		Addr:         fmt.Sprintf(":%d", app.config.ws.port),
-		Handler:      app.wsRoutes(),
+		Handler:      app.sseRoutes(),
 		IdleTimeout:  time.Minute,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 0, // no timeout
