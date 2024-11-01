@@ -64,22 +64,24 @@ func (app *application) loadAndSendPendingNotifications(userID int64) {
 	app.logger.Info("Loading and sending pending notifications for user:", zap.Int64("userID", userID))
 	ctx := context.Background()
 
+	// Track processed notifications using a map for deduplication
+	processedNotifications := make(map[int64]bool)
 	// Load from Redis
 	pendingKey := fmt.Sprintf("%s:%d", data.RedisNotManPendingNotificationKey, userID)
-	err := app.loadAndProcessRedisData(ctx, userID, pendingKey)
+	err := app.loadAndProcessRedisData(ctx, userID, pendingKey, &processedNotifications)
 	if err != nil {
 		app.logger.Info("Error loading notifications from Redis:", zap.Error(err))
 	}
 
 	// Load from Database if needed
-	err = app.loadAndProcessDBData(userID)
+	err = app.loadAndProcessDBData(userID, &processedNotifications)
 	if err != nil {
 		app.logger.Info("Error loading notifications from database:", zap.Error(err))
 	}
 }
 
 // loadAndProcessRedisData processes pending notifications from Redis
-func (app *application) loadAndProcessRedisData(ctx context.Context, userID int64, pendingKey string) error {
+func (app *application) loadAndProcessRedisData(ctx context.Context, userID int64, pendingKey string, processed *map[int64]bool) error {
 	pendingNotifications, err := app.RedisDB.HGetAll(ctx, pendingKey).Result()
 	if err != nil {
 		return err
@@ -96,13 +98,19 @@ func (app *application) loadAndProcessRedisData(ctx context.Context, userID int6
 			app.logger.Error("Failed to unmarshal notification from Redis", zap.Error(err))
 			continue
 		}
+		// Deduplication check
+		if _, exists := (*processed)[notification.NotificationID]; exists {
+			app.logger.Info("Skipping duplicate notification from Redis", zap.Int64("notification_id", notification.NotificationID))
+			continue
+		}
 		app.PublishNotification(userID, notification)
+		(*processed)[notification.NotificationID] = true // Mark as processed
 	}
 	return app.RedisDB.Del(ctx, pendingKey).Err()
 }
 
 // loadAndProcessDBData loads and processes pending notifications from the database
-func (app *application) loadAndProcessDBData(userID int64) error {
+func (app *application) loadAndProcessDBData(userID int64, processed *map[int64]bool) error {
 	pendingNotifications := []data.NotificationContent{
 		{NotificationID: 1, Message: "Database notification 1", Meta: data.NotificationMeta{Url: "https://example.com/1"}},
 		{NotificationID: 2, Message: "Database notification 2", Meta: data.NotificationMeta{Url: "https://example.com/2"}},
@@ -114,6 +122,11 @@ func (app *application) loadAndProcessDBData(userID int64) error {
 	}
 
 	for _, notification := range pendingNotifications {
+		// Deduplication check
+		if _, exists := (*processed)[notification.NotificationID]; exists {
+			app.logger.Info("Skipping duplicate notification from DB", zap.Int64("notification_id", notification.NotificationID))
+			continue
+		}
 		app.PublishNotification(userID, notification)
 	}
 	return nil
@@ -153,6 +166,12 @@ func (app *application) PublishNotification(userID int64, notification data.Noti
 
 		// Send notification directly to the user's SSE channel
 		ch <- string(notificationJSON)
+		// update database notification status
+		err = app.updateDatabaseNotificationStatus(notification.NotificationID, data.NotificationStatusTypeDelivered)
+		if err != nil {
+			app.logger.Error("Error updating notification status in database", zap.Error(err))
+			return
+		}
 		app.logger.Info("Notification sent to user via SSE", zap.Int64("userID", userID))
 	} else {
 		// If the user is offline, save the notification to Redis for future delivery
@@ -280,9 +299,9 @@ func (app *application) SimulateData(userID int64) {
 	channel := fmt.Sprintf("%s:%d", data.RedisNotManNotificationKey, userID)
 	for {
 		time.Sleep(7 * time.Second)
-
+		notificationID := rand.Int63()
 		notification := data.NotificationContent{
-			NotificationID: rand.Int63(),
+			NotificationID: notificationID,
 			Message:        fmt.Sprintf("Simulated data: %d", rand.Intn(100)),
 			Meta:           data.NotificationMeta{Url: "https://example.com", Tags: "simulation"},
 		}
@@ -302,14 +321,19 @@ func (app *application) SimulateData(userID int64) {
 
 // SimulateDataWithRedisPubSub simulates data and publishes messages to a user-specific Redis pub/sub channel
 func (app *application) SimulateDataWithRedisPubSub(userID int64) {
-
+	forceFirstSimilarNotification := true
 	for {
+		notificationID := rand.Int63()
+		if forceFirstSimilarNotification { // Force a similar notification to test deduplication
+			notificationID = 1
+			forceFirstSimilarNotification = false
+		}
 		// Sleep to simulate a delay between notifications
 		time.Sleep(10 * time.Second)
 
 		// Create a simulated notification
 		notification := data.NotificationContent{
-			NotificationID: rand.Int63(),
+			NotificationID: notificationID,
 			Message:        fmt.Sprintf("Redis Simulation data: %d", rand.Intn(100)),
 			Meta:           data.NotificationMeta{Url: "https://example.com", Tags: "simulation"},
 		}
