@@ -148,7 +148,9 @@ SELECT
     meta,
     redis_key
 FROM notifications
-WHERE user_id = $1 AND status = 'pending' AND expires_at > NOW()
+WHERE user_id = $1 
+AND status = 'pending' 
+AND (expires_at > NOW() OR expires_at IS NULL)
 `
 
 func (q *Queries) GetUnreadNotifications(ctx context.Context, userID int64) ([]Notification, error) {

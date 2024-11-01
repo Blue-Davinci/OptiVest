@@ -73,7 +73,7 @@ func (app *application) loadAndSendPendingNotifications(userID int64) {
 		app.logger.Info("Error loading notifications from Redis:", zap.Error(err))
 	}
 
-	// Load from Database if needed
+	// Load from Database
 	err = app.loadAndProcessDBData(userID, &processedNotifications)
 	if err != nil {
 		app.logger.Info("Error loading notifications from database:", zap.Error(err))
@@ -111,23 +111,48 @@ func (app *application) loadAndProcessRedisData(ctx context.Context, userID int6
 
 // loadAndProcessDBData loads and processes pending notifications from the database
 func (app *application) loadAndProcessDBData(userID int64, processed *map[int64]bool) error {
-	pendingNotifications := []data.NotificationContent{
-		{NotificationID: 1, Message: "Database notification 1", Meta: data.NotificationMeta{Url: "https://example.com/1"}},
-		{NotificationID: 2, Message: "Database notification 2", Meta: data.NotificationMeta{Url: "https://example.com/2"}},
+	pendingNotifications, err := app.models.NotificationManager.GetUnreadNotifications(userID)
+	if err != nil {
+		return err
 	}
-
+	// check length
 	if len(pendingNotifications) == 0 {
-		app.logger.Info("No pending notifications in DB for user:", zap.Int64("userID", userID))
-		return errors.New("no pending notifications found")
+		app.logger.Info("No pending notifications found", zap.Int64("userID", userID))
+		return data.ErrGeneralRecordNotFound
 	}
 
 	for _, notification := range pendingNotifications {
 		// Deduplication check
-		if _, exists := (*processed)[notification.NotificationID]; exists {
-			app.logger.Info("Skipping duplicate notification from DB", zap.Int64("notification_id", notification.NotificationID))
+		if _, exists := (*processed)[notification.ID]; exists {
+			app.logger.Info("Skipping duplicate notification from DB", zap.Int64("notification_id", notification.ID))
 			continue
 		}
-		app.PublishNotification(userID, notification)
+		app.logger.Info("Pending notifications recieved from Database", zap.Int64("Notification ID", notification.ID))
+		var notificationMeta data.NotificationMeta
+		err := json.Unmarshal([]byte(notification.Meta), &notificationMeta)
+		if err != nil {
+			app.logger.Error("Failed to unmarshal notification meta", zap.Error(err))
+			continue
+		}
+		// create our notification content
+		notificationContent := data.NotificationContent{
+			NotificationID: notification.ID,
+			Message:        notification.Message,
+			Meta:           notificationMeta,
+		}
+		app.logger.Info("Pending notifications sent from Database", zap.Int64("Notification ID", notification.ID))
+		// Publish to the pub/sub system
+		app.PublishNotification(userID, notificationContent)
+		// update the notification status to delivered
+		err = app.updateDatabaseNotificationStatus(notification.ID, data.NotificationStatusTypeDelivered)
+		if err != nil {
+			switch {
+			case errors.Is(err, data.ErrEditConflict):
+				return data.ErrEditConflict
+			default:
+				return err
+			}
+		}
 	}
 	return nil
 }
@@ -223,7 +248,7 @@ func (app *application) updateDatabaseNotificationStatus(notificationID int64, s
 		status,
 	)
 	if err != nil {
-		return fmt.Errorf("error updating notification status: %v", err)
+		return err
 	}
 	return nil
 }

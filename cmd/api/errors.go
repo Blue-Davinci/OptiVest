@@ -6,12 +6,6 @@ import (
 	"go.uber.org/zap"
 )
 
-// error response structure for WebSocket clients.
-type wsErrorResponse struct {
-	Error   string `json:"error"`
-	Message string `json:"message"`
-}
-
 func (app *application) logError(r *http.Request, err error) {
 	// Use the PrintError() method to log the error message, and include the current
 	// request method and URL as properties in the log entry.
