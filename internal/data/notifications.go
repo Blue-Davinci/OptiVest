@@ -31,6 +31,7 @@ const (
 	NotificationTypeFeeds               = "feeds"
 	NotificationTypeFinancialTracking   = "financial_tracking"
 	NotificationTypeFinancialManagement = "financial_management"
+	NotificationTypeAward               = "award"
 )
 
 const (
@@ -52,7 +53,7 @@ type Notification struct {
 	ReadAt           *time.Time                  `json:"read_at,omitempty"`    // Nullable
 	ExpiresAt        *time.Time                  `json:"expires_at,omitempty"` // Nullable
 	Meta             json.RawMessage             `json:"meta,omitempty"`       // Can be used for JSONB
-	RedisKey         *string                     `json:"redis_key,omitempty"`  // Nullable
+	RedisKey         *string                     `json:"-"`                    // Nullable, not exposed to the client
 }
 
 // Struct to hold the notification information
@@ -60,12 +61,29 @@ type NotificationContent struct {
 	NotificationID int64            `json:"notification_id"`
 	Message        string           `json:"message"`
 	Meta           NotificationMeta `json:"meta"`
+	SentAt         time.Time        `json:"sent_at"`
 }
 
 type NotificationMeta struct {
 	Url      string `json:"url,omitempty"`
 	ImageUrl string `json:"image_url,omitempty"`
 	Tags     string `json:"tags,omitempty"`
+}
+
+// MapNotificationStatusTypeToConst maps the notification status type to the database notification status type.
+func MapNotificationStatusTypeToConst(statusType string) (database.NotificationStatus, error) {
+	switch statusType {
+	case "delivered":
+		return NotificationStatusTypeDelivered, nil
+	case "pending":
+		return NotificationStatusTypePending, nil
+	case "read":
+		return NotificationStatusTypeRead, nil
+	case "expired":
+		return NotificationStatusTypeExpired, nil
+	default:
+		return NotificationStatusTypePending, ErrInvalidStatusType
+	}
 }
 
 // CreateNewNotification() creates a new notification in the system.
@@ -120,6 +138,48 @@ func (m NotificationManagerModel) UpdateNotificationReadAtAndStatus(notification
 	fmt.Println("Notification: ", notificationID, ", was updated at: ", updatedAt)
 	// return nil if there was no error
 	return nil
+}
+
+// GetAllNotificationsByUserId() gets all the notifications for a user.
+// This method supports both pagination as a notification_type search.
+// We take in a user id, notification type and a filter and return a slice of notifications and an error if there was an issue.
+func (m NotificationManagerModel) GetAllNotificationsByUserId(userID int64, notificationType string, filters Filters) ([]*Notification, Metadata, error) {
+	ctx, cancel := contextGenerator(context.Background(), DefualtNotManContextTimeout)
+	defer cancel()
+	// Get all the notifications from the database
+	notificationsRows, err := m.DB.GetAllNotificationsByUserId(ctx, database.GetAllNotificationsByUserIdParams{
+		UserID:  userID,
+		Column2: notificationType,
+		Limit:   int32(filters.limit()),
+		Offset:  int32(filters.offset()),
+	})
+	if err != nil {
+		switch {
+		case err == sql.ErrNoRows:
+			return nil, Metadata{}, ErrGeneralRecordNotFound
+		default:
+			return nil, Metadata{}, err
+		}
+	}
+	// check for empty notifications and return
+	if len(notificationsRows) == 0 {
+		//fmt.Println("No notifications found for user: ", userID)
+		return nil, Metadata{}, ErrGeneralRecordNotFound
+	}
+
+	// create a slice of notifications
+	notifications := []*Notification{}
+	fmt.Println("First notification ID: ", notificationsRows[0].ID)
+	totalNotifications := 0
+	// loop through using the populate function to fill in the notification struct
+	for _, notification := range notificationsRows {
+		totalNotifications = int(notification.TotalCount)
+		notifications = append(notifications, populateNotification(notification))
+	}
+	// make metadata struct
+	metadata := calculateMetadata(totalNotifications, filters.Page, filters.PageSize)
+	// return the notifications if there was no error
+	return notifications, metadata, nil
 }
 
 // GetUnreadNotifications() gets all the unread notifications for a user i.e
@@ -214,6 +274,20 @@ func populateNotification(notificationRow interface{}) *Notification {
 			RedisKey:         &notification.RedisKey.String,
 		}
 	case database.GetAllExpiredNotificationsRow:
+		return &Notification{
+			ID:               notification.ID,
+			UserID:           notification.UserID,
+			Message:          notification.Message,
+			NotificationType: notification.NotificationType,
+			Status:           notification.Status,
+			CreatedAt:        notification.CreatedAt,
+			UpdatedAt:        notification.UpdatedAt,
+			ReadAt:           &notification.ReadAt.Time,
+			ExpiresAt:        &notification.ExpiresAt.Time,
+			Meta:             notification.Meta.RawMessage,
+			RedisKey:         &notification.RedisKey.String,
+		}
+	case database.GetAllNotificationsByUserIdRow:
 		return &Notification{
 			ID:               notification.ID,
 			UserID:           notification.UserID,

@@ -20,8 +20,11 @@ func (app *application) sseRoutes() http.Handler {
 	}))
 	//Use alice to make a global middleware chain.
 	sseMiddleware := alice.New(app.recoverPanic, app.authenticate, app.requireAuthenticatedUser, app.requireActivatedUser).Then
-
-	router.With(sseMiddleware).Get("/sse", app.ServeSSE)
+	// Make our categorized routes
+	v1Router := chi.NewRouter()
+	v1Router.With(sseMiddleware).Get("/sse", app.ServeSSE)
+	// Moount the v1Router to the main base router
+	router.Mount("/v1", v1Router)
 	return router
 }
 
@@ -61,6 +64,7 @@ func (app *application) routes() http.Handler {
 	v1Router.With(dynamicMiddleware.Then).Mount("/feeds", app.feedRoutes())
 	v1Router.With(dynamicMiddleware.Then).Mount("/awards", app.awardRoutes())
 	v1Router.With(dynamicMiddleware.Then).Mount("/search-options", app.searchOptionRoutes())
+	v1Router.With(dynamicMiddleware.Then).Mount("/notifications", app.notifications())
 
 	// Moount the v1Router to the main base router
 	router.Mount("/v1", v1Router)
@@ -244,4 +248,12 @@ func (app *application) searchOptionRoutes() chi.Router {
 	searchOptionRoutes.Get("/currencies", app.getAllCurrencyHandler)
 	searchOptionRoutes.Get("/budget-id-names", app.getDistinctBudgetIdBudgetNameHandler)
 	return searchOptionRoutes
+}
+
+// notifications() is a method that returns a chi.Router that contains all the routes for the notifications
+func (app *application) notifications() chi.Router {
+	notificationRoutes := chi.NewRouter()
+	notificationRoutes.Get("/", app.getAllNotificationsByUserIdHandler)
+	notificationRoutes.Patch("/{notificationID}", app.updatedNotificationHandler)
+	return notificationRoutes
 }

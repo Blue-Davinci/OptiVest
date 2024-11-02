@@ -143,6 +143,7 @@ func (app *application) loadAndProcessDBData(userID int64, processed *map[int64]
 		notificationContent := data.NotificationContent{
 			NotificationID: notification.ID,
 			Message:        notification.Message,
+			SentAt:         notification.CreatedAt,
 			Meta:           notificationMeta,
 		}
 		app.logger.Info("Pending notifications sent from Database", zap.Int64("Notification ID", notification.ID))
@@ -187,6 +188,8 @@ func (app *application) PublishNotification(userID int64, notification data.Noti
 
 	// Check if the user has an active connection
 	if ch, exists := app.Clients[userID]; exists {
+		// set the time to now with seconds precision
+		notification.SentAt = time.Now().Truncate(time.Second)
 		// Marshal the notification to JSON
 		notificationJSON, err := json.Marshal(notification)
 		if err != nil {
@@ -397,10 +400,14 @@ func (app *application) BroadcastNotification(notification data.NotificationCont
 // SimulateData simulates data and publishes messages to a user-specific channel in Redis
 func (app *application) SimulateData(userID int64) {
 	for {
-		time.Sleep(7 * time.Second)
+		time.Sleep(15 * time.Second)
 		notification := data.NotificationContent{
 			Message: fmt.Sprintf("Simulated data: %d", rand.Intn(100)),
-			Meta:    data.NotificationMeta{Url: "https://example.com", Tags: "simulation"},
+			Meta: data.NotificationMeta{
+				Url:      "http://localhost:5173/dashboard/notifications",
+				ImageUrl: "https://images.unsplash.com/photo-1640160186315-838b53fcabc6?q=80&w=1172&auto=format&fit=crop&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D",
+				Tags:     "non-redis simulation",
+			},
 		}
 
 		err := app.PublishNotificationToRedis(userID, data.NotificationTypeDefault, notification)
@@ -414,12 +421,16 @@ func (app *application) SimulateData(userID int64) {
 func (app *application) SimulateDataWithRedisPubSub(userID int64) {
 	for {
 		// Sleep to simulate a delay between notifications
-		time.Sleep(10 * time.Second)
+		time.Sleep(20 * time.Second)
 
 		// Create a simulated notification
 		notification := data.NotificationContent{
 			Message: fmt.Sprintf("Redis Simulation data: %d", rand.Intn(100)),
-			Meta:    data.NotificationMeta{Url: "https://example.com", Tags: "simulation"},
+			Meta: data.NotificationMeta{
+				Url:      "http://localhost:5173/dashboard/notifications",
+				ImageUrl: "https://images.unsplash.com/photo-1640160186315-838b53fcabc6?q=80&w=1172&auto=format&fit=crop&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D",
+				Tags:     "simulation",
+			},
 		}
 
 		err := app.PublishNotificationToRedis(userID, data.NotificationTypeDefault, notification)

@@ -55,3 +55,23 @@ WHERE expires_at < NOW()
 AND status = 'pending'
 ORDER BY created_at DESC
 LIMIT $1 OFFSET $2;
+
+-- name: GetAllNotificationsByUserId :many
+SELECT
+    COUNT(*) OVER() AS total_count,
+    id,
+    user_id,
+    message,
+    notification_type,
+    status,
+    created_at,
+    updated_at,
+    read_at,
+    expires_at,
+    meta,
+    redis_key
+FROM notifications
+WHERE user_id = $1
+AND ($2 = '' OR to_tsvector('simple', notification_type) @@ plainto_tsquery('simple', $2))
+ORDER BY created_at DESC
+LIMIT $3 OFFSET $4;

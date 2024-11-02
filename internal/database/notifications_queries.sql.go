@@ -134,6 +134,90 @@ func (q *Queries) GetAllExpiredNotifications(ctx context.Context, arg GetAllExpi
 	return items, nil
 }
 
+const getAllNotificationsByUserId = `-- name: GetAllNotificationsByUserId :many
+SELECT
+    COUNT(*) OVER() AS total_count,
+    id,
+    user_id,
+    message,
+    notification_type,
+    status,
+    created_at,
+    updated_at,
+    read_at,
+    expires_at,
+    meta,
+    redis_key
+FROM notifications
+WHERE user_id = $1
+AND ($2 = '' OR to_tsvector('simple', notification_type) @@ plainto_tsquery('simple', $2))
+ORDER BY created_at DESC
+LIMIT $3 OFFSET $4
+`
+
+type GetAllNotificationsByUserIdParams struct {
+	UserID  int64
+	Column2 interface{}
+	Limit   int32
+	Offset  int32
+}
+
+type GetAllNotificationsByUserIdRow struct {
+	TotalCount       int64
+	ID               int64
+	UserID           int64
+	Message          string
+	NotificationType string
+	Status           NotificationStatus
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+	ReadAt           sql.NullTime
+	ExpiresAt        sql.NullTime
+	Meta             pqtype.NullRawMessage
+	RedisKey         sql.NullString
+}
+
+func (q *Queries) GetAllNotificationsByUserId(ctx context.Context, arg GetAllNotificationsByUserIdParams) ([]GetAllNotificationsByUserIdRow, error) {
+	rows, err := q.db.QueryContext(ctx, getAllNotificationsByUserId,
+		arg.UserID,
+		arg.Column2,
+		arg.Limit,
+		arg.Offset,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetAllNotificationsByUserIdRow
+	for rows.Next() {
+		var i GetAllNotificationsByUserIdRow
+		if err := rows.Scan(
+			&i.TotalCount,
+			&i.ID,
+			&i.UserID,
+			&i.Message,
+			&i.NotificationType,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.ReadAt,
+			&i.ExpiresAt,
+			&i.Meta,
+			&i.RedisKey,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getUnreadNotifications = `-- name: GetUnreadNotifications :many
 SELECT
     id,
