@@ -1,6 +1,13 @@
-# TODO
+<p align="center">
+  <a href="" rel="noopener">
+ <img width=200px height=190px src="https://i.ibb.co/hZdMWvh/optivest-cropped.png" alt="Project logo"></a>
+</p>
 
-## Features to Implement
+<h3 align="center">OptiVest</h3>
+
+# TODO 📝
+
+## Features to Implement 🚀
 
 1. **Enhanced Notification System**
    - ~~**Migration to SSE**: Migrate from WebSockets to Server-Sent Events (SSE) for real-time notifications.~~
