@@ -17,20 +17,20 @@
 ---
 
 <p align="center"> Optivest <b>[Back-End]: </b> This is the backend sister project of OptiVest Project. To Check out the Frontend, go <a href="https://github.com/Blue-Davinci/OptiVest-Frontend">here</a>
-
-    <br> 
 </p>
+
+<hr> 
 
 ## 📝 Table of Contents
 
 - [About](#about)
 - [Features](#features)
 - [Getting Started](#getting_started)
+- [Endpoints](#endpoints)
 - [Deployment](#deployment)
 - [Usage](#usage)
 - [Built Using](#built_using)
-- [TODO](../TODO.md)
-- [Contributing](../CONTRIBUTING.md)
+- [TODO](./TODO.md)
 - [Authors](#authors)
 - [Acknowledgments](#acknowledgement)
 
@@ -280,7 +280,7 @@ go run ./cmd/api
 
 <hr />
 
-### API Endpoints <a name = "endpoints"></a>
+### API Endpoints 📌 <a name="endpoints"></a>
 A full ist is documented using swagger, but here is a quick runwdown:
 1. **GET /v1/healthcheck:** Checks the health of the application. Returns a 200 OK status code if the application is running correctly.
 
@@ -292,6 +292,7 @@ A full ist is documented using swagger, but here is a quick runwdown:
 
 5. **GET /debug/vars:** Provides debug variables from the `expvar` package. 
 
+(will be added)
 
 ## 🔧 Running the tests <a name = "tests"></a>
 
