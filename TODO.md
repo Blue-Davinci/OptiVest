@@ -14,9 +14,9 @@
    - ~~**Redis Integration**: Integrate Redis for efficient notification management.~~
    - ~~**Pending Notifications**: Load pending notifications from Redis and the database while preventing duplication.~~
    - **Notification Endpoints**: 
-     -~~ **Status Updates**: Endpoint to update the status of notifications (e.g., mark as read).~~
+     -~~**Status Updates**: Endpoint to update the status of notifications (e.g., mark as read).~~
      - **Deletion**: Endpoint to delete notifications.
-     -~~ **Fetch Notifications**: Endpoints to get both unread and all notifications for a user.~~
+     -~~**Fetch Notifications**: Endpoints to get both unread and all notifications for a user.~~
 
 2. **Plan, Payment, and Subscription Capability**
    - **Plan Creation**: Allow users to create different plans (e.g., Basic, Premium, Enterprise).
