@@ -76,10 +76,8 @@ Before you can run or contribute to this project, you'll need to have the follow
 - A Go IDE or text editor: While not strictly necessary, a Go IDE or a text editor with Go support can make it easier to work with the code. I use vscode.
 - [Git](https://git-scm.com/downloads): You'll need Git to clone the repo.
 - [Redis](https://redis.io/): OptiVest uses Redis for caching to enhance performance and reduce API load.
-- [OptiVest-Predictor-Microservice](https://github.com/Blue-Davinci/OptiVest_Finance_Predictor_Micro_Service_V1): Clone and ser up this micro-service, which is esential for financial predictions and recommendations
-```
-Give examples
-```
+- [OptiVest-Predictor-Microservice](https://github.com/Blue-Davinci/OptiVest_Finance_Predictor_Micro_Service_V1): Clone and set up this micro-service, which is esential for financial predictions and recommendations
+
 
 ### Installing
 
