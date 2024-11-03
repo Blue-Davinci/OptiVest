@@ -15,7 +15,7 @@
    - ~~**Pending Notifications**: Load pending notifications from Redis and the database while preventing duplication.~~
    - **Notification Endpoints**: 
      -~~ **Status Updates**: Endpoint to update the status of notifications (e.g., mark as read).~~
-     - **Deletion**: Endpoint to delete notifications.
+     - ~~**Deletion**: Endpoint to delete notifications.~~
      -~~ **Fetch Notifications**: Endpoints to get both unread and all notifications for a user.~~
 
 2. **Plan, Payment, and Subscription Capability**
