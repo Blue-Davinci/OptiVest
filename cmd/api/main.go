@@ -140,6 +140,7 @@ type application struct {
 	Mutex             sync.Mutex
 	WebSocketUpgrader websocket.Upgrader
 	Clients           map[int64]chan string
+	ListeningUsers    map[int64]bool // Track active listeners for each user
 }
 
 func main() {
@@ -292,7 +293,8 @@ func main() {
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
 		},
-		Clients: make(map[int64]chan string),
+		Clients:        make(map[int64]chan string),
+		ListeningUsers: make(map[int64]bool),
 	}
 	err = app.startupFunction()
 	if err != nil {
@@ -344,6 +346,7 @@ func (app *application) startSchedulers() {
 	go app.trackOverdueDebtsHandler()                // trackOverdueDebts
 	go app.trackExpiredNotificationsHandler()        // trackExpiredNotification
 	go app.startRssFeedScraperHandler()              // rssFeedScraper
+	go app.listenToAwardNotifications()              // listenToAwardNotifications
 }
 
 // publishMetrics sets up the expvar variables for the application

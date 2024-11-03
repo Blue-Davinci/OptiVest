@@ -57,6 +57,34 @@ func (q *Queries) CreateNewNotification(ctx context.Context, arg CreateNewNotifi
 	return i, err
 }
 
+const deleteAllNotificationsByUserId = `-- name: DeleteAllNotificationsByUserId :exec
+DELETE FROM notifications
+WHERE user_id = $1
+`
+
+func (q *Queries) DeleteAllNotificationsByUserId(ctx context.Context, userID int64) error {
+	_, err := q.db.ExecContext(ctx, deleteAllNotificationsByUserId, userID)
+	return err
+}
+
+const deleteNotificationById = `-- name: DeleteNotificationById :one
+DELETE FROM notifications
+WHERE id = $1 AND user_id = $2
+RETURNING id
+`
+
+type DeleteNotificationByIdParams struct {
+	ID     int64
+	UserID int64
+}
+
+func (q *Queries) DeleteNotificationById(ctx context.Context, arg DeleteNotificationByIdParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, deleteNotificationById, arg.ID, arg.UserID)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
 const getAllExpiredNotifications = `-- name: GetAllExpiredNotifications :many
 SELECT
     COUNT(*) OVER() AS total_count,

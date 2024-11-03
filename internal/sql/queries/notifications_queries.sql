@@ -75,3 +75,12 @@ WHERE user_id = $1
 AND ($2 = '' OR to_tsvector('simple', notification_type) @@ plainto_tsquery('simple', $2))
 ORDER BY created_at DESC
 LIMIT $3 OFFSET $4;
+
+-- name: DeleteNotificationById :one
+DELETE FROM notifications
+WHERE id = $1 AND user_id = $2
+RETURNING id;
+
+-- name: DeleteAllNotificationsByUserId :exec
+DELETE FROM notifications
+WHERE user_id = $1;

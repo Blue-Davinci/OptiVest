@@ -1,8 +1,10 @@
 package main
 
 import (
+	"database/sql"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/Blue-Davinci/OptiVest/internal/data"
 	"github.com/Blue-Davinci/OptiVest/internal/validator"
@@ -35,7 +37,10 @@ func (app *application) updatedNotificationHandler(w http.ResponseWriter, r *htt
 		return
 	}
 	// update the notification's status
-	err = app.updateDatabaseNotificationStatus(notificationID, status)
+	err = app.models.NotificationManager.UpdateNotificationReadAtAndStatus(
+		notificationID,
+		sql.NullTime{Time: time.Now(), Valid: true},
+		status)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrEditConflict):
@@ -102,6 +107,51 @@ func (app *application) getAllNotificationsByUserIdHandler(w http.ResponseWriter
 	}
 	// return a 200 status code
 	err = app.writeJSON(w, http.StatusOK, envelope{"notifications": notifications, "metadata": metadata}, nil)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+	}
+}
+
+// deleteNotificationByIdHandler() is a notification handler responsible for deleting a notification by id.
+// This is a delete endpoint that takes in a notification id supplied via he URL.
+// We return a 200 status code if the notification was deleted successfully
+func (app *application) deleteNotificationByIdHandler(w http.ResponseWriter, r *http.Request) {
+	// read the notification id from the url
+	notificationID, err := app.readIDParam(r, "notificationID")
+	if err != nil {
+		app.notFoundResponse(w, r)
+		return
+	}
+	// delete the notification by id
+	err = app.models.NotificationManager.DeleteNotificationById(notificationID, app.contextGetUser(r).ID)
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrGeneralRecordNotFound):
+			app.notFoundResponse(w, r)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
+	// return a 200 status code
+	err = app.writeJSON(w, http.StatusOK, envelope{"notification": "notification deleted successfully"}, nil)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+	}
+}
+
+// deleteAllNotificationsByUserIdHandler() is a notification handler responsible for deleting all notifications for a user.
+// This is a delete endpoint that takes in a user id.
+// We return a 200 status code if the notifications were deleted successfully
+func (app *application) deleteAllNotificationsByUserIdHandler(w http.ResponseWriter, r *http.Request) {
+	// delete all notifications for a user
+	err := app.models.NotificationManager.DeleteAllNotificationsByUserId(app.contextGetUser(r).ID)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+		return
+	}
+	// return a 200 status code
+	err = app.writeJSON(w, http.StatusOK, envelope{"notification": "all notifications have been deleted successfully"}, nil)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 	}

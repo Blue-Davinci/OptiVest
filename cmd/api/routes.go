@@ -255,5 +255,8 @@ func (app *application) notifications() chi.Router {
 	notificationRoutes := chi.NewRouter()
 	notificationRoutes.Get("/", app.getAllNotificationsByUserIdHandler)
 	notificationRoutes.Patch("/{notificationID}", app.updatedNotificationHandler)
+
+	notificationRoutes.Delete("/{notificationID}", app.deleteNotificationByIdHandler)
+	notificationRoutes.Delete("/", app.deleteAllNotificationsByUserIdHandler)
 	return notificationRoutes
 }

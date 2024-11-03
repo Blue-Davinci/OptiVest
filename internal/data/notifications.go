@@ -23,7 +23,7 @@ const (
 const (
 	DefualtNotManContextTimeout         = 3 * time.Second
 	DefaultNotificationTimeout          = 30 * time.Second
-	DefaultRedisNotificationTTLDuration = 1 * time.Hour
+	DefaultRedisNotificationTTLDuration = 10 * time.Minute
 )
 
 const (
@@ -255,6 +255,42 @@ func (m NotificationManagerModel) GetAllExpiredNotifications(filters Filters) ([
 	metadata := calculateMetadata(totalNotifications, filters.Page, filters.PageSize)
 	// return the notifications if there was no error
 	return notifications, metadata, nil
+}
+
+// DeleteNotificationById() deletes a notification by id.
+// We take in a notification id and a userID and return an error if there was an issue deleting the notification.
+func (m NotificationManagerModel) DeleteNotificationById(notificationID int64, userID int64) error {
+	ctx, cancel := contextGenerator(context.Background(), DefualtNotManContextTimeout)
+	defer cancel()
+	// Delete the notification from the database
+	_, err := m.DB.DeleteNotificationById(ctx, database.DeleteNotificationByIdParams{
+		ID:     notificationID,
+		UserID: userID,
+	})
+	if err != nil {
+		switch {
+		case err == sql.ErrNoRows:
+			return ErrGeneralRecordNotFound
+		default:
+			return err
+		}
+	}
+	// return nil if there was no error
+	return nil
+}
+
+// DeleteAllNotificationsByUserId() deletes all notifications for a user.
+// We take in a user id and return an error if there was an issue deleting the notifications.
+func (m NotificationManagerModel) DeleteAllNotificationsByUserId(userID int64) error {
+	ctx, cancel := contextGenerator(context.Background(), DefualtNotManContextTimeout)
+	defer cancel()
+	// Delete all notifications from the database
+	err := m.DB.DeleteAllNotificationsByUserId(ctx, userID)
+	if err != nil {
+		return err
+	}
+	// return nil if there was no error
+	return nil
 }
 
 func populateNotification(notificationRow interface{}) *Notification {

@@ -31,20 +31,9 @@ func (app *application) ServeSSE(w http.ResponseWriter, r *http.Request) {
 	app.AddClient(userID, w)
 	defer app.RemoveClient(userID)
 
-	// Listen for Redis messages for the specific user
-	go app.ListenForRedisPubSubUserMessages(userID)
-
-	// Load and send pending notifications
+	// Load and send pending notifications, This is safe as it is a one-time operation
+	// no matter how many times the client reconnects, the pending notifications will only be sent once
 	go app.loadAndSendPendingNotifications(userID)
-
-	// Listen for award notifications
-	go app.listenToAwardNotifications()
-
-	// Simulate data
-	go app.SimulateData(1)
-
-	// Simulate data with Redis pub/sub
-	go app.SimulateDataWithRedisPubSub(3)
 
 	app.logger.Info("SSE client connected", zap.Int64("userID", userID))
 
@@ -167,6 +156,24 @@ func (app *application) loadAndProcessDBData(userID int64, processed *map[int64]
 func (app *application) AddClient(userID int64, w http.ResponseWriter) {
 	app.Mutex.Lock()
 	defer app.Mutex.Unlock()
+
+	// Check if the user already has an active connection
+	if _, exists := app.Clients[userID]; exists {
+		app.RemoveClient(userID) // Close existing connection to avoid duplicates
+	}
+
+	// Initialize user-specific listeners if they do not already exist
+	// this is to prevent multiple goroutines listening to the same user or channel
+	// this will also prevent duplicate notifications from being sent to the user
+	if _, listening := app.ListeningUsers[userID]; !listening {
+		go app.ListenForRedisPubSubUserMessages(userID)
+		go app.listenToAwardNotifications()
+		// Simulate data with Redis pub/sub
+		go app.SimulateDataWithRedisPubSub(userID)
+		app.ListeningUsers[userID] = true
+	}
+
+	// Create a new channel for the user
 	app.Clients[userID] = make(chan string)
 }
 
@@ -189,7 +196,7 @@ func (app *application) PublishNotification(userID int64, notification data.Noti
 	// Check if the user has an active connection
 	if ch, exists := app.Clients[userID]; exists {
 		// set the time to now with seconds precision
-		notification.SentAt = time.Now().Truncate(time.Second)
+		notification.SentAt = time.Now()
 		// Marshal the notification to JSON
 		notificationJSON, err := json.Marshal(notification)
 		if err != nil {
@@ -205,7 +212,6 @@ func (app *application) PublishNotification(userID int64, notification data.Noti
 			app.logger.Error("Error updating notification status in database", zap.Error(err))
 			return
 		}
-		app.logger.Info("Notification sent to user via SSE", zap.Int64("userID", userID))
 	} else {
 		// If the user is offline, save the notification to Redis for future delivery
 		err := app.storeNotificationInRedis(userID, notification)
@@ -301,6 +307,7 @@ func (app *application) PublishNotificationToRedis(userID int64, notificationTyp
 func (app *application) ListenForRedisPubSubUserMessages(userID int64) {
 	ctx := context.Background()
 	pubsub := app.RedisDB.Subscribe(ctx, fmt.Sprintf("%s:%d", data.RedisNotManNotificationKey, userID))
+
 	defer pubsub.Close()
 
 	for msg := range pubsub.Channel() {
@@ -397,31 +404,11 @@ func (app *application) BroadcastNotification(notification data.NotificationCont
 	}
 }
 
-// SimulateData simulates data and publishes messages to a user-specific channel in Redis
-func (app *application) SimulateData(userID int64) {
-	for {
-		time.Sleep(15 * time.Second)
-		notification := data.NotificationContent{
-			Message: fmt.Sprintf("Simulated data: %d", rand.Intn(100)),
-			Meta: data.NotificationMeta{
-				Url:      "http://localhost:5173/dashboard/notifications",
-				ImageUrl: "https://images.unsplash.com/photo-1640160186315-838b53fcabc6?q=80&w=1172&auto=format&fit=crop&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D",
-				Tags:     "non-redis simulation",
-			},
-		}
-
-		err := app.PublishNotificationToRedis(userID, data.NotificationTypeDefault, notification)
-		if err != nil {
-			app.logger.Info("Error publishing simulated data:", zap.Error(err))
-		}
-	}
-}
-
 // SimulateDataWithRedisPubSub simulates data and publishes messages to a user-specific Redis pub/sub channel
 func (app *application) SimulateDataWithRedisPubSub(userID int64) {
 	for {
 		// Sleep to simulate a delay between notifications
-		time.Sleep(20 * time.Second)
+		time.Sleep(10 * time.Second)
 
 		// Create a simulated notification
 		notification := data.NotificationContent{
