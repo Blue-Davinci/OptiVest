@@ -188,9 +188,13 @@ func (app *application) updateBudgetHandler(w http.ResponseWriter, r *http.Reque
 			app.failedValidationResponse(w, r, v.Errors)
 			return
 		} else if input.TotalAmount.Cmp(totalUtilizedBudgetAmount) < 0 && !budget.IsStrict {
-			message.Message = append(message.Message, "though allowed, your new budget total amount is less than the total goal and expense amounts")
+			// make a message showing the budget name, current surplus, original total amount and new total amount
+			notificationMessage := fmt.Sprintf("Though allowed, your new budget total amount is less than the total goal and expense amounts. Budget %s has a surplus of %s, original total amount was %s and new total amount is %s", budget.Name, budgetTotal.TotalSurplus.String(), budget.TotalAmount.String(), input.TotalAmount.String())
+			message.Message = append(message.Message, notificationMessage)
 		} else {
-			message.Message = append(message.Message, "budget total amount updated")
+			// Add a message if the total amount is updated
+			notificationMessage := fmt.Sprintf("Budget %s total amount updated to %s", budget.Name, input.TotalAmount.String())
+			message.Message = append(message.Message, notificationMessage)
 		}
 	}
 
@@ -242,6 +246,12 @@ func (app *application) updateBudgetHandler(w http.ResponseWriter, r *http.Reque
 	err = app.writeJSON(w, http.StatusOK, envelope{"budget": budget, "message": message, "totals": budgetTotal}, nil)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
+	}
+	// notify the user of the user incase
+	err = app.notificationPreperationHelper(user.ID, message.Message, data.NotificationTypeBudget, "", "", "budget_updated")
+	if err != nil {
+		// just log the error
+		app.logger.Error("error while sending budget notification", zap.Error(err))
 	}
 }
 

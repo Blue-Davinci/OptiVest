@@ -656,3 +656,28 @@ func (app *application) proces1sOCRRequestHelper(url string) (*data.OCRResponse,
 	app.logger.Info("Done processing OCR request successfully")
 	return &response, nil
 }
+
+// notificationPreperationHelper() is a helper function that will prepare the notification
+// we will recieve the , []mesage,notificationtype , url, imgurl and tags
+// for each item, we will make a notificationcontent struct and use app.PublishNotificationToRedis
+// to publish the notification to Redis, passing in the userID, notification type and the notification content
+func (app *application) notificationPreperationHelper(userID int64, messages []string, notificationType, url, imgURL, tags string) error {
+	if len(messages) == 0 {
+		return nil
+	}
+	for _, message := range messages {
+		notificationContent := data.NotificationContent{
+			Message: message,
+			Meta: data.NotificationMeta{
+				Url:      url,
+				ImageUrl: imgURL,
+				Tags:     tags,
+			},
+		}
+		err := app.PublishNotificationToRedis(userID, notificationType, notificationContent)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}

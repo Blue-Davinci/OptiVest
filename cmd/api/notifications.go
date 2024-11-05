@@ -9,8 +9,6 @@ import (
 	"net/http"
 	"time"
 
-	"math/rand"
-
 	"github.com/Blue-Davinci/OptiVest/internal/data"
 	"github.com/Blue-Davinci/OptiVest/internal/database"
 	"github.com/lib/pq"
@@ -161,20 +159,23 @@ func (app *application) AddClient(userID int64, w http.ResponseWriter) {
 	if _, exists := app.Clients[userID]; exists {
 		app.RemoveClient(userID) // Close existing connection to avoid duplicates
 	}
+	// Create a new context with cancellation for the user
+	ctx, cancelFunc := context.WithCancel(context.Background())
 
 	// Initialize user-specific listeners if they do not already exist
 	// this is to prevent multiple goroutines listening to the same user or channel
 	// this will also prevent duplicate notifications from being sent to the user
 	if _, listening := app.ListeningUsers[userID]; !listening {
-		go app.ListenForRedisPubSubUserMessages(userID)
-		go app.listenToAwardNotifications()
+		go app.ListenForRedisPubSubUserMessages(ctx, userID)
 		// Simulate data with Redis pub/sub
-		go app.SimulateDataWithRedisPubSub(userID)
+		//go app.SimulateDataWithRedisPubSub(userID)
 		app.ListeningUsers[userID] = true
 	}
 
 	// Create a new channel for the user
 	app.Clients[userID] = make(chan string)
+	// Associate the cancel function with the user for cleanup
+	app.ClientCancelFuncs[userID] = cancelFunc
 }
 
 // RemoveClient removes the client from Clients map and closes their channel
@@ -182,9 +183,18 @@ func (app *application) RemoveClient(userID int64) {
 	app.Mutex.Lock()
 	defer app.Mutex.Unlock()
 	if ch, exists := app.Clients[userID]; exists {
+		app.logger.Info("SSE client disconnected, closing and deleting", zap.Int64("userID", userID))
 		close(ch)
 		delete(app.Clients, userID)
 	}
+	// Stop the Redis listener if it exists
+	if cancelFunc, exists := app.ClientCancelFuncs[userID]; exists {
+		cancelFunc() // Cancel the context, stopping the goroutine
+		delete(app.ClientCancelFuncs, userID)
+	}
+
+	// Mark the user as no longer listening
+	delete(app.ListeningUsers, userID)
 }
 
 // PublishNotification publishes a message to a specific user's SSE channel if they are online.
@@ -269,6 +279,7 @@ func (app *application) updateDatabaseNotificationStatus(notificationID int64, s
 
 // PublishNotificationToRedis publishes a message to a specific user's Redis pub/sub channel
 func (app *application) PublishNotificationToRedis(userID int64, notificationType string, notification data.NotificationContent) error {
+	app.logger.Info("Publishing notification to Redis", zap.Int64("userID", userID))
 	// redis key
 	channel := fmt.Sprintf("%s:%d", data.RedisNotManNotificationKey, userID)
 	// marshal the meta data to JSON
@@ -279,7 +290,7 @@ func (app *application) PublishNotificationToRedis(userID int64, notificationTyp
 	// attempt to save the notification to the database
 	savedNotification := &data.Notification{
 		Message:          notification.Message,
-		NotificationType: data.NotificationTypeDefault,
+		NotificationType: notificationType,
 		Status:           data.NotificationStatusTypePending,
 		Meta:             metaJSON,
 		RedisKey:         &channel,
@@ -290,6 +301,10 @@ func (app *application) PublishNotificationToRedis(userID int64, notificationTyp
 	}
 	// set the notification ID
 	notification.NotificationID = savedNotification.ID
+	// set status to pending
+	notification.Status = data.NotificationStatusTypePending
+	// notification type
+	notification.NotificationType = notificationType
 	// we are going to publish the notification to the user's Redis channel
 	notificationJSON, err := json.Marshal(notification)
 	if err != nil {
@@ -304,19 +319,24 @@ func (app *application) PublishNotificationToRedis(userID int64, notificationTyp
 }
 
 // ListenForUserMessages listens to Redis pub/sub and sends messages to the specific user's SSE channel
-func (app *application) ListenForRedisPubSubUserMessages(userID int64) {
-	ctx := context.Background()
+func (app *application) ListenForRedisPubSubUserMessages(ctx context.Context, userID int64) {
 	pubsub := app.RedisDB.Subscribe(ctx, fmt.Sprintf("%s:%d", data.RedisNotManNotificationKey, userID))
 
 	defer pubsub.Close()
 
-	for msg := range pubsub.Channel() {
-		var notification data.NotificationContent
-		if err := json.Unmarshal([]byte(msg.Payload), &notification); err != nil {
-			app.logger.Error("Failed to unmarshal Redis message", zap.Error(err))
-			continue
+	for {
+		select {
+		case <-ctx.Done(): // Exit loop when context is canceled
+			app.logger.Info("Stopping Redis pub/sub listener for user", zap.Int64("userID", userID))
+			return
+		case msg := <-pubsub.Channel():
+			var notification data.NotificationContent
+			if err := json.Unmarshal([]byte(msg.Payload), &notification); err != nil {
+				app.logger.Error("Failed to unmarshal Redis message", zap.Error(err))
+				continue
+			}
+			app.PublishNotification(userID, notification)
 		}
-		app.PublishNotification(userID, notification)
 	}
 }
 
@@ -404,11 +424,12 @@ func (app *application) BroadcastNotification(notification data.NotificationCont
 	}
 }
 
-// SimulateDataWithRedisPubSub simulates data and publishes messages to a user-specific Redis pub/sub channel
+/*/ SimulateDataWithRedisPubSub simulates data and publishes messages to a user-specific Redis pub/sub channel
 func (app *application) SimulateDataWithRedisPubSub(userID int64) {
 	for {
+		app.logger.Info("Simulating data for user:", zap.Int64("userID", userID))
 		// Sleep to simulate a delay between notifications
-		time.Sleep(10 * time.Second)
+		time.Sleep(25 * time.Second)
 
 		// Create a simulated notification
 		notification := data.NotificationContent{
@@ -426,3 +447,4 @@ func (app *application) SimulateDataWithRedisPubSub(userID int64) {
 		}
 	}
 }
+*/

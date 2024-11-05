@@ -141,6 +141,7 @@ type application struct {
 	WebSocketUpgrader websocket.Upgrader
 	Clients           map[int64]chan string
 	ListeningUsers    map[int64]bool // Track active listeners for each user
+	ClientCancelFuncs map[int64]context.CancelFunc
 }
 
 func main() {
@@ -293,8 +294,9 @@ func main() {
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
 		},
-		Clients:        make(map[int64]chan string),
-		ListeningUsers: make(map[int64]bool),
+		Clients:           make(map[int64]chan string),
+		ListeningUsers:    make(map[int64]bool),
+		ClientCancelFuncs: make(map[int64]context.CancelFunc),
 	}
 	err = app.startupFunction()
 	if err != nil {
@@ -339,14 +341,17 @@ func (app *application) startupFunction() error {
 // startSchedulers starts the cronjobs for the application
 func (app *application) startSchedulers() {
 	app.logger.Info("Starting Schedulers")
-	go app.trackMonthlyGoalsScheduleHandler()        // trackMonthlyGoals
-	go app.updateGoalProgressOnExpiredGoalsHandler() // updateGoalProgressOnExpiredGoals
-	go app.trackExpiredGroupInvitationsHandler()     // trackExpiredGroupInvitations
-	go app.trackRecurringExpensesHandler()           // trackRecurringExpenses
-	go app.trackOverdueDebtsHandler()                // trackOverdueDebts
-	go app.trackExpiredNotificationsHandler()        // trackExpiredNotification
-	go app.startRssFeedScraperHandler()              // rssFeedScraper
-	go app.listenToAwardNotifications()              // listenToAwardNotifications
+	app.background(func() {
+		app.trackMonthlyGoalsScheduleHandler()        // trackMonthlyGoals
+		app.updateGoalProgressOnExpiredGoalsHandler() // updateGoalProgressOnExpiredGoals
+		app.trackExpiredGroupInvitationsHandler()     // trackExpiredGroupInvitations
+		app.trackRecurringExpensesHandler()           // trackRecurringExpenses
+		app.trackOverdueDebtsHandler()                // trackOverdueDebts
+		app.trackExpiredNotificationsHandler()        // trackExpiredNotification
+		app.startRssFeedScraperHandler()              // rssFeedScraper
+		app.listenToAwardNotifications()              // listenToAwardNotifications
+	})
+
 }
 
 // publishMetrics sets up the expvar variables for the application

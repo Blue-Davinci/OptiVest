@@ -31,6 +31,7 @@ const (
 	NotificationTypeFeeds               = "feeds"
 	NotificationTypeFinancialTracking   = "financial_tracking"
 	NotificationTypeFinancialManagement = "financial_management"
+	NotificationTypeBudget              = "budget"
 	NotificationTypeAward               = "award"
 )
 
@@ -50,18 +51,20 @@ type Notification struct {
 	Status           database.NotificationStatus `json:"status"`
 	CreatedAt        time.Time                   `json:"created_at"`
 	UpdatedAt        time.Time                   `json:"updated_at"`
-	ReadAt           *time.Time                  `json:"read_at,omitempty"`    // Nullable
-	ExpiresAt        *time.Time                  `json:"expires_at,omitempty"` // Nullable
-	Meta             json.RawMessage             `json:"meta,omitempty"`       // Can be used for JSONB
-	RedisKey         *string                     `json:"-"`                    // Nullable, not exposed to the client
+	ReadAt           *time.Time                  `json:"read_at,omitempty"` // Nullable
+	ExpiresAt        *time.Time                  `json:"-"`                 // Nullable
+	Meta             json.RawMessage             `json:"meta,omitempty"`    // Can be used for JSONB
+	RedisKey         *string                     `json:"-"`                 // Nullable, not exposed to the client
 }
 
 // Struct to hold the notification information
 type NotificationContent struct {
-	NotificationID int64            `json:"notification_id"`
-	Message        string           `json:"message"`
-	Meta           NotificationMeta `json:"meta"`
-	SentAt         time.Time        `json:"sent_at"`
+	NotificationID   int64                       `json:"notification_id"`
+	Message          string                      `json:"message"`
+	NotificationType string                      `json:"notification_type"`
+	Status           database.NotificationStatus `json:"status"`
+	Meta             NotificationMeta            `json:"meta"`
+	SentAt           time.Time                   `json:"sent_at"`
 }
 
 type NotificationMeta struct {
@@ -169,7 +172,6 @@ func (m NotificationManagerModel) GetAllNotificationsByUserId(userID int64, noti
 
 	// create a slice of notifications
 	notifications := []*Notification{}
-	fmt.Println("First notification ID: ", notificationsRows[0].ID)
 	totalNotifications := 0
 	// loop through using the populate function to fill in the notification struct
 	for _, notification := range notificationsRows {
@@ -207,7 +209,6 @@ func (m NotificationManagerModel) GetUnreadNotifications(userID int64) ([]*Notif
 
 	// create a slice of notifications
 	notifications := []*Notification{}
-	fmt.Println("First notification ID: ", notificationsRows[0].ID)
 	// loop through using the populate function to fill in the notification struct
 	for _, notification := range notificationsRows {
 		notifications = append(notifications, populateNotification(notification))
@@ -244,7 +245,6 @@ func (m NotificationManagerModel) GetAllExpiredNotifications(filters Filters) ([
 
 	// create a slice of notifications
 	notifications := []*Notification{}
-	fmt.Println("First notification ID: ", notificationsRows[0].ID)
 	totalNotifications := 0
 	// loop through using the populate function to fill in the notification struct
 	for _, notification := range notificationsRows {
