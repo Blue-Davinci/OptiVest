@@ -122,6 +122,7 @@ func (app *application) goalRoutes() chi.Router {
 // groupRoutes() is a method that returns a chi.Router that contains all the routes for the user groups
 func (app *application) groupRoutes() chi.Router {
 	groupRoutes := chi.NewRouter()
+	groupRoutes.Get("/", app.getAllGroupsCreatedByUserHandler)
 	groupRoutes.Post("/", app.createNewUserGroupHandler)
 	groupRoutes.Patch("/{groupID}", app.updateUserGroupHandler)
 

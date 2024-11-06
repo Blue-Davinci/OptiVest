@@ -661,3 +661,19 @@ func (app *application) deleteGroupExpenseHandler(w http.ResponseWriter, r *http
 		app.serverErrorResponse(w, r, err)
 	}
 }
+
+// getAllGroupsCreatedByUserHandler() will get all the groups created by the user
+// we will return a list of groups created by the user
+func (app *application) getAllGroupsCreatedByUserHandler(w http.ResponseWriter, r *http.Request) {
+	// get all the groups created by the user
+	groups, err := app.models.FinancialGroupManager.GetAllGroupsCreatedByUser(app.contextGetUser(r).ID)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+		return
+	}
+	// send the groups in the response
+	err = app.writeJSON(w, http.StatusOK, envelope{"groups": groups}, nil)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+	}
+}

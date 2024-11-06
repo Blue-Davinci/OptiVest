@@ -3,7 +3,9 @@ package data
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"time"
 
@@ -98,6 +100,33 @@ type GroupExpense struct {
 	Category    string          `json:"category"`    // Category of the expense (e.g., 'operations', 'purchase', etc.)
 	CreatedAt   time.Time       `json:"created_at"`  // Time when the expense was created
 	UpdatedAt   time.Time       `json:"updated_at"`  // Time when the expense was last updated
+}
+
+// Enriched Group struct represents a group with additional information
+type EnrichedGroup struct {
+	Group                   *Group             `json:"group"`
+	GroupGoals              []*SampleGroupGoal `json:"group_goals"`
+	TotalMembers            int64              `json:"total_members"`
+	LatestMember            *GroupMember       `json:"latest_member"`
+	GroupMembers            []*GroupMember     `json:"group_members"`
+	TotalPendingInvitations decimal.Decimal    `json:"total_pending_invitations"`
+	TotalGroupTransactions  decimal.Decimal    `json:"total_group_transactions"`
+	LatestTransactionAmount decimal.Decimal    `json:"latest_transaction_amount"`
+}
+
+// SampleGroupGoal struct represents a sample group goal
+type SampleGroupGoal struct {
+	GoalName      string  `json:"goal_name"`
+	TargetAmount  float64 `json:"target_amount"`
+	CurrentAmount float64 `json:"current_amount"`
+}
+
+// GroupMember holds data for each member within a group.
+type GroupMember struct {
+	UserID           int64  `json:"user_id"`
+	FirstName        string `json:"first_name"`
+	Role             string `json:"role"`
+	ProfileAvatarURL string `json:"profile_avatar_url"`
 }
 
 // MapInvitationInvitationStatusTypeToConstant() maps the invitation status type to a constant
@@ -240,6 +269,88 @@ func (m FinancialGroupManagerModel) GetGroupById(groupID int64) (*Group, error) 
 	group := populateGroup(returnedGroup)
 	// we are good now
 	return group, nil
+}
+
+// GetAllGroupsCreatedByUser() retrieves all the groups created by a user
+// We will take the user ID as an argument and return [] EnrichedGroup and an error
+func (m FinancialGroupManagerModel) GetAllGroupsCreatedByUser(userID int64) ([]*EnrichedGroup, error) {
+	ctx, cancel := contextGenerator(context.Background(), DefualtFinManGroupsContextTimeout)
+	defer cancel()
+	// get the groups
+	groups, err := m.DB.GetAllGroupsCreatedByUser(ctx, sql.NullInt64{Int64: userID, Valid: true})
+	if err != nil {
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return nil, ErrGeneralRecordNotFound
+		default:
+			return nil, err
+		}
+	}
+	// check the length
+	if len(groups) == 0 {
+		return nil, ErrGeneralRecordNotFound
+	}
+	// create a slice of enriched groups
+	var enrichedGroups []*EnrichedGroup
+	// loop through the groups
+	for _, group := range groups {
+		// get the group goals marshalling them to a group sample goals
+		var groupGoals []*SampleGroupGoal
+		// type assert topgoals to byte
+		topGoals, ok := group.TopGoals.([]byte)
+		if !ok {
+			fmt.Println("Error in group goal type assertion")
+			continue
+		}
+		// unmarshal
+		err := json.Unmarshal(topGoals, &groupGoals)
+		if err != nil {
+			return nil, err
+		}
+		// get the group members
+		var groupMembers []*GroupMember
+		// type assert topgoals to byte
+		topMembers, ok := group.TopMembers.([]byte)
+		if !ok {
+			fmt.Println("Error in group members type assertion")
+			continue
+		}
+		// unmarshal
+		err = json.Unmarshal(topMembers, &groupMembers)
+		if err != nil {
+			return nil, err
+		}
+
+		// get latest member
+		var latestMember *GroupMember
+		// type assert topgoals to byte
+		latestMemberByte, ok := group.LatestMember.([]byte)
+		if !ok {
+			fmt.Println("Error in latest member type assertion")
+			continue
+		}
+		// unmarshal
+		err = json.Unmarshal(latestMemberByte, &latestMember)
+		if err != nil {
+			return nil, err
+		}
+		// create an enriched group
+		enrichedGroup := &EnrichedGroup{
+			Group:                   populateGroup(group),
+			GroupGoals:              groupGoals,
+			TotalMembers:            group.TotalMembers.Int64,
+			LatestMember:            latestMember,
+			GroupMembers:            groupMembers,
+			TotalPendingInvitations: decimal.RequireFromString(group.TotalPendingInvitations),
+			TotalGroupTransactions:  decimal.RequireFromString(group.TotalGroupTransactions),
+			LatestTransactionAmount: decimal.RequireFromString(group.LatestTransactionAmount),
+		}
+		// append to the slice
+		enrichedGroups = append(enrichedGroups, enrichedGroup)
+
+	}
+	// we are good now
+	return enrichedGroups, nil
 }
 
 // CreateNewUserGroup() creates a new user group in the database and returns the ID of the new group
@@ -634,6 +745,21 @@ func (m FinancialGroupManagerModel) DeleteGroupExpense(userID, expenseID int64) 
 func populateGroup(groupRow interface{}) *Group {
 	switch group := groupRow.(type) {
 	case database.Group:
+		return &Group{
+			ID:             group.ID,
+			CreatorUserID:  group.CreatorUserID.Int64,
+			GroupImageURL:  group.GroupImageUrl,
+			Name:           group.Name,
+			IsPrivate:      group.IsPrivate.Bool,
+			MaxMemberCount: int(group.MaxMemberCount.Int32),
+			Description:    group.Description.String,
+			ActivityCount:  int(group.ActivityCount.Int32),
+			LastActivityAt: group.LastActivityAt.Time,
+			CreatedAt:      group.CreatedAt.Time,
+			UpdatedAt:      group.UpdatedAt.Time,
+			Version:        int(group.Version.Int32),
+		}
+	case database.GetAllGroupsCreatedByUserRow:
 		return &Group{
 			ID:             group.ID,
 			CreatorUserID:  group.CreatorUserID.Int64,

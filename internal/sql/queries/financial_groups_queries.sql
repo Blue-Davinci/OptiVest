@@ -176,3 +176,78 @@ RETURNING id, created_at, updated_at;
 DELETE FROM group_expenses
 WHERE id = $1 AND member_id = $2
 RETURNING id;
+
+-- name: GetAllGroupsCreatedByUser :many
+WITH user_groups AS (
+    SELECT g.*
+    FROM groups g
+    WHERE g.creator_user_id = $1 
+),
+
+top_members AS (
+    SELECT gm.group_id, gm.user_id, u.first_name, gm.role, u.profile_avatar_url,
+           ROW_NUMBER() OVER (PARTITION BY gm.group_id ORDER BY gm.request_time DESC) AS row_num
+    FROM group_memberships gm
+    JOIN users u ON gm.user_id = u.id
+    WHERE gm.status = 'accepted'
+),
+
+group_member_stats AS (
+    SELECT gm.group_id,
+           COUNT(*) AS total_members,
+           MAX(u.id) AS latest_member_id,
+           MAX(u.first_name) AS latest_member_first_name,
+           MAX(u.profile_avatar_url) AS latest_member_avatar,
+           MAX(gm.role) AS latest_member_role
+    FROM group_memberships gm
+    JOIN users u ON gm.user_id = u.id
+    WHERE gm.status = 'accepted'
+    GROUP BY gm.group_id
+),
+
+pending_invitations AS (
+    SELECT gi.group_id, COUNT(*) AS total_pending_invitations
+    FROM group_invitations gi
+    WHERE gi.status = 'pending'
+    GROUP BY gi.group_id
+),
+
+top_goals AS (
+    SELECT gg.group_id, gg.goal_name, gg.target_amount, gg.current_amount,
+           ROW_NUMBER() OVER (PARTITION BY gg.group_id ORDER BY gg.created_at DESC) AS row_num
+    FROM group_goals gg
+    WHERE gg.status = 'ongoing'
+),
+
+group_transaction_stats AS (
+    SELECT gg.group_id,
+           COUNT(gt.id) AS total_transactions,
+           MAX(gt.amount)::NUMERIC AS latest_transaction_amount
+    FROM group_transactions gt
+    JOIN group_goals gg ON gt.goal_id = gg.id
+    GROUP BY gg.group_id
+)
+
+SELECT ug.*, 
+       COALESCE(
+           (SELECT jsonb_agg(jsonb_build_object('user_id', tm.user_id, 'first_name', tm.first_name, 'role', tm.role, 'profile_avatar_url', tm.profile_avatar_url))
+            FROM top_members tm
+            WHERE tm.group_id = ug.id AND tm.row_num <= 5), '[]'::jsonb) AS top_members,
+       gms.total_members,
+       COALESCE(jsonb_build_object(
+           'user_id', gms.latest_member_id, 
+           'first_name', gms.latest_member_first_name, 
+           'role', gms.latest_member_role,
+           'profile_avatar_url', gms.latest_member_avatar
+       ), '{}'::jsonb) AS latest_member,
+       COALESCE(pi.total_pending_invitations, 0)::NUMERIC AS total_pending_invitations,
+       COALESCE(
+           (SELECT jsonb_agg(jsonb_build_object('goal_name', tg.goal_name, 'target_amount', tg.target_amount, 'current_amount', tg.current_amount))
+            FROM top_goals tg
+            WHERE tg.group_id = ug.id AND tg.row_num <= 5), '[]'::jsonb) AS top_goals,
+       COALESCE(gts.total_transactions, 0)::NUMERIC AS total_group_transactions,
+       COALESCE(gts.latest_transaction_amount, 0)::NUMERIC AS latest_transaction_amount
+FROM user_groups ug
+LEFT JOIN group_member_stats gms ON ug.id = gms.group_id
+LEFT JOIN pending_invitations pi ON ug.id = pi.group_id
+LEFT JOIN group_transaction_stats gts ON ug.id = gts.group_id;
