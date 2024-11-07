@@ -294,60 +294,56 @@ func (m FinancialGroupManagerModel) GetAllGroupsCreatedByUser(userID int64) ([]*
 	var enrichedGroups []*EnrichedGroup
 	// loop through the groups
 	for _, group := range groups {
-		// get the group goals marshalling them to a group sample goals
-		var groupGoals []*SampleGroupGoal
-		// type assert topgoals to byte
-		topGoals, ok := group.TopGoals.([]byte)
-		if !ok {
-			fmt.Println("Error in group goal type assertion")
-			continue
-		}
-		// unmarshal
-		err := json.Unmarshal(topGoals, &groupGoals)
+		group, err := populateEnrichedGroup(group)
 		if err != nil {
-			return nil, err
+			switch {
+			case errors.Is(err, ErrTypeConversionError):
+				continue
+			default:
+				return nil, err
+			}
 		}
-		// get the group members
-		var groupMembers []*GroupMember
-		// type assert topgoals to byte
-		topMembers, ok := group.TopMembers.([]byte)
-		if !ok {
-			fmt.Println("Error in group members type assertion")
-			continue
-		}
-		// unmarshal
-		err = json.Unmarshal(topMembers, &groupMembers)
-		if err != nil {
-			return nil, err
-		}
+		// append to the slice
+		enrichedGroups = append(enrichedGroups, group)
+	}
+	// we are good now
+	return enrichedGroups, nil
+}
 
-		// get latest member
-		var latestMember *GroupMember
-		// type assert topgoals to byte
-		latestMemberByte, ok := group.LatestMember.([]byte)
-		if !ok {
-			fmt.Println("Error in latest member type assertion")
-			continue
-		}
-		// unmarshal
-		err = json.Unmarshal(latestMemberByte, &latestMember)
-		if err != nil {
+// GetAllGroupsUserIsMemberOf() retrieves all the groups a user is a member of
+// We will take the user ID as an argument and return [] EnrichedGroup and an error
+func (m FinancialGroupManagerModel) GetAllGroupsUserIsMemberOf(userID int64) ([]*EnrichedGroup, error) {
+	ctx, cancel := contextGenerator(context.Background(), DefualtFinManGroupsContextTimeout)
+	defer cancel()
+	// get the groups
+	groups, err := m.DB.GetAllGroupsUserIsMemberOf(ctx, sql.NullInt64{Int64: userID, Valid: true})
+	if err != nil {
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return nil, ErrGeneralRecordNotFound
+		default:
 			return nil, err
 		}
-		// create an enriched group
-		enrichedGroup := &EnrichedGroup{
-			Group:                   populateGroup(group),
-			GroupGoals:              groupGoals,
-			TotalMembers:            group.TotalMembers.Int64,
-			LatestMember:            latestMember,
-			GroupMembers:            groupMembers,
-			TotalPendingInvitations: decimal.RequireFromString(group.TotalPendingInvitations),
-			TotalGroupTransactions:  decimal.RequireFromString(group.TotalGroupTransactions),
-			LatestTransactionAmount: decimal.RequireFromString(group.LatestTransactionAmount),
+	}
+	// check the length
+	if len(groups) == 0 {
+		return nil, ErrGeneralRecordNotFound
+	}
+	// create a slice of enriched groups
+	var enrichedGroups []*EnrichedGroup
+	// loop through the groups
+	for _, group := range groups {
+		enrichedGroup, err := populateEnrichedGroup(group)
+		if err != nil {
+			switch {
+			case errors.Is(err, ErrTypeConversionError):
+				continue
+			default:
+				return nil, err
+			}
 		}
 		// append to the slice
 		enrichedGroups = append(enrichedGroups, enrichedGroup)
-
 	}
 	// we are good now
 	return enrichedGroups, nil
@@ -742,6 +738,112 @@ func (m FinancialGroupManagerModel) DeleteGroupExpense(userID, expenseID int64) 
 	return deletedExpenseID, nil
 }
 
+func populateEnrichedGroup(enrichedGroupRow interface{}) (*EnrichedGroup, error) {
+	switch group := enrichedGroupRow.(type) {
+	case database.GetAllGroupsCreatedByUserRow:
+		// get the group goals marshalling them to a group sample goals
+		var groupGoals []*SampleGroupGoal
+		// type assert topgoals to byte
+		topGoals, ok := group.TopGoals.([]byte)
+		if !ok {
+			return nil, ErrTypeConversionError
+		}
+		// unmarshal
+		err := json.Unmarshal(topGoals, &groupGoals)
+		if err != nil {
+			return nil, err
+		}
+		// get the group members
+		var groupMembers []*GroupMember
+		// type assert topgoals to byte
+		topMembers, ok := group.TopMembers.([]byte)
+		if !ok {
+			return nil, ErrTypeConversionError
+		}
+		// unmarshal
+		err = json.Unmarshal(topMembers, &groupMembers)
+		if err != nil {
+			return nil, err
+		}
+
+		// get latest member
+		var latestMember *GroupMember
+		// type assert topgoals to byte
+		latestMemberByte, ok := group.LatestMember.([]byte)
+		if !ok {
+			return nil, ErrTypeConversionError
+		}
+		// unmarshal
+		err = json.Unmarshal(latestMemberByte, &latestMember)
+		if err != nil {
+			return nil, err
+		}
+		// create an enriched group
+		enrichedGroup := &EnrichedGroup{
+			Group:                   populateGroup(group),
+			GroupGoals:              groupGoals,
+			TotalMembers:            group.TotalMembers.Int64,
+			LatestMember:            latestMember,
+			GroupMembers:            groupMembers,
+			TotalPendingInvitations: decimal.RequireFromString(group.TotalPendingInvitations),
+			TotalGroupTransactions:  decimal.RequireFromString(group.TotalGroupTransactions),
+			LatestTransactionAmount: decimal.RequireFromString(group.LatestTransactionAmount),
+		}
+		return enrichedGroup, nil
+	case database.GetAllGroupsUserIsMemberOfRow:
+		var groupGoals []*SampleGroupGoal
+		// type assert topgoals to byte
+		topGoals, ok := group.TopGoals.([]byte)
+		if !ok {
+			return nil, ErrTypeConversionError
+		}
+		// unmarshal
+		err := json.Unmarshal(topGoals, &groupGoals)
+		if err != nil {
+			return nil, err
+		}
+		// get the group members
+		var groupMembers []*GroupMember
+		// type assert topgoals to byte
+		topMembers, ok := group.TopMembers.([]byte)
+		if !ok {
+			return nil, ErrTypeConversionError
+		}
+		// unmarshal
+		err = json.Unmarshal(topMembers, &groupMembers)
+		if err != nil {
+			return nil, err
+		}
+
+		// get latest member
+		var latestMember *GroupMember
+		// type assert topgoals to byte
+		latestMemberByte, ok := group.LatestMember.([]byte)
+		if !ok {
+			return nil, ErrTypeConversionError
+		}
+		// unmarshal
+		err = json.Unmarshal(latestMemberByte, &latestMember)
+		if err != nil {
+			return nil, err
+		}
+		// create an enriched group
+		enrichedGroup := &EnrichedGroup{
+			Group:                   populateGroup(group),
+			GroupGoals:              groupGoals,
+			TotalMembers:            group.TotalMembers.Int64,
+			LatestMember:            latestMember,
+			GroupMembers:            groupMembers,
+			TotalGroupTransactions:  decimal.RequireFromString(group.TotalGroupTransactions),
+			LatestTransactionAmount: decimal.RequireFromString(group.LatestTransactionAmount),
+		}
+		return enrichedGroup, nil
+	default:
+		return nil, fmt.Errorf("error in type assertion")
+	}
+
+}
+
 func populateGroup(groupRow interface{}) *Group {
 	switch group := groupRow.(type) {
 	case database.Group:
@@ -759,7 +861,22 @@ func populateGroup(groupRow interface{}) *Group {
 			UpdatedAt:      group.UpdatedAt.Time,
 			Version:        int(group.Version.Int32),
 		}
-	case database.GetAllGroupsCreatedByUserRow:
+	case database.GetAllGroupsCreatedByUserRow: // database.GetAllGroupsUserIsMemberOfRow
+		return &Group{
+			ID:             group.ID,
+			CreatorUserID:  group.CreatorUserID.Int64,
+			GroupImageURL:  group.GroupImageUrl,
+			Name:           group.Name,
+			IsPrivate:      group.IsPrivate.Bool,
+			MaxMemberCount: int(group.MaxMemberCount.Int32),
+			Description:    group.Description.String,
+			ActivityCount:  int(group.ActivityCount.Int32),
+			LastActivityAt: group.LastActivityAt.Time,
+			CreatedAt:      group.CreatedAt.Time,
+			UpdatedAt:      group.UpdatedAt.Time,
+			Version:        int(group.Version.Int32),
+		}
+	case database.GetAllGroupsUserIsMemberOfRow:
 		return &Group{
 			ID:             group.ID,
 			CreatorUserID:  group.CreatorUserID.Int64,

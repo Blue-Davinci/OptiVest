@@ -677,3 +677,19 @@ func (app *application) getAllGroupsCreatedByUserHandler(w http.ResponseWriter, 
 		app.serverErrorResponse(w, r, err)
 	}
 }
+
+// getAllGroupsUserIsMemberOfHandler() will get all the groups the user is a member of
+// we will return a list of groups the user is a member of
+func (app *application) getAllGroupsUserIsMemberOfHandler(w http.ResponseWriter, r *http.Request) {
+	// get all the groups the user is a member of
+	groups, err := app.models.FinancialGroupManager.GetAllGroupsUserIsMemberOf(app.contextGetUser(r).ID)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+		return
+	}
+	// send the groups in the response
+	err = app.writeJSON(w, http.StatusOK, envelope{"groups": groups}, nil)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+	}
+}

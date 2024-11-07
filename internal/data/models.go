@@ -11,6 +11,7 @@ var (
 	ErrUnableToQueryDatabase     = errors.New("unable to query database")
 	ErrGeneralRecordNotFound     = errors.New("finance record not found")
 	ErrGeneralEditConflict       = errors.New("edit conflict")
+	ErrTypeConversionError       = errors.New("type conversion error")
 )
 
 type Models struct {
