@@ -33,6 +33,10 @@ func (app *application) ServeSSE(w http.ResponseWriter, r *http.Request) {
 	// no matter how many times the client reconnects, the pending notifications will only be sent once
 	go app.loadAndSendPendingNotifications(userID)
 
+	// Set up a ticker for heartbeat messages
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
 	app.logger.Info("SSE client connected", zap.Int64("userID", userID))
 
 	// Stream messages to client
@@ -44,6 +48,10 @@ func (app *application) ServeSSE(w http.ResponseWriter, r *http.Request) {
 			}
 			fmt.Fprintf(w, "data: %s\n\n", msg)
 			w.(http.Flusher).Flush() // Flush the buffer, send message to client
+		case <-ticker.C:
+			// Send heartbeat message
+			fmt.Fprintf(w, "event: heartbeat\ndata: {}\n\n")
+			w.(http.Flusher).Flush()
 		case <-r.Context().Done(): // Stop if client disconnects
 			return
 		}
