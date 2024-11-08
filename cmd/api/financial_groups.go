@@ -340,12 +340,12 @@ func (app *application) updateGroupInvitationStatusHandler(w http.ResponseWriter
 func (app *application) createNewGroupGoalHandler(w http.ResponseWriter, r *http.Request) {
 	// input
 	var input struct {
-		GroupID       int64           `json:"group_id"`
-		Name          string          `json:"name"`
-		TargetAmount  decimal.Decimal `json:"target_amount"`
-		CurrentAmount decimal.Decimal `json:"current_amount"`
-		StartDate     time.Time       `json:"start_date"`
-		EndDate       time.Time       `json:"end_date"`
+		GroupID       int64            `json:"group_id"`
+		Name          string           `json:"name"`
+		TargetAmount  decimal.Decimal  `json:"target_amount"`
+		CurrentAmount decimal.Decimal  `json:"current_amount"`
+		StartDate     time.Time        `json:"start_date"`
+		EndDate       data.CustomTime1 `json:"end_date"`
 	}
 	// decode the input
 	err := app.readJSON(w, r, &input)
@@ -411,9 +411,9 @@ func (app *application) updateGroupGoalHandler(w http.ResponseWriter, r *http.Re
 	}
 	// input
 	var input struct {
-		Name        *string    `json:"name"`
-		EndDate     *time.Time `json:"end_date"`
-		Description *string    `json:"description"`
+		Name        *string           `json:"name"`
+		EndDate     *data.CustomTime1 `json:"end_date"`
+		Description *string           `json:"description"`
 	}
 	// decode the input
 	err = app.readJSON(w, r, &input)
@@ -689,6 +689,40 @@ func (app *application) getAllGroupsUserIsMemberOfHandler(w http.ResponseWriter,
 	}
 	// send the groups in the response
 	err = app.writeJSON(w, http.StatusOK, envelope{"groups": groups}, nil)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+	}
+}
+
+// getDetailedGroupByIdHandler() will get a detailed group by the group ID and user ID
+// we will return a detailed group by the ID
+func (app *application) getDetailedGroupByIdHandler(w http.ResponseWriter, r *http.Request) {
+	// get the group ID from the URL
+	groupID, err := app.readIDParam(r, "groupID")
+	if err != nil || groupID < 1 {
+		app.notFoundResponse(w, r)
+		return
+	}
+	// verify the urlID
+	// validate the post ID
+	v := validator.New()
+	if data.ValidateURLID(v, groupID, "groupID"); !v.Valid() {
+		app.failedValidationResponse(w, r, v.Errors)
+		return
+	}
+	// get the group by the details
+	group, err := app.models.FinancialGroupManager.GetDetailedGroupById(app.contextGetUser(r).ID, groupID)
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrGeneralRecordNotFound):
+			app.notFoundResponse(w, r)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
+	// send the group in the response
+	err = app.writeJSON(w, http.StatusOK, envelope{"group": group}, nil)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 	}

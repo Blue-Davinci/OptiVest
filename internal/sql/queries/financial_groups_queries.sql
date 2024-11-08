@@ -318,3 +318,128 @@ SELECT ug.*,
 FROM user_groups ug
 LEFT JOIN group_member_stats gms ON ug.id = gms.group_id
 LEFT JOIN group_transaction_stats gts ON ug.id = gts.group_id;
+
+-- name: GetDetailedGroupById :one
+WITH user_groups AS (
+    SELECT g.*
+    FROM groups g
+    JOIN group_memberships gm ON gm.group_id = g.id
+    WHERE g.id = $1 
+      AND gm.user_id = $2 
+      AND gm.status = 'accepted' -- Only fetch data if the user is an approved member
+),
+
+group_members AS (
+    SELECT gm.group_id, gm.user_id, u.first_name, gm.role, u.profile_avatar_url
+    FROM group_memberships gm
+    JOIN users u ON gm.user_id = u.id
+    WHERE gm.group_id = $1 -- Same group_id parameter
+),
+
+pending_invitations AS (
+    SELECT gi.id, gi.group_id, gi.inviter_user_id, gi.invitee_user_email, gi.status, gi.sent_at, gi.responded_at, gi.expiration_date
+    FROM group_invitations gi
+    WHERE gi.group_id = $1 
+      AND gi.status = 'pending' -- Fetch only pending invitations for the group
+),
+
+group_goals AS (
+    SELECT gg.id, gg.group_id, gg.creator_user_id, gg.goal_name, gg.target_amount, gg.current_amount, gg.start_date, gg.deadline, gg.description, gg.status, gg.created_at, gg.updated_at
+    FROM group_goals gg
+    WHERE gg.group_id = $1 -- Group goals filtered by group_id
+),
+
+total_group_transactions AS (
+    SELECT COALESCE(SUM(gt.amount), 0)::NUMERIC AS total_transactions
+    FROM group_transactions gt
+    JOIN group_goals gg ON gt.goal_id = gg.id
+    WHERE gg.group_id = $1
+),
+
+total_group_expenses AS (
+    SELECT COALESCE(SUM(ge.amount), 0)::NUMERIC AS total_expenses
+    FROM group_expenses ge
+    WHERE ge.group_id = $1
+),
+
+goal_with_most_transactions AS (
+    SELECT gg.goal_name AS goal_name,
+           gg.target_amount AS target_amount,
+		   gg.current_amount AS current_amount,
+		   COUNT(gt.id) AS transaction_count
+    FROM group_goals gg
+    JOIN group_transactions gt ON gg.id = gt.goal_id
+    WHERE gg.group_id = $1
+    GROUP BY gg.goal_name, gg.target_amount,current_amount
+    ORDER BY transaction_count DESC
+    LIMIT 1
+)
+
+SELECT 
+    ug.*, 
+
+    COALESCE(
+        (SELECT jsonb_agg(
+            jsonb_build_object(
+                'user_id', gm.user_id, 
+                'first_name', gm.first_name, 
+                'role', gm.role, 
+                'profile_avatar_url', gm.profile_avatar_url
+            )
+        )
+        FROM group_members gm
+        WHERE gm.group_id = ug.id), '[]'::jsonb
+    ) AS members,
+
+    COALESCE(
+        (SELECT jsonb_agg(
+            jsonb_build_object(
+                'id', pi.id,
+                'group_id', pi.group_id,
+                'inviter_user_id', pi.inviter_user_id,
+                'invitee_user_email', pi.invitee_user_email,
+                'status', pi.status,
+                'sent_at', pi.sent_at,
+                'responded_at', pi.responded_at,
+                'expiration_date', pi.expiration_date
+            )
+        )
+        FROM pending_invitations pi
+        WHERE pi.group_id = ug.id), '[]'::jsonb
+    ) AS pending_invitations,
+
+    COALESCE(
+        (SELECT jsonb_agg(
+            jsonb_build_object(
+                'id', gg.id,
+                'group_id', gg.group_id,
+                'creator_user_id', gg.creator_user_id,
+                'name', gg.goal_name,
+                'target_amount', gg.target_amount,
+                'current_amount', gg.current_amount,
+                'start_date', gg.start_date,
+                'deadline', gg.deadline,
+                'description', gg.description,
+                'status', gg.status,
+                'created_at', gg.created_at,
+                'updated_at', gg.updated_at
+            )
+        )
+        FROM group_goals gg
+        WHERE gg.group_id = ug.id), '[]'::jsonb
+    ) AS goals,
+
+    (SELECT total_transactions FROM total_group_transactions) AS total_group_transactions,
+    (SELECT total_expenses FROM total_group_expenses) AS total_group_expenses,
+    
+    COALESCE(
+        (SELECT jsonb_build_object(
+            'goal_name', gmt.goal_name,
+			'target_amount', gmt.target_amount,
+            'current_amount', gmt.current_amount
+        )
+        FROM goal_with_most_transactions gmt), '{}'::jsonb
+    ) AS goal_with_most_transactions
+
+FROM user_groups ug;
+

@@ -123,6 +123,8 @@ func (app *application) goalRoutes() chi.Router {
 func (app *application) groupRoutes() chi.Router {
 	groupRoutes := chi.NewRouter()
 	groupRoutes.Get("/", app.getAllGroupsUserIsMemberOfHandler)
+	groupRoutes.Get("/{groupID}", app.getDetailedGroupByIdHandler)
+
 	groupRoutes.Post("/", app.createNewUserGroupHandler)
 	groupRoutes.Patch("/{groupID}", app.updateUserGroupHandler)
 

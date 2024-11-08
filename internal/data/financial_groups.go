@@ -59,8 +59,8 @@ type GroupGoal struct {
 	GoalName      string              `json:"name"`
 	TargetAmount  decimal.Decimal     `json:"target_amount"`
 	CurrentAmount decimal.Decimal     `json:"current_amount"`
-	Startdate     time.Time           `json:"start_date"`
-	Deadline      time.Time           `json:"deadline"`
+	Startdate     CustomTime1         `json:"start_date"`
+	Deadline      CustomTime1         `json:"deadline"`
 	Description   string              `json:"description"`
 	Status        database.GoalStatus `json:"status"`
 	CreatedAt     time.Time           `json:"created_at"`
@@ -112,6 +112,16 @@ type EnrichedGroup struct {
 	TotalPendingInvitations decimal.Decimal    `json:"total_pending_invitations"`
 	TotalGroupTransactions  decimal.Decimal    `json:"total_group_transactions"`
 	LatestTransactionAmount decimal.Decimal    `json:"latest_transaction_amount"`
+}
+
+// DetailedGroup struct represents a group with detailed information
+type DetailedGroup struct {
+	Group                  *Group
+	GroupGoals             []*GroupGoal
+	GroupMembers           []*GroupMember
+	PendingInvitations     []*GroupInvitation
+	TotalGroupTransactions decimal.Decimal
+	TotalGroupExpenses     decimal.Decimal
 }
 
 // SampleGroupGoal struct represents a sample group goal
@@ -196,7 +206,7 @@ func ValidateGroupAmounts(v *validator.Validator, targetAmount, currentAmount de
 }
 func ValidateGroupGoal(v *validator.Validator, goal *GroupGoal) {
 	ValidateGroupName(v, goal.GoalName)
-	ValidateGroupDate(v, goal.Startdate, goal.Deadline)
+	ValidateGroupDate(v, goal.Startdate.Time, goal.Deadline.Time)
 	ValidateGroupAmounts(v, goal.TargetAmount, goal.CurrentAmount)
 }
 
@@ -308,6 +318,38 @@ func (m FinancialGroupManagerModel) GetAllGroupsCreatedByUser(userID int64) ([]*
 	}
 	// we are good now
 	return enrichedGroups, nil
+}
+
+// GetDetailedGroupById() retrieves a group by its ID and the User ID of the user
+// This will return an error if the user is not a member of the group
+// The aggregated data includes a json array of the users (which will be unmarshalled to the GroupMember struct)
+// Pending invitations jsnon array (which will be unmarshalled to the GroupInvitation struct)
+// The group goals json array (which will be unmarshalled to the GroupGoal struct)
+// And the totals for the total group transactions, total group expenses and the goal_with_most_transactions
+func (m FinancialGroupManagerModel) GetDetailedGroupById(userID, groupID int64) (*DetailedGroup, error) {
+	// get our context
+	ctx, cancel := contextGenerator(context.Background(), DefualtFinManGroupsContextTimeout)
+	defer cancel()
+	// get the group
+	groupDetails, err := m.DB.GetDetailedGroupById(ctx, database.GetDetailedGroupByIdParams{
+		ID:     groupID,
+		UserID: sql.NullInt64{Int64: userID, Valid: true},
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return nil, ErrGeneralRecordNotFound
+		default:
+			return nil, err
+		}
+	}
+	// populate our group
+	detailedGroup, err := populateDetailedGroup(groupDetails, userID)
+	if err != nil {
+		return nil, err
+	}
+	// we are good now
+	return detailedGroup, nil
 }
 
 // GetAllGroupsUserIsMemberOf() retrieves all the groups a user is a member of
@@ -534,8 +576,8 @@ func (m FinancialGroupManagerModel) CreateNewGroupGoal(userID int64, groupGoal *
 		GoalName:      groupGoal.GoalName,
 		TargetAmount:  groupGoal.TargetAmount.String(),
 		CurrentAmount: sql.NullString{String: groupGoal.CurrentAmount.String(), Valid: true},
-		StartDate:     groupGoal.Startdate,
-		Deadline:      groupGoal.Deadline,
+		StartDate:     groupGoal.Startdate.Time,
+		Deadline:      groupGoal.Deadline.Time,
 		Description:   groupGoal.Description,
 	})
 	if err != nil {
@@ -567,7 +609,7 @@ func (m FinancialGroupManagerModel) UpdateGroupGoal(userID int64, groupGoal *Gro
 	// update the data
 	updatedAt, err := m.DB.UpdateGroupGoal(ctx, database.UpdateGroupGoalParams{
 		GoalName:    groupGoal.GoalName,
-		Deadline:    groupGoal.Deadline,
+		Deadline:    groupGoal.Deadline.Time,
 		Description: groupGoal.Description,
 		ID:          groupGoal.ID,
 	})
@@ -891,6 +933,21 @@ func populateGroup(groupRow interface{}) *Group {
 			UpdatedAt:      group.UpdatedAt.Time,
 			Version:        int(group.Version.Int32),
 		}
+	case database.GetDetailedGroupByIdRow:
+		return &Group{
+			ID:             group.ID,
+			CreatorUserID:  group.CreatorUserID.Int64,
+			GroupImageURL:  group.GroupImageUrl,
+			Name:           group.Name,
+			IsPrivate:      group.IsPrivate.Bool,
+			MaxMemberCount: int(group.MaxMemberCount.Int32),
+			Description:    group.Description.String,
+			ActivityCount:  int(group.ActivityCount.Int32),
+			LastActivityAt: group.LastActivityAt.Time,
+			CreatedAt:      group.CreatedAt.Time,
+			UpdatedAt:      group.UpdatedAt.Time,
+			Version:        int(group.Version.Int32),
+		}
 	default:
 		return nil
 	}
@@ -924,8 +981,8 @@ func populateGroupGoal(groupGoalRow interface{}) *GroupGoal {
 			GoalName:      groupGoal.GoalName,
 			TargetAmount:  decimal.RequireFromString(groupGoal.TargetAmount),
 			CurrentAmount: decimal.RequireFromString(groupGoal.CurrentAmount.String),
-			Startdate:     groupGoal.StartDate,
-			Deadline:      groupGoal.Deadline,
+			Startdate:     CustomTime1{groupGoal.StartDate},
+			Deadline:      CustomTime1{groupGoal.Deadline},
 			Description:   groupGoal.Description,
 			Status:        groupGoal.Status,
 			CreatedAt:     groupGoal.CreatedAt,
@@ -934,4 +991,102 @@ func populateGroupGoal(groupGoalRow interface{}) *GroupGoal {
 	default:
 		return nil
 	}
+}
+
+// populateDetailedGroup() populates the detailed group struct
+// We receive an interface and return a pointer to a DetailedGroup struct
+// For the group goals, group members and pending invitations, we will
+// unmarshal the json array to the respective structs
+func populateDetailedGroup(groupDetails interface{}, userID int64) (*DetailedGroup, error) {
+	switch groupDetails := groupDetails.(type) {
+	case database.GetDetailedGroupByIdRow:
+		// get the group goals marshalling them to a group sample goals
+		var groupGoals []*GroupGoal
+		// type assert topgoals to byte
+		topGoals, ok := groupDetails.Goals.([]byte)
+		if !ok {
+			return nil, ErrTypeConversionError
+		}
+		// unmarshal
+		err := json.Unmarshal(topGoals, &groupGoals)
+		if err != nil {
+			return nil, err
+		}
+		// get the goal with the most transactions
+		var goalWithMostTransactions *GroupGoal
+		// type assert topgoals to byte
+		goalWithMostTransactionsByte, ok := groupDetails.GoalWithMostTransactions.([]byte)
+		if !ok {
+			return nil, ErrTypeConversionError
+		}
+		// unmarshal
+		err = json.Unmarshal(goalWithMostTransactionsByte, &goalWithMostTransactions)
+		if err != nil {
+			return nil, err
+		}
+		// get the group members
+		var groupMembers []*GroupMember
+		// type assert topgoals to byte
+		topMembers, ok := groupDetails.Members.([]byte)
+		if !ok {
+			return nil, ErrTypeConversionError
+		}
+		// unmarshal
+		err = json.Unmarshal(topMembers, &groupMembers)
+		if err != nil {
+			return nil, err
+		}
+		var userRole string
+		// get the user's role
+		for _, member := range groupMembers {
+			if member.UserID == userID {
+				userRole = member.Role
+			}
+		}
+
+		// get the pending invitations
+		var pendingInvitations []*GroupInvitation
+		// type assert pending invitations to byte
+		pendingInvitationsByte, ok := groupDetails.PendingInvitations.([]byte)
+		if !ok {
+			return nil, ErrTypeConversionError
+		}
+		// unmarshal
+		err = json.Unmarshal(pendingInvitationsByte, &pendingInvitations)
+		if err != nil {
+			return nil, err
+		}
+		// populate our group
+		group := populateGroup(groupDetails)
+		// get the totals
+		totalGroupTransactions := decimal.RequireFromString(groupDetails.TotalGroupTransactions)
+		totalGroupExpenses := decimal.RequireFromString(groupDetails.TotalGroupExpenses)
+		// we are good now
+		// if the user's role is an admin or moderator, we will return everything
+		// otherwise, we will return all except the pending invitations
+
+		var detailedGroup *DetailedGroup
+		if userRole == "admin" || userRole == "moderator" {
+			detailedGroup = &DetailedGroup{
+				Group:                  group,
+				GroupGoals:             groupGoals,
+				GroupMembers:           groupMembers,
+				PendingInvitations:     pendingInvitations,
+				TotalGroupTransactions: totalGroupTransactions,
+				TotalGroupExpenses:     totalGroupExpenses,
+			}
+		} else {
+			detailedGroup = &DetailedGroup{
+				Group:                  group,
+				GroupGoals:             groupGoals,
+				GroupMembers:           groupMembers,
+				TotalGroupTransactions: totalGroupTransactions,
+				TotalGroupExpenses:     totalGroupExpenses,
+			}
+		}
+		return detailedGroup, nil
+	default:
+		return nil, nil
+	}
+
 }
