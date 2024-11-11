@@ -79,6 +79,13 @@ type GroupInvitation struct {
 	ExpirationDate   time.Time                     `json:"expiration_date"`
 }
 
+// EnrichedGroupTransaction struct represents a group transaction with additional information
+type EnrichedGroupTransaction struct {
+	GroupTransaction        []*GroupTransaction `json:"group_transaction"`
+	TotalTransactionAmount  decimal.Decimal     `json:"total_transaction_amount"`
+	LatestTransactionAmount decimal.Decimal     `json:"latest_transaction_amount"`
+}
+
 // GroupTransaction struct represents a group transaction in the database
 type GroupTransaction struct {
 	ID          int64           `json:"id"`
@@ -88,6 +95,13 @@ type GroupTransaction struct {
 	Description string          `json:"description"`
 	CreatedAt   time.Time       `json:"created_at"`
 	UpdatedAt   time.Time       `json:"updated_at"`
+}
+
+// EnrichedExpense struct represents a group expense with additional information
+type EnrichedExpense struct {
+	GroupExpense        []*GroupExpense `json:"group_expense"`
+	TotalGroupExpenses  decimal.Decimal `json:"total_group_expenses"`
+	LatestExpenseAmount decimal.Decimal `json:"latest_expense_amount"`
 }
 
 // GroupExpense struct represents a group expense in the database
@@ -367,6 +381,7 @@ func (m FinancialGroupManagerModel) GetAllGroupsUserIsMemberOf(userID int64) ([]
 			return nil, err
 		}
 	}
+
 	// check the length
 	if len(groups) == 0 {
 		return nil, ErrGeneralRecordNotFound
@@ -389,6 +404,114 @@ func (m FinancialGroupManagerModel) GetAllGroupsUserIsMemberOf(userID int64) ([]
 	}
 	// we are good now
 	return enrichedGroups, nil
+}
+
+// GetGroupTransactionsByGroupId() retrieves all the group transactions by the group ID, user ID and the FILTERs
+// We will take the group ID, user ID, and the filters as arguments and return [] EnrichedGroupTransaction, metadata and an error
+func (m FinancialGroupManagerModel) GetGroupTransactionsByGroupId(userID, groupID, goalID int64, filters Filters) (*EnrichedGroupTransaction, Metadata, error) {
+	// get our context
+	ctx, cancel := contextGenerator(context.Background(), DefualtFinManGroupsContextTimeout)
+	defer cancel()
+
+	// get the group transactions
+	groupTransactionsRows, err := m.DB.GetGroupTransactionsByGroupId(ctx, database.GetGroupTransactionsByGroupIdParams{
+		GroupID: groupID,
+		Column2: goalID,
+		UserID:  sql.NullInt64{Int64: userID, Valid: true},
+		Limit:   int32(filters.limit()),
+		Offset:  int32(filters.offset()),
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return nil, Metadata{}, ErrGeneralRecordNotFound
+		default:
+			return nil, Metadata{}, err
+		}
+	}
+
+	// check the length
+	if len(groupTransactionsRows) == 0 {
+		return nil, Metadata{}, ErrGeneralRecordNotFound
+	}
+
+	// initialize enrichedGroupTransaction to avoid nil dereference
+	enrichedGroupTransaction := &EnrichedGroupTransaction{
+		GroupTransaction: []*GroupTransaction{},
+	}
+
+	// Totals
+	totalTransactionCount := 0
+
+	// loop through the group transactions
+	for _, groupTransaction := range groupTransactionsRows {
+		totalTransactionCount = int(groupTransaction.TotalTransactions)
+		enrichedGroupTransaction.TotalTransactionAmount = decimal.RequireFromString(groupTransaction.TotalTransactionAmount)
+		enrichedGroupTransaction.LatestTransactionAmount = decimal.RequireFromString(groupTransaction.LatestTransactionAmount)
+		populatedTransaction := populateTransactions(groupTransaction)
+		// append to the slice
+		enrichedGroupTransaction.GroupTransaction = append(enrichedGroupTransaction.GroupTransaction, populatedTransaction)
+	}
+
+	// make the metadata
+	metadata := calculateMetadata(totalTransactionCount, filters.Page, filters.PageSize)
+
+	// we are good now
+	return enrichedGroupTransaction, metadata, nil
+}
+
+// GetGroupExpensesByGroupId() retrieves all the group expenses by the group ID, user ID, Optional search by expense category and the FILTERs
+// We will take the group ID, user ID, expense category and the filters as arguments and return *EnrichedExpenses, metadata and an error
+func (m FinancialGroupManagerModel) GetGroupExpensesByGroupId(userID, groupID int64, category string, filters Filters) (*EnrichedExpense, Metadata, error) {
+	// get our context
+	ctx, cancel := contextGenerator(context.Background(), DefualtFinManGroupsContextTimeout)
+	defer cancel()
+
+	// get the group expenses
+	groupExpensesRows, err := m.DB.GetGroupExpensesByGroupId(ctx, database.GetGroupExpensesByGroupIdParams{
+		GroupID: sql.NullInt64{Int64: groupID, Valid: true},
+		Column2: category,
+		UserID:  sql.NullInt64{Int64: userID, Valid: true},
+		Limit:   int32(filters.limit()),
+		Offset:  int32(filters.offset()),
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return nil, Metadata{}, ErrGeneralRecordNotFound
+		default:
+			return nil, Metadata{}, err
+		}
+	}
+
+	// check the length
+	if len(groupExpensesRows) == 0 {
+		return nil, Metadata{}, ErrGeneralRecordNotFound
+	}
+
+	// initialize enrichedGroupTransaction to avoid nil dereference
+	enrichedExpense := &EnrichedExpense{
+		GroupExpense: []*GroupExpense{},
+	}
+
+	// Totals
+	totalExpenseCount := 0
+
+	// loop through the group expenses
+	for _, groupExpense := range groupExpensesRows {
+		totalExpenseCount = int(groupExpense.TotalExpensesCount)
+		enrichedExpense.TotalGroupExpenses = decimal.RequireFromString(groupExpense.TotalExpenseAmount)
+		enrichedExpense.LatestExpenseAmount = decimal.RequireFromString(groupExpense.LatestExpenseAmount)
+		populatedExpense := populateExpenses(groupExpense)
+		// append to the slice
+		enrichedExpense.GroupExpense = append(enrichedExpense.GroupExpense, populatedExpense)
+	}
+
+	// make the metadata
+	metadata := calculateMetadata(totalExpenseCount, filters.Page, filters.PageSize)
+
+	// we are good now
+	return enrichedExpense, metadata, nil
 }
 
 // CreateNewUserGroup() creates a new user group in the database and returns the ID of the new group
@@ -780,6 +903,44 @@ func (m FinancialGroupManagerModel) DeleteGroupExpense(userID, expenseID int64) 
 	return deletedExpenseID, nil
 }
 
+// populateExpenses() populates the group expenses
+func populateExpenses(expenseRow interface{}) *GroupExpense {
+	switch expense := expenseRow.(type) {
+	case database.GetGroupExpensesByGroupIdRow:
+		return &GroupExpense{
+			ID:          expense.ExpenseID,
+			GroupID:     expense.GroupID.Int64,
+			MemberID:    expense.MemberID.Int64,
+			Amount:      decimal.RequireFromString(expense.Amount),
+			Description: expense.Description.String,
+			Category:    expense.Category.String,
+			CreatedAt:   expense.CreatedAt.Time,
+			UpdatedAt:   expense.UpdatedAt.Time,
+		}
+	default:
+		return nil
+	}
+}
+
+// populateTransactions() populates the group transactions
+func populateTransactions(transactionsRow interface{}) *GroupTransaction {
+	switch transaction := transactionsRow.(type) {
+	case database.GetGroupTransactionsByGroupIdRow:
+		return &GroupTransaction{
+			ID:          transaction.TransactionID,
+			GoalID:      transaction.GoalID.Int64,
+			MemberID:    transaction.MemberID.Int64,
+			Amount:      decimal.RequireFromString(transaction.Amount),
+			Description: transaction.Description.String,
+			CreatedAt:   transaction.CreatedAt.Time,
+			UpdatedAt:   transaction.UpdatedAt.Time,
+		}
+	default:
+		return nil
+	}
+}
+
+// populateEnrichedGroup() populates the enriched group
 func populateEnrichedGroup(enrichedGroupRow interface{}) (*EnrichedGroup, error) {
 	switch group := enrichedGroupRow.(type) {
 	case database.GetAllGroupsCreatedByUserRow:

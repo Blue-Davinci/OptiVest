@@ -137,6 +137,87 @@ SELECT
 FROM group_goals
 WHERE group_id = $1;
 
+-- name: GetGroupTransactionsByGroupId :many
+WITH transaction_totals AS (
+    SELECT 
+        SUM(gt.amount)::NUMERIC AS total_transaction_amount,
+        MAX(gt.created_at) AS latest_transaction_date
+    FROM 
+        group_transactions gt
+    JOIN 
+        group_goals gg ON gt.goal_id = gg.id
+    WHERE 
+        gg.group_id = $1
+        AND ($2 = 0 OR gt.goal_id = $2) -- Use 0 as a default to indicate "no specific goal"
+)
+SELECT 
+    gt.id AS transaction_id,
+    gg.goal_name,
+    gt.goal_id,
+    gt.member_id,
+    gt.amount,
+    gt.description,
+    gt.created_at,
+    gt.updated_at,
+    COUNT(*) OVER() AS total_transactions, -- Total count of transactions for pagination
+    tt.total_transaction_amount, -- Total transaction amount for the group and goal
+    (SELECT gt.amount FROM group_transactions gt WHERE gt.created_at = tt.latest_transaction_date LIMIT 1) AS latest_transaction_amount -- Most recent transaction amount
+FROM 
+    group_transactions gt
+JOIN 
+    group_goals gg ON gt.goal_id = gg.id
+JOIN 
+    group_memberships gm ON gm.group_id = gg.group_id -- Ensure user access
+JOIN 
+    transaction_totals tt ON TRUE -- Cross join to bring totals into main query
+WHERE 
+    gg.group_id = $1
+    AND ($2 = 0 OR gt.goal_id = $2) -- Use 0 as a default to indicate "no specific goal"
+    AND gm.user_id = $3 -- Check if requesting user is a member
+    AND gm.status = 'accepted'
+ORDER BY 
+    gt.created_at DESC
+LIMIT $4 OFFSET $5;
+
+-- name: GetGroupExpensesByGroupId :many
+WITH expense_totals AS (
+    SELECT 
+        SUM(ge.amount)::NUMERIC AS total_expense_amount,
+        MAX(ge.created_at) AS latest_expense_date
+    FROM 
+        group_expenses ge
+    WHERE 
+        ge.group_id = $1
+        AND($2 = '' OR to_tsvector('simple', ge.category) @@ plainto_tsquery('simple', $2))
+)
+SELECT 
+    ge.id AS expense_id,
+    ge.group_id,
+    ge.member_id,
+    ge.amount,
+    ge.description,
+    ge.category,
+    ge.created_at,
+    ge.updated_at,
+    COUNT(*) OVER() AS total_expenses_count, -- Total count of expenses for pagination
+    et.total_expense_amount, -- Total expense amount for the group and category
+    (SELECT ge.amount FROM group_expenses ge WHERE ge.created_at = et.latest_expense_date LIMIT 1) AS latest_expense_amount -- Most recent expense amount
+FROM 
+    group_expenses ge
+JOIN 
+    group_memberships gm ON gm.group_id = ge.group_id -- Ensure user access
+JOIN 
+    expense_totals et ON TRUE -- Cross join to bring totals into main query
+WHERE 
+    ge.group_id = $1
+    AND($2 = '' OR to_tsvector('simple', ge.category) @@ plainto_tsquery('simple', $2))
+    AND gm.user_id = $3 -- Check if requesting user is a member
+    AND gm.status = 'accepted' -- Only approved members can view expenses
+ORDER BY 
+    ge.created_at DESC
+LIMIT $4 OFFSET $5;
+
+
 -- name: CreateNewGroupTransaction :one
 INSERT INTO group_transactions (
     goal_id,

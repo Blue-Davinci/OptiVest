@@ -140,10 +140,12 @@ func (app *application) groupRoutes() chi.Router {
 	groupRoutes.Patch("/goal/{groupGoalID}", app.updateGroupGoalHandler)
 
 	// group Transactions
+	groupRoutes.Get("/transactions/{groupID}", app.getGroupTransactionsByGroupIdHandler)
 	groupRoutes.Post("/transactions", app.createNewGroupTransactionHandler)
 	groupRoutes.Delete("/transactions/{groupTransactionID}", app.deleteGroupTransactionHandler)
 
 	// group Expenses
+	groupRoutes.Get("/expenses/{groupID}", app.getGroupExpensesByGroupIdHandler)
 	groupRoutes.Post("/expenses", app.createNewGroupExpenseHandler)
 	groupRoutes.Delete("/expenses/{groupExpenseID}", app.deleteGroupExpenseHandler)
 

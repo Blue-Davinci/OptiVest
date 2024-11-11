@@ -681,6 +681,7 @@ func (app *application) getAllGroupsCreatedByUserHandler(w http.ResponseWriter, 
 // getAllGroupsUserIsMemberOfHandler() will get all the groups the user is a member of
 // we will return a list of groups the user is a member of
 func (app *application) getAllGroupsUserIsMemberOfHandler(w http.ResponseWriter, r *http.Request) {
+	app.logger.Info("getting all groups user is a member of")
 	// get all the groups the user is a member of
 	groups, err := app.models.FinancialGroupManager.GetAllGroupsUserIsMemberOf(app.contextGetUser(r).ID)
 	if err != nil {
@@ -694,9 +695,115 @@ func (app *application) getAllGroupsUserIsMemberOfHandler(w http.ResponseWriter,
 	}
 }
 
+// getGroupTransactionsByGroupIdHandler() will get all the transactions for a group
+// This route supports Pagination and a goalID search (which is optional and defaults to 0 to get all transactions)
+// We also accept a groupID as well as the userID
+func (app *application) getGroupTransactionsByGroupIdHandler(w http.ResponseWriter, r *http.Request) {
+	// The Group ID will be provided as a URL param
+	groupID, err := app.readIDParam(r, "groupID")
+	if err != nil || groupID < 1 {
+		app.notFoundResponse(w, r)
+		return
+	}
+	// verify the urlID
+	v := validator.New()
+	if data.ValidateURLID(v, groupID, "groupID"); !v.Valid() {
+		app.failedValidationResponse(w, r, v.Errors)
+		return
+	}
+	// the goalID and Filters will be provided as Query params
+	var input struct {
+		GoalID int64 `json:"goal_id"`
+		data.Filters
+	}
+	qs := r.URL.Query()
+	input.GoalID = int64(app.readInt(qs, "goalID", 0, v))
+	input.Filters.Page = app.readInt(qs, "page", 1, v)
+	input.Filters.PageSize = app.readInt(qs, "page_size", 18, v)
+	// We don't use any sort for this endpoint
+	input.Filters.Sort = app.readString(qs, "", "")
+	// None of the sort values are supported for this endpoint
+	input.Filters.SortSafelist = []string{"", ""}
+	// Perform validation
+	if data.ValidateFilters(v, input.Filters); !v.Valid() {
+		app.failedValidationResponse(w, r, v.Errors)
+		return
+	}
+	// get all the transactions for the group
+	transactions, metadata, err := app.models.FinancialGroupManager.GetGroupTransactionsByGroupId(app.contextGetUser(r).ID, groupID, input.GoalID, input.Filters)
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrGeneralRecordNotFound):
+			app.notFoundResponse(w, r)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
+	// send the transactions in the response
+	err = app.writeJSON(w, http.StatusOK, envelope{"transactions": transactions, "metadata": metadata}, nil)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+	}
+}
+
+// getGroupExpensesByGroupIdHandler() will get all the expenses for a group
+// This route supports Pagination and a category search (which is optional and defaults to "" to get all expenses)
+// We also accept a groupID as well as the userID
+func (app *application) getGroupExpensesByGroupIdHandler(w http.ResponseWriter, r *http.Request) {
+	// The Group ID will be provided as a URL param
+	groupID, err := app.readIDParam(r, "groupID")
+	if err != nil || groupID < 1 {
+		app.notFoundResponse(w, r)
+		return
+	}
+	// verify the urlID
+	v := validator.New()
+	if data.ValidateURLID(v, groupID, "groupID"); !v.Valid() {
+		app.failedValidationResponse(w, r, v.Errors)
+		return
+	}
+	// the category and Filters will be provided as Query params
+	var input struct {
+		Category string `json:"category"`
+		data.Filters
+	}
+
+	qs := r.URL.Query()
+	input.Category = app.readString(qs, "name", "")
+	input.Filters.Page = app.readInt(qs, "page", 1, v)
+	input.Filters.PageSize = app.readInt(qs, "page_size", 18, v)
+	// We don't use any sort for this endpoint
+	input.Filters.Sort = app.readString(qs, "", "")
+	// None of the sort values are supported for this endpoint
+	input.Filters.SortSafelist = []string{"", ""}
+	// Perform validation
+	if data.ValidateFilters(v, input.Filters); !v.Valid() {
+		app.failedValidationResponse(w, r, v.Errors)
+		return
+	}
+	// get all the expenses for the group
+	expenses, metadata, err := app.models.FinancialGroupManager.GetGroupExpensesByGroupId(app.contextGetUser(r).ID, groupID, input.Category, input.Filters)
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrGeneralRecordNotFound):
+			app.notFoundResponse(w, r)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
+	// send the expenses in the response
+	err = app.writeJSON(w, http.StatusOK, envelope{"expenses": expenses, "metadata": metadata}, nil)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+	}
+}
+
 // getDetailedGroupByIdHandler() will get a detailed group by the group ID and user ID
 // we will return a detailed group by the ID
 func (app *application) getDetailedGroupByIdHandler(w http.ResponseWriter, r *http.Request) {
+	app.logger.Info("getting detailed group by ID")
 	// get the group ID from the URL
 	groupID, err := app.readIDParam(r, "groupID")
 	if err != nil || groupID < 1 {

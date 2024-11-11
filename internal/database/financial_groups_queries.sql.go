@@ -795,6 +795,108 @@ func (q *Queries) GetGroupById(ctx context.Context, id int64) (Group, error) {
 	return i, err
 }
 
+const getGroupExpensesByGroupId = `-- name: GetGroupExpensesByGroupId :many
+WITH expense_totals AS (
+    SELECT 
+        SUM(ge.amount)::NUMERIC AS total_expense_amount,
+        MAX(ge.created_at) AS latest_expense_date
+    FROM 
+        group_expenses ge
+    WHERE 
+        ge.group_id = $1
+        AND($2 = '' OR to_tsvector('simple', ge.category) @@ plainto_tsquery('simple', $2))
+)
+SELECT 
+    ge.id AS expense_id,
+    ge.group_id,
+    ge.member_id,
+    ge.amount,
+    ge.description,
+    ge.category,
+    ge.created_at,
+    ge.updated_at,
+    COUNT(*) OVER() AS total_expenses_count, -- Total count of expenses for pagination
+    et.total_expense_amount, -- Total expense amount for the group and category
+    (SELECT ge.amount FROM group_expenses ge WHERE ge.created_at = et.latest_expense_date LIMIT 1) AS latest_expense_amount -- Most recent expense amount
+FROM 
+    group_expenses ge
+JOIN 
+    group_memberships gm ON gm.group_id = ge.group_id -- Ensure user access
+JOIN 
+    expense_totals et ON TRUE -- Cross join to bring totals into main query
+WHERE 
+    ge.group_id = $1
+    AND($2 = '' OR to_tsvector('simple', ge.category) @@ plainto_tsquery('simple', $2))
+    AND gm.user_id = $3 -- Check if requesting user is a member
+    AND gm.status = 'accepted' -- Only approved members can view expenses
+ORDER BY 
+    ge.created_at DESC
+LIMIT $4 OFFSET $5
+`
+
+type GetGroupExpensesByGroupIdParams struct {
+	GroupID sql.NullInt64
+	Column2 interface{}
+	UserID  sql.NullInt64
+	Limit   int32
+	Offset  int32
+}
+
+type GetGroupExpensesByGroupIdRow struct {
+	ExpenseID           int64
+	GroupID             sql.NullInt64
+	MemberID            sql.NullInt64
+	Amount              string
+	Description         sql.NullString
+	Category            sql.NullString
+	CreatedAt           sql.NullTime
+	UpdatedAt           sql.NullTime
+	TotalExpensesCount  int64
+	TotalExpenseAmount  string
+	LatestExpenseAmount string
+}
+
+func (q *Queries) GetGroupExpensesByGroupId(ctx context.Context, arg GetGroupExpensesByGroupIdParams) ([]GetGroupExpensesByGroupIdRow, error) {
+	rows, err := q.db.QueryContext(ctx, getGroupExpensesByGroupId,
+		arg.GroupID,
+		arg.Column2,
+		arg.UserID,
+		arg.Limit,
+		arg.Offset,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetGroupExpensesByGroupIdRow
+	for rows.Next() {
+		var i GetGroupExpensesByGroupIdRow
+		if err := rows.Scan(
+			&i.ExpenseID,
+			&i.GroupID,
+			&i.MemberID,
+			&i.Amount,
+			&i.Description,
+			&i.Category,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.TotalExpensesCount,
+			&i.TotalExpenseAmount,
+			&i.LatestExpenseAmount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getGroupGoalById = `-- name: GetGroupGoalById :one
 SELECT
     id,
@@ -907,6 +1009,112 @@ func (q *Queries) GetGroupInvitationById(ctx context.Context, arg GetGroupInvita
 		&i.ExpirationDate,
 	)
 	return i, err
+}
+
+const getGroupTransactionsByGroupId = `-- name: GetGroupTransactionsByGroupId :many
+WITH transaction_totals AS (
+    SELECT 
+        SUM(gt.amount)::NUMERIC AS total_transaction_amount,
+        MAX(gt.created_at) AS latest_transaction_date
+    FROM 
+        group_transactions gt
+    JOIN 
+        group_goals gg ON gt.goal_id = gg.id
+    WHERE 
+        gg.group_id = $1
+        AND ($2 = 0 OR gt.goal_id = $2) -- Use 0 as a default to indicate "no specific goal"
+)
+SELECT 
+    gt.id AS transaction_id,
+    gg.goal_name,
+    gt.goal_id,
+    gt.member_id,
+    gt.amount,
+    gt.description,
+    gt.created_at,
+    gt.updated_at,
+    COUNT(*) OVER() AS total_transactions, -- Total count of transactions for pagination
+    tt.total_transaction_amount, -- Total transaction amount for the group and goal
+    (SELECT gt.amount FROM group_transactions gt WHERE gt.created_at = tt.latest_transaction_date LIMIT 1) AS latest_transaction_amount -- Most recent transaction amount
+FROM 
+    group_transactions gt
+JOIN 
+    group_goals gg ON gt.goal_id = gg.id
+JOIN 
+    group_memberships gm ON gm.group_id = gg.group_id -- Ensure user access
+JOIN 
+    transaction_totals tt ON TRUE -- Cross join to bring totals into main query
+WHERE 
+    gg.group_id = $1
+    AND ($2 = 0 OR gt.goal_id = $2) -- Use 0 as a default to indicate "no specific goal"
+    AND gm.user_id = $3 -- Check if requesting user is a member
+    AND gm.status = 'accepted'
+ORDER BY 
+    gt.created_at DESC
+LIMIT $4 OFFSET $5
+`
+
+type GetGroupTransactionsByGroupIdParams struct {
+	GroupID int64
+	Column2 interface{}
+	UserID  sql.NullInt64
+	Limit   int32
+	Offset  int32
+}
+
+type GetGroupTransactionsByGroupIdRow struct {
+	TransactionID           int64
+	GoalName                string
+	GoalID                  sql.NullInt64
+	MemberID                sql.NullInt64
+	Amount                  string
+	Description             sql.NullString
+	CreatedAt               sql.NullTime
+	UpdatedAt               sql.NullTime
+	TotalTransactions       int64
+	TotalTransactionAmount  string
+	LatestTransactionAmount string
+}
+
+func (q *Queries) GetGroupTransactionsByGroupId(ctx context.Context, arg GetGroupTransactionsByGroupIdParams) ([]GetGroupTransactionsByGroupIdRow, error) {
+	rows, err := q.db.QueryContext(ctx, getGroupTransactionsByGroupId,
+		arg.GroupID,
+		arg.Column2,
+		arg.UserID,
+		arg.Limit,
+		arg.Offset,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetGroupTransactionsByGroupIdRow
+	for rows.Next() {
+		var i GetGroupTransactionsByGroupIdRow
+		if err := rows.Scan(
+			&i.TransactionID,
+			&i.GoalName,
+			&i.GoalID,
+			&i.MemberID,
+			&i.Amount,
+			&i.Description,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.TotalTransactions,
+			&i.TotalTransactionAmount,
+			&i.LatestTransactionAmount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const updateExpiredGroupInvitations = `-- name: UpdateExpiredGroupInvitations :exec
