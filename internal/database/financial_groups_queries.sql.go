@@ -591,10 +591,27 @@ WITH user_groups AS (
 ),
 
 group_members AS (
-    SELECT gm.group_id, gm.user_id, u.first_name, gm.role, u.profile_avatar_url
+    SELECT 
+        gm.group_id,
+        gm.user_id,
+        u.first_name,
+        gm.role,
+        u.profile_avatar_url,
+        gm.approval_time AS join_date,  -- Join date
+
+        -- Number of transactions for each member
+        COALESCE(COUNT(gt.id), 0) AS transaction_count,
+
+        -- Total amount of transactions for each member
+        COALESCE(SUM(gt.amount), 0)::NUMERIC AS total_transaction_amount
+
     FROM group_memberships gm
     JOIN users u ON gm.user_id = u.id
-    WHERE gm.group_id = $1 -- Same group_id parameter
+    LEFT JOIN group_transactions gt ON gt.member_id = gm.user_id AND gt.goal_id IN (
+        SELECT id FROM group_goals WHERE group_id = $1
+    )
+    WHERE gm.group_id = $1 
+    GROUP BY gm.group_id, gm.user_id, u.first_name, gm.role, u.profile_avatar_url, gm.approval_time
 ),
 
 pending_invitations AS (
@@ -645,7 +662,10 @@ SELECT
                 'user_id', gm.user_id, 
                 'first_name', gm.first_name, 
                 'role', gm.role, 
-                'profile_avatar_url', gm.profile_avatar_url
+                'profile_avatar_url', gm.profile_avatar_url,
+                'join_date', gm.join_date,              
+                'transaction_count', gm.transaction_count,             
+                'total_transaction_amount', gm.total_transaction_amount 
             )
         )
         FROM group_members gm

@@ -81,9 +81,15 @@ type GroupInvitation struct {
 
 // EnrichedGroupTransaction struct represents a group transaction with additional information
 type EnrichedGroupTransaction struct {
-	GroupTransaction        []*GroupTransaction `json:"group_transaction"`
-	TotalTransactionAmount  decimal.Decimal     `json:"total_transaction_amount"`
-	LatestTransactionAmount decimal.Decimal     `json:"latest_transaction_amount"`
+	GroupTransaction        []*GroupTransactionWithGoalName `json:"group_transaction"`
+	TotalTransactionAmount  decimal.Decimal                 `json:"total_transaction_amount"`
+	LatestTransactionAmount decimal.Decimal                 `json:"latest_transaction_amount"`
+}
+
+// GroupTransactionWithGoalName struct represents a group transaction with the goal name
+type GroupTransactionWithGoalName struct {
+	GoalName         string            `json:"goal_name"`
+	GroupTransaction *GroupTransaction `json:"group_transaction"`
 }
 
 // GroupTransaction struct represents a group transaction in the database
@@ -147,10 +153,13 @@ type SampleGroupGoal struct {
 
 // GroupMember holds data for each member within a group.
 type GroupMember struct {
-	UserID           int64  `json:"user_id"`
-	FirstName        string `json:"first_name"`
-	Role             string `json:"role"`
-	ProfileAvatarURL string `json:"profile_avatar_url"`
+	UserID                int64           `json:"user_id"`
+	FirstName             string          `json:"first_name"`
+	Role                  string          `json:"role"`
+	ProfileAvatarURL      string          `json:"profile_avatar_url"`
+	JoinDate              CustomTime1     `json:"join_date,omitempty"`
+	TransactionCount      int64           `json:"transaction_count,omitempty"`
+	TotalTransactioAmount decimal.Decimal `json:"total_transaction_amount,omitempty"`
 }
 
 // MapInvitationInvitationStatusTypeToConstant() maps the invitation status type to a constant
@@ -437,7 +446,7 @@ func (m FinancialGroupManagerModel) GetGroupTransactionsByGroupId(userID, groupI
 
 	// initialize enrichedGroupTransaction to avoid nil dereference
 	enrichedGroupTransaction := &EnrichedGroupTransaction{
-		GroupTransaction: []*GroupTransaction{},
+		GroupTransaction: []*GroupTransactionWithGoalName{},
 	}
 
 	// Totals
@@ -449,8 +458,12 @@ func (m FinancialGroupManagerModel) GetGroupTransactionsByGroupId(userID, groupI
 		enrichedGroupTransaction.TotalTransactionAmount = decimal.RequireFromString(groupTransaction.TotalTransactionAmount)
 		enrichedGroupTransaction.LatestTransactionAmount = decimal.RequireFromString(groupTransaction.LatestTransactionAmount)
 		populatedTransaction := populateTransactions(groupTransaction)
+		transactionWithGoalName := &GroupTransactionWithGoalName{
+			GoalName:         groupTransaction.GoalName,
+			GroupTransaction: populatedTransaction,
+		}
 		// append to the slice
-		enrichedGroupTransaction.GroupTransaction = append(enrichedGroupTransaction.GroupTransaction, populatedTransaction)
+		enrichedGroupTransaction.GroupTransaction = append(enrichedGroupTransaction.GroupTransaction, transactionWithGoalName)
 	}
 
 	// make the metadata

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/Blue-Davinci/OptiVest/internal/data"
@@ -154,6 +155,7 @@ func (app *application) generateAuthenticationTokenAndLogin(user *data.User, tim
 	err = app.writeJSON(w, http.StatusCreated, envelope{
 		"api_key": bearer_token,
 		"user": map[string]string{
+			"id":                strconv.Itoa(int(user.ID)),
 			"first_name":        user.FirstName,
 			"last_name":         user.LastName,
 			"user_role":         user.UserRole,

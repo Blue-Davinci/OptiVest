@@ -33,6 +33,7 @@ const (
 	NotificationTypeFinancialManagement = "financial_management"
 	NotificationTypeBudget              = "budget"
 	NotificationTypeAward               = "award"
+	NotificationTypeGroupInvite         = "group_invite"
 )
 
 const (

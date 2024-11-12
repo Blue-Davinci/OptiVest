@@ -203,7 +203,7 @@ func (app *application) createNewGroupInvitation(w http.ResponseWriter, r *http.
 		return
 	}
 	// check if invitee exists
-	_, err = app.models.Users.GetByEmail(input.InviteeUserEmail, app.config.encryption.key)
+	inviteeUser, err := app.models.Users.GetByEmail(input.InviteeUserEmail, app.config.encryption.key)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -255,6 +255,15 @@ func (app *application) createNewGroupInvitation(w http.ResponseWriter, r *http.
 		app.serverErrorResponse(w, r, err)
 	}
 	// ToDO: Send notificion to the invitee
+	notificationContent := data.NotificationContent{
+		Message: fmt.Sprintf("You have been invited to join the group %s, by %s at %s. Follow the link to accept the invitation", group.Name, app.contextGetUser(r).Email, time.Now().Format("2006-01-02 15:04:05")),
+		Meta: data.NotificationMeta{
+			Url:      fmt.Sprintf("%s?groupID=%d", app.config.frontend.groupinvitationurl, group.ID),
+			ImageUrl: group.GroupImageURL,
+			Tags:     "group,invitation",
+		},
+	}
+	app.PublishNotificationToRedis(inviteeUser.ID, data.NotificationTypeGroupInvite, notificationContent)
 }
 
 // updateGroupInvitationStatusHandler() will update the status of a group invitation
