@@ -111,6 +111,7 @@ type config struct {
 		passwordreseturl   string
 		callback_url       string
 		awardurl           string
+		groupurl           string
 		groupinvitationurl string
 	}
 	scheduler struct {
@@ -233,7 +234,8 @@ func main() {
 	flag.StringVar(&cfg.frontend.passwordreseturl, "frontend-password-reset-url", "http://localhost:5173/passwordreset/password?token=", "Frontend Password Reset URL")
 	flag.StringVar(&cfg.frontend.callback_url, "frontend-callback-url", "https://adapted-healthy-monitor.ngrok-free.app/v1", "Frontend Callback URL")
 	flag.StringVar(&cfg.frontend.awardurl, "frontend-award-url", "http://localhost:5173/awards", "Frontend Award URL")
-	flag.StringVar(&cfg.frontend.groupinvitationurl, "frontend-group-url", "http://localhost:5173/groups/invitation", "Frontend Group URL")
+	flag.StringVar(&cfg.frontend.groupurl, "frontend-group-url", "http://localhost:5173/groups", "Frontend Group URL")
+	flag.StringVar(&cfg.frontend.groupinvitationurl, "frontend-group-invite-url", "http://localhost:5173/groups/invitation", "Frontend Group invitation URL")
 	// Limit configuration
 	flag.IntVar(&cfg.limit.monthlyGoalProcessingBatchLimit, "monthly-goal-batch-limit", 100, "Batching Limit for Monthly Goal Processing")
 	flag.IntVar(&cfg.limit.recurringExpenseTrackerBurstLimit, "recurring-expense-burst-limit", 100, "Batch Limit for Recurring Expense Tracker")

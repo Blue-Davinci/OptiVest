@@ -49,6 +49,11 @@ func (app *application) createAuthenticationApiKeyHandler(w http.ResponseWriter,
 		}
 		return
 	}
+	// if the user is not activated, we return an error
+	if !user.Activated {
+		app.inactiveAccountResponse(w, r)
+		return
+	}
 	// check if the password matches
 	match, err := user.Password.Matches(input.Password)
 	if err != nil {
@@ -335,6 +340,70 @@ func (app *application) createPasswordResetTokenHandler(w http.ResponseWriter, r
 	// But use a generic message as well
 	// an email will be sent to you containing password reset instructions
 	env := envelope{"message": "if we found a matching email address, we have sent password reset instructions to it"}
+	err = app.writeJSON(w, http.StatusAccepted, env, nil)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+	}
+}
+
+func (app *application) createManualActivationTokenHandler(w http.ResponseWriter, r *http.Request) {
+	// Parse and validate the user's email address.
+	var input struct {
+		Email string `json:"email"`
+	}
+	err := app.readJSON(w, r, &input)
+	if err != nil {
+		app.badRequestResponse(w, r, err)
+		return
+	}
+	v := validator.New()
+	if data.ValidateEmail(v, input.Email); !v.Valid() {
+		app.failedValidationResponse(w, r, v.Errors)
+		return
+	}
+	// Try to retrieve the corresponding user record for the email address. If it can't
+	// be found, return an error message to the client.
+	user, err := app.models.Users.GetByEmail(input.Email, app.config.encryption.key)
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrGeneralRecordNotFound):
+			v.AddError("email", "no matching email address found")
+			app.failedValidationResponse(w, r, v.Errors)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
+	// Return an error if the user has already been activated.
+	if user.Activated {
+		v.AddError("email", "user has already been activated")
+		app.failedValidationResponse(w, r, v.Errors)
+		return
+	}
+	// Otherwise, create a new activation token.
+	token, err := app.models.Tokens.New(user.ID, 3*24*time.Hour, data.ScopeActivation)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+		return
+	}
+	// Email the user with their additional activation token.
+	app.background(func() {
+		data := map[string]any{
+			"activationURL": app.config.frontend.activationurl + token.Plaintext,
+			"firstName":     user.FirstName,
+			"lastName":      user.LastName,
+			"userID":        user.ID,
+		}
+		// Since email addresses MAY be case sensitive, notice that we are sending this
+		// email using the address stored in our database for the user --- not to the
+		// input.Email address provided by the client in this request.
+		err = app.mailer.Send(user.Email, "user_welcome.tmpl", data)
+		if err != nil {
+			app.logger.Info("An error occurred while sending the activation email", zap.Error(err))
+		}
+	})
+	// Send a 202 Accepted response and confirmation message to the client.
+	env := envelope{"message": "an email will be sent to you containing activation instructions"}
 	err = app.writeJSON(w, http.StatusAccepted, env, nil)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)

@@ -258,7 +258,7 @@ func (app *application) createNewGroupInvitation(w http.ResponseWriter, r *http.
 	notificationContent := data.NotificationContent{
 		Message: fmt.Sprintf("You have been invited to join the group %s, by %s at %s. Follow the link to accept the invitation", group.Name, app.contextGetUser(r).Email, time.Now().Format("2006-01-02 15:04:05")),
 		Meta: data.NotificationMeta{
-			Url:      fmt.Sprintf("%s?groupID=%d", app.config.frontend.groupinvitationurl, group.ID),
+			Url:      fmt.Sprintf("%s?groupID=%d&email=%s", app.config.frontend.groupinvitationurl, group.ID, inviteeUser.Email),
 			ImageUrl: group.GroupImageURL,
 			Tags:     "group,invitation",
 		},
@@ -298,7 +298,7 @@ func (app *application) updateGroupInvitationStatusHandler(w http.ResponseWriter
 		return
 	}
 	// the notification exists, lets proceed
-	// validate the status by mapping it
+	// validate the status by mapping it (pending, accepted or declined)
 	mappedStatus, err := app.models.FinancialGroupManager.MapInvitationInvitationStatusTypeToConstant(input.Status)
 	if err != nil {
 		switch {
@@ -328,16 +328,25 @@ func (app *application) updateGroupInvitationStatusHandler(w http.ResponseWriter
 	// make a message depending on whether status was accepted or rejected
 	var message string
 	if mappedStatus == data.InviationStatusTypeAccepted {
-		message = "group invitation accepted"
+		message = "the group invitation has been accepted"
 	} else {
-		message = "group invitation rejected"
+		message = "the group invitation has been rejected"
 	}
 	// send the group invitation in the response
 	err = app.writeJSON(w, http.StatusOK, envelope{"message": message, "group_invitation": groupInvitation}, nil)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 	}
-
+	// ToDo: Notify inviter of acceptance
+	notificationContent := data.NotificationContent{
+		Message: fmt.Sprintf("%s has seen your group invitation and %s", app.contextGetUser(r).Email, message),
+		Meta: data.NotificationMeta{
+			Url:      fmt.Sprintf("%s/%d", app.config.frontend.groupurl, groupID),
+			ImageUrl: "",
+			Tags:     "groups, invitation, status",
+		},
+	}
+	app.PublishNotificationToRedis(groupInvitation.InviterUserID, data.NotificationTypeGroupInvite, notificationContent)
 }
 
 // createNewGroupGoalHandler() will create a new group goal for a group

@@ -91,6 +91,8 @@ func (app *application) apiKeyRoutes() chi.Router {
 	apiKeyRoutes.Patch("/authentication/verify", app.validateMFALoginAttemptHandler)
 	// /password-reset : for sending keys for resetting passwords
 	apiKeyRoutes.Post("/password-reset", app.createPasswordResetTokenHandler)
+	// manual token request
+	apiKeyRoutes.Post("/resend-activation", app.createManualActivationTokenHandler)
 	return apiKeyRoutes
 }
 
