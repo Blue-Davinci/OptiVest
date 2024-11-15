@@ -544,3 +544,26 @@ SELECT
 
 FROM user_groups ug;
 
+
+-- name: AdminDeleteGroupMember :one
+-- Admin can delete a member from a group who is not an admin
+DELETE FROM group_memberships gm_target
+WHERE gm_target.group_id = $1
+  AND gm_target.user_id = $2
+  AND gm_target.role != 'admin' -- Prevent deletion of other admins
+  AND EXISTS (
+      SELECT 1
+      FROM group_memberships gm_admin
+      WHERE gm_admin.group_id = $1
+        AND gm_admin.user_id = $3
+        AND gm_admin.role = 'admin'
+        AND gm_admin.status = 'approved'
+  )
+RETURNING user_id;
+
+
+-- name: UserLeaveGroup :one
+-- User can leave a group
+DELETE FROM group_memberships
+WHERE group_id = $1 AND user_id = $2
+RETURNING user_id;

@@ -319,7 +319,12 @@ func (app *application) getBudgetsForUserHandler(w http.ResponseWriter, r *http.
 	// Get the budgets for the user
 	enrichedBudgets, metadata, err := app.models.FinancialManager.GetBudgetsForUser(app.contextGetUser(r).ID, input.Name, input.Filters)
 	if err != nil {
-		app.serverErrorResponse(w, r, err)
+		switch {
+		case errors.Is(err, data.ErrGeneralRecordNotFound):
+			app.notFoundResponse(w, r)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
 		return
 	}
 	// Return the enriched budgets with a 200 OK response
@@ -638,7 +643,12 @@ func (app *application) getGoalTrackingHistoryHandler(w http.ResponseWriter, r *
 	// Get the goal tracking history for the user
 	goalTrackingHistory, metadata, err := app.models.FinancialManager.GetGoalTrackingHistory(user.ID, mappedTrackingType, input.Filters)
 	if err != nil {
-		app.serverErrorResponse(w, r, err)
+		switch {
+		case errors.Is(err, data.ErrGeneralRecordNotFound):
+			app.notFoundResponse(w, r)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
 		return
 	}
 	// Return the goal tracking history with a 200 OK response

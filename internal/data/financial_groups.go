@@ -916,6 +916,54 @@ func (m FinancialGroupManagerModel) DeleteGroupExpense(userID, expenseID int64) 
 	return deletedExpenseID, nil
 }
 
+// AdminDeleteGroupMember() allows an ADMIN user to remove/delete/boot a user from the group
+// We take in a group ID, the user ID of the user to be removed and the user ID of the group admin.
+// we return the deleted user's ID and an error if any
+func (m FinancialGroupManagerModel) AdminDeleteGroupMember(adminID, groupID, memberID int64) (int64, error) {
+	// get our context
+	ctx, cancel := contextGenerator(context.Background(), DefualtFinManGroupsContextTimeout)
+	defer cancel()
+	// delete the data
+	deletedMemberID, err := m.DB.AdminDeleteGroupMember(ctx, database.AdminDeleteGroupMemberParams{
+		GroupID:  sql.NullInt64{Int64: groupID, Valid: true},
+		UserID:   sql.NullInt64{Int64: memberID, Valid: true},
+		UserID_2: sql.NullInt64{Int64: adminID, Valid: true},
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return 0, ErrGeneralRecordNotFound
+		default:
+			return 0, err
+		}
+	}
+	// we are good now
+	return deletedMemberID.Int64, nil
+}
+
+// UserLeaveGroup() allows a user to leave a group and delete themselves from the group
+// We take in the user ID and the group ID and return an error if any as well as the deleted user ID
+func (m FinancialGroupManagerModel) UserLeaveGroup(userID, groupID int64) (int64, error) {
+	// get our context
+	ctx, cancel := contextGenerator(context.Background(), DefualtFinManGroupsContextTimeout)
+	defer cancel()
+	// delete the data
+	deletedMemberID, err := m.DB.UserLeaveGroup(ctx, database.UserLeaveGroupParams{
+		GroupID: sql.NullInt64{Int64: groupID, Valid: true},
+		UserID:  sql.NullInt64{Int64: userID, Valid: true},
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return 0, ErrGeneralRecordNotFound
+		default:
+			return 0, err
+		}
+	}
+	// we are good now
+	return deletedMemberID.Int64, nil
+}
+
 // populateExpenses() populates the group expenses
 func populateExpenses(expenseRow interface{}) *GroupExpense {
 	switch expense := expenseRow.(type) {

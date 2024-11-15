@@ -247,7 +247,12 @@ func (app *application) getAllStockInvestmentByUserIDHandler(w http.ResponseWrit
 	// get our stock information
 	stock, metadata, err := app.models.InvestmentPortfolioManager.GetAllStockInvestmentByUserID(app.contextGetUser(r).ID, input.Name, input.Filters)
 	if err != nil {
-		app.serverErrorResponse(w, r, err)
+		switch {
+		case errors.Is(err, data.ErrGeneralRecordNotFound):
+			app.notFoundResponse(w, r)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
 		return
 	}
 	// save the stock in our cache using data.DefaultInvestmentPortfolioSummaryTTL(currently 10mins)
@@ -476,7 +481,12 @@ func (app *application) getAllBondInvestmentByUserIDHandler(w http.ResponseWrite
 	// get our bond information
 	bond, metadata, err := app.models.InvestmentPortfolioManager.GetAllBondInvestmentByUserID(app.contextGetUser(r).ID, input.Name, input.Filters)
 	if err != nil {
-		app.serverErrorResponse(w, r, err)
+		switch {
+		case errors.Is(err, data.ErrGeneralRecordNotFound):
+			app.notFoundResponse(w, r)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
 		return
 	}
 
@@ -1060,7 +1070,12 @@ func (app *application) getAllAlternativeInvestmentByUserIDHandler(w http.Respon
 	// get our alternative information
 	alternative, metadata, err := app.models.InvestmentPortfolioManager.GetAllAlternativeInvestmentByUserID(app.contextGetUser(r).ID, input.Name, input.Filters)
 	if err != nil {
-		app.serverErrorResponse(w, r, err)
+		switch {
+		case errors.Is(err, data.ErrGeneralRecordNotFound):
+			app.notFoundResponse(w, r)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
 		return
 	}
 	// save the alternative in our cache using data.DefaultInvestmentPortfolioSummaryTTL(currently 10mins)

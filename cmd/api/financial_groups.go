@@ -686,7 +686,12 @@ func (app *application) getAllGroupsCreatedByUserHandler(w http.ResponseWriter, 
 	// get all the groups created by the user
 	groups, err := app.models.FinancialGroupManager.GetAllGroupsCreatedByUser(app.contextGetUser(r).ID)
 	if err != nil {
-		app.serverErrorResponse(w, r, err)
+		switch {
+		case errors.Is(err, data.ErrGeneralRecordNotFound):
+			app.notFoundResponse(w, r)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
 		return
 	}
 	// send the groups in the response
@@ -703,7 +708,12 @@ func (app *application) getAllGroupsUserIsMemberOfHandler(w http.ResponseWriter,
 	// get all the groups the user is a member of
 	groups, err := app.models.FinancialGroupManager.GetAllGroupsUserIsMemberOf(app.contextGetUser(r).ID)
 	if err != nil {
-		app.serverErrorResponse(w, r, err)
+		switch {
+		case errors.Is(err, data.ErrGeneralRecordNotFound):
+			app.notFoundResponse(w, r)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
 		return
 	}
 	// send the groups in the response

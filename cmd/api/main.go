@@ -234,8 +234,8 @@ func main() {
 	flag.StringVar(&cfg.frontend.passwordreseturl, "frontend-password-reset-url", "http://localhost:5173/passwordreset/password?token=", "Frontend Password Reset URL")
 	flag.StringVar(&cfg.frontend.callback_url, "frontend-callback-url", "https://adapted-healthy-monitor.ngrok-free.app/v1", "Frontend Callback URL")
 	flag.StringVar(&cfg.frontend.awardurl, "frontend-award-url", "http://localhost:5173/awards", "Frontend Award URL")
-	flag.StringVar(&cfg.frontend.groupurl, "frontend-group-url", "http://localhost:5173/groups", "Frontend Group URL")
-	flag.StringVar(&cfg.frontend.groupinvitationurl, "frontend-group-invite-url", "http://localhost:5173/groups/invitation", "Frontend Group invitation URL")
+	flag.StringVar(&cfg.frontend.groupurl, "frontend-group-url", "http://localhost:5173/dashboard/groups", "Frontend Group URL")
+	flag.StringVar(&cfg.frontend.groupinvitationurl, "frontend-group-invite-url", "http://localhost:5173/dashboard/groups/invitation", "Frontend Group invitation URL")
 	// Limit configuration
 	flag.IntVar(&cfg.limit.monthlyGoalProcessingBatchLimit, "monthly-goal-batch-limit", 100, "Batching Limit for Monthly Goal Processing")
 	flag.IntVar(&cfg.limit.recurringExpenseTrackerBurstLimit, "recurring-expense-burst-limit", 100, "Batch Limit for Recurring Expense Tracker")
@@ -345,6 +345,8 @@ func (app *application) startupFunction() error {
 // startSchedulers starts the cronjobs for the application
 func (app *application) startSchedulers() {
 	app.logger.Info("Starting Schedulers")
+	// we use our app.background function to run the cronjobs in the background
+	// and also will be responsible for managing them especially when we need to stop or end the application
 	app.background(func() {
 		app.trackMonthlyGoalsScheduleHandler()        // trackMonthlyGoals
 		app.updateGoalProgressOnExpiredGoalsHandler() // updateGoalProgressOnExpiredGoals
