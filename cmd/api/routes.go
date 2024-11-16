@@ -129,6 +129,10 @@ func (app *application) groupRoutes() chi.Router {
 	groupRoutes.Post("/", app.createNewUserGroupHandler)
 	groupRoutes.Patch("/{groupID}", app.updateUserGroupHandler)
 
+	// members
+	groupRoutes.Delete("/member/{groupID}/{memberID}", app.adminDeleteGroupMemberHandler) // admin deletion {},{}
+	groupRoutes.Delete("/member/{groupID}", app.userLeaveGroupHandler)                    // user leaving {}
+
 	// get for creators
 	groupRoutes.Get("/created", app.getAllGroupsCreatedByUserHandler)
 

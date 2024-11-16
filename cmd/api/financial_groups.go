@@ -862,3 +862,84 @@ func (app *application) getDetailedGroupByIdHandler(w http.ResponseWriter, r *ht
 		app.serverErrorResponse(w, r, err)
 	}
 }
+
+// adminDeleteGroupMemberHandler() is a handler that allows a group's admin to remove/delete
+// a user from the group. It's a DELETE endpoint and allows the useer to send the groupID
+// {groupID} and the memberID {memberID} in the URL. The admin's ID will be obtained from the
+// context.
+func (app *application) adminDeleteGroupMemberHandler(w http.ResponseWriter, r *http.Request) {
+	// get the groupID and memberID from the url
+	groupID, err := app.readIDParam(r, "groupID")
+	if err != nil || groupID < 1 {
+		app.notFoundResponse(w, r)
+		return
+	}
+	// memberID
+	memberID, err := app.readIDParam(r, "memberID")
+	if err != nil || memberID < 1 {
+		app.notFoundResponse(w, r)
+		return
+	}
+	// verify the urlID's
+	// validate the post ID
+	v := validator.New()
+	if data.ValidateURLID(v, groupID, "groupID"); !v.Valid() {
+		app.failedValidationResponse(w, r, v.Errors)
+		return
+	}
+	// verify memberID
+	if data.ValidateURLID(v, memberID, "memberID"); !v.Valid() {
+		app.failedValidationResponse(w, r, v.Errors)
+		return
+	}
+	// perform the Delete Request
+	_, err = app.models.FinancialGroupManager.AdminDeleteGroupMember(app.contextGetUser(r).ID, groupID, memberID)
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrGeneralRecordNotFound):
+			app.notFoundResponse(w, r)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
+	// send the response
+	err = app.writeJSON(w, http.StatusOK, envelope{"message": "member deleted successfully"}, nil)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+	}
+}
+
+// userLeaveGroupHandler() allows users to remove/delete themselves from a given group.
+// wwe expect the groupID from the URL and a userID from the context
+func (app *application) userLeaveGroupHandler(w http.ResponseWriter, r *http.Request) {
+	// get the groupID
+	groupID, err := app.readIDParam(r, "groupID")
+	if err != nil || groupID < 1 {
+		app.notFoundResponse(w, r)
+		return
+	}
+	// verify the urlID
+	// validate the post ID
+	v := validator.New()
+	if data.ValidateURLID(v, groupID, "groupID"); !v.Valid() {
+		app.failedValidationResponse(w, r, v.Errors)
+		return
+	}
+	// delete the user from the group
+	_, err = app.models.FinancialGroupManager.UserLeaveGroup(app.contextGetUser(r).ID, groupID)
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrGeneralRecordNotFound):
+			app.notFoundResponse(w, r)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
+	// send the response
+	err = app.writeJSON(w, http.StatusOK, envelope{"message": "you have successfully left the group"}, nil)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+	}
+}
