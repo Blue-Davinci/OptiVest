@@ -130,6 +130,7 @@ func (app *application) groupRoutes() chi.Router {
 	groupRoutes.Patch("/{groupID}", app.updateUserGroupHandler)
 
 	// members
+	groupRoutes.Patch("/member/{groupID}", app.updateGroupUserRoleHandler)
 	groupRoutes.Delete("/member/{groupID}/{memberID}", app.adminDeleteGroupMemberHandler) // admin deletion {},{}
 	groupRoutes.Delete("/member/{groupID}", app.userLeaveGroupHandler)                    // user leaving {}
 

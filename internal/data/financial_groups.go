@@ -22,6 +22,10 @@ const (
 	InviationStatusTypePending  = database.InvitationStatusTypePending
 	InviationStatusTypeAccepted = database.InvitationStatusTypeAccepted
 	InviationStatusTypeDeclined = database.InvitationStatusTypeDeclined
+	// roles
+	GroupRoleAdmin     = database.MembershipRoleAdmin
+	GroupRoleMember    = database.MembershipRoleMember
+	GroupRoleModerator = database.MembershipRoleModerator
 )
 
 var (
@@ -171,6 +175,20 @@ func (m FinancialGroupManagerModel) MapInvitationInvitationStatusTypeToConstant(
 		return InviationStatusTypeAccepted, nil
 	case "declined":
 		return InviationStatusTypeDeclined, nil
+	default:
+		return "", ErrInvalidStatusType
+	}
+}
+
+// MapUserRoleTypeToConstant() maps the user role type to a constant
+func (m FinancialGroupManagerModel) MapUserRoleTypeToConstant(userRoleType string) (database.MembershipRole, error) {
+	switch userRoleType {
+	case "admin":
+		return GroupRoleAdmin, nil
+	case "member":
+		return GroupRoleMember, nil
+	case "moderator":
+		return GroupRoleModerator, nil
 	default:
 		return "", ErrInvalidStatusType
 	}
@@ -599,6 +617,33 @@ func (m FinancialGroupManagerModel) UpdateUserGroup(groupID, creatorUserID int64
 	return nil
 }
 
+// UpdateGroupUserRole() updates the user role in the group
+// We take in the groupID, the userID, the new role as well as the user ID of the person performing the action
+// This is to ensure that only the group admin or moderator can perform this action
+// We return the updated_At time and an error if any
+func (m FinancialGroupManagerModel) UpdateGroupUserRole(groupID, userID, updaterUserID int64, newRole database.MembershipRole) (time.Time, error) {
+	// get our context
+	ctx, cancel := contextGenerator(context.Background(), DefualtFinManGroupsContextTimeout)
+	defer cancel()
+	// update the data
+	updatedAt, err := m.DB.UpdateGroupUserRole(ctx, database.UpdateGroupUserRoleParams{
+		GroupID:  sql.NullInt64{Int64: groupID, Valid: true},
+		UserID:   sql.NullInt64{Int64: userID, Valid: true},
+		Role:     database.NullMembershipRole{MembershipRole: newRole, Valid: true},
+		UserID_2: sql.NullInt64{Int64: updaterUserID, Valid: true},
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return time.Time{}, ErrEditConflict
+		default:
+			return time.Time{}, err
+		}
+	}
+	// we are good now
+	return updatedAt.Time, nil
+}
+
 // GetGroupInvitationById() retrieves a group invitation by its ID
 // We also take in the invitee user email and return the group invitation and an error
 func (m FinancialGroupManagerModel) GetGroupInvitationById(groupID int64, inviteeUserEmail string) (*GroupInvitation, error) {
@@ -962,6 +1007,25 @@ func (m FinancialGroupManagerModel) UserLeaveGroup(userID, groupID int64) (int64
 	}
 	// we are good now
 	return deletedMemberID.Int64, nil
+}
+
+// DeleteNonPendingGroupInvitationsForUser() deletes all non pending group invitations for a user for
+// as specific group. This prevents duplicate invitations which may cause constraint violations down the line
+// We take in the invitee email and the group id. We return an error if any
+func (m FinancialGroupManagerModel) DeleteNonPendingGroupInvitationsForUser(groupID int64, inviteeEmail string) error {
+	// get our context
+	ctx, cancel := contextGenerator(context.Background(), DefualtFinManGroupsContextTimeout)
+	defer cancel()
+	// delete the data
+	err := m.DB.DeleteNonPendingGroupInvitationsForUser(ctx, database.DeleteNonPendingGroupInvitationsForUserParams{
+		InviteeUserEmail: inviteeEmail,
+		GroupID:          sql.NullInt64{Int64: groupID, Valid: true},
+	})
+	if err != nil {
+		return err
+	}
+	// we are good now
+	return nil
 }
 
 // populateExpenses() populates the group expenses

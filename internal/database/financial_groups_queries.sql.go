@@ -22,7 +22,7 @@ WHERE gm_target.group_id = $1
       WHERE gm_admin.group_id = $1
         AND gm_admin.user_id = $3
         AND gm_admin.role = 'admin'
-        AND gm_admin.status = 'approved'
+        AND gm_admin.status = 'accepted'
   )
 RETURNING user_id
 `
@@ -336,6 +336,22 @@ func (q *Queries) DeleteGroupTransaction(ctx context.Context, arg DeleteGroupTra
 	var id int64
 	err := row.Scan(&id)
 	return id, err
+}
+
+const deleteNonPendingGroupInvitationsForUser = `-- name: DeleteNonPendingGroupInvitationsForUser :exec
+DELETE FROM group_invitations
+WHERE invitee_user_email = $1 AND group_id = $2 AND status != 'pending'
+`
+
+type DeleteNonPendingGroupInvitationsForUserParams struct {
+	InviteeUserEmail string
+	GroupID          sql.NullInt64
+}
+
+// deletes any non-pending group invitations for a user avoiding duplicates
+func (q *Queries) DeleteNonPendingGroupInvitationsForUser(ctx context.Context, arg DeleteNonPendingGroupInvitationsForUserParams) error {
+	_, err := q.db.ExecContext(ctx, deleteNonPendingGroupInvitationsForUser, arg.InviteeUserEmail, arg.GroupID)
+	return err
 }
 
 const getAllGroupsCreatedByUser = `-- name: GetAllGroupsCreatedByUser :many
@@ -1226,6 +1242,40 @@ func (q *Queries) UpdateGroupInvitationStatus(ctx context.Context, arg UpdateGro
 	var responded_at sql.NullTime
 	err := row.Scan(&responded_at)
 	return responded_at, err
+}
+
+const updateGroupUserRole = `-- name: UpdateGroupUserRole :one
+UPDATE group_memberships AS target
+SET role = $1, updated_at = NOW()
+WHERE target.group_id = $2
+  AND target.user_id = $3
+  AND EXISTS (
+      SELECT 1
+      FROM group_memberships AS gm
+      WHERE gm.group_id = $2
+        AND gm.user_id = $4  -- The ID of the user performing the update
+        AND gm.role IN ('moderator', 'admin')
+  )
+RETURNING updated_at
+`
+
+type UpdateGroupUserRoleParams struct {
+	Role     NullMembershipRole
+	GroupID  sql.NullInt64
+	UserID   sql.NullInt64
+	UserID_2 sql.NullInt64
+}
+
+func (q *Queries) UpdateGroupUserRole(ctx context.Context, arg UpdateGroupUserRoleParams) (sql.NullTime, error) {
+	row := q.db.QueryRowContext(ctx, updateGroupUserRole,
+		arg.Role,
+		arg.GroupID,
+		arg.UserID,
+		arg.UserID_2,
+	)
+	var updated_at sql.NullTime
+	err := row.Scan(&updated_at)
+	return updated_at, err
 }
 
 const updateUserGroup = `-- name: UpdateUserGroup :one

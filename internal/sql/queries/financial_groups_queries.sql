@@ -103,6 +103,21 @@ UPDATE group_goals SET
 WHERE id = $4  
 RETURNING updated_at;
 
+-- name: UpdateGroupUserRole :one
+UPDATE group_memberships AS target
+SET role = $1, updated_at = NOW()
+WHERE target.group_id = $2
+  AND target.user_id = $3
+  AND EXISTS (
+      SELECT 1
+      FROM group_memberships AS gm
+      WHERE gm.group_id = $2
+        AND gm.user_id = $4  -- The ID of the user performing the update
+        AND gm.role IN ('moderator', 'admin')
+  )
+RETURNING updated_at;
+
+
 -- name: GetGroupGoalById :one
 SELECT
     id,
@@ -557,7 +572,7 @@ WHERE gm_target.group_id = $1
       WHERE gm_admin.group_id = $1
         AND gm_admin.user_id = $3
         AND gm_admin.role = 'admin'
-        AND gm_admin.status = 'approved'
+        AND gm_admin.status = 'accepted'
   )
 RETURNING user_id;
 
@@ -567,3 +582,9 @@ RETURNING user_id;
 DELETE FROM group_memberships
 WHERE group_id = $1 AND user_id = $2
 RETURNING user_id;
+
+-- name: DeleteNonPendingGroupInvitationsForUser :exec
+-- deletes any non-pending group invitations for a user avoiding duplicates
+DELETE FROM group_invitations
+WHERE invitee_user_email = $1 AND group_id = $2 AND status != 'pending';
+

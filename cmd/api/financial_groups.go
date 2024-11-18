@@ -141,6 +141,70 @@ func (app *application) updateUserGroupHandler(w http.ResponseWriter, r *http.Re
 
 }
 
+// updateGroupUserRoleHandler() is a handler function that updates a user's role in a group
+// we will take the groupID from the URL and an input body which includes the userID and the role
+// The updaterUserID will be obtained from the context as we need to verify that the user is an admin or mod
+// We will verify that the group exists and the proceed. We will return the updated group
+func (app *application) updateGroupUserRoleHandler(w http.ResponseWriter, r *http.Request) {
+	// get the group ID from the URL
+	groupID, err := app.readIDParam(r, "groupID")
+	if err != nil || groupID < 1 {
+		app.notFoundResponse(w, r)
+		return
+	}
+	// get the group by the details
+	_, err = app.models.FinancialGroupManager.GetGroupById(groupID)
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrGeneralRecordNotFound):
+			app.notFoundResponse(w, r)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
+	// input
+	var input struct {
+		UserID int64  `json:"user_id"`
+		Role   string `json:"role"`
+	}
+	// decode the input
+	err = app.readJSON(w, r, &input)
+	if err != nil {
+		app.badRequestResponse(w, r, err)
+		return
+	}
+	// map the role
+	mappedRole, err := app.models.FinancialGroupManager.MapUserRoleTypeToConstant(input.Role)
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrInvalidStatusType):
+			app.failedValidationResponse(w, r, map[string]string{"role": "invalid role type"})
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
+	// update the user role
+	updatedAt, err := app.models.FinancialGroupManager.UpdateGroupUserRole(groupID, input.UserID, app.contextGetUser(r).ID, mappedRole)
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrEditConflict):
+			app.editConflictResponse(w, r)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
+	// send a message with the updatedAt time and new role in the response
+	message := fmt.Sprintf("user role updated at %s", updatedAt.Format(time.RFC3339))
+	err = app.writeJSON(w, http.StatusOK, envelope{"message": message, "role": mappedRole}, nil)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+	}
+
+}
+
 // createNewGroupInvitation() will create a new group invitation for a specific user.
 // This group invitation is only for PRIVATE groups, so we will check if the group is private
 // If the group is private, we will check if the group has reached its maximum member count
@@ -235,6 +299,12 @@ func (app *application) createNewGroupInvitation(w http.ResponseWriter, r *http.
 	// validate the group invitation
 	if data.ValidateGroupInvitation(v, groupInvitation); !v.Valid() {
 		app.failedValidationResponse(w, r, v.Errors)
+		return
+	}
+	// delete any existing group invitation that is not pending
+	err = app.models.FinancialGroupManager.DeleteNonPendingGroupInvitationsForUser(input.GroupID, input.InviteeUserEmail)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
 		return
 	}
 	// create a new group invitation
