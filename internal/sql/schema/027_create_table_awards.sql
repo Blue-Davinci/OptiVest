@@ -29,7 +29,8 @@ VALUES
     ('first_budget', 'Awarded for creating the first budget.', 20, NOW(), NOW()),
     ('first_analysis', 'Awarded for completing the first financial analysis.', 25, NOW(), NOW()),
     ('first_goal_completed', 'Awarded for completing the first goal.', 40, NOW(), NOW()),
-    ('first_debt_paid', 'Awarded for completing the first goal.', 40, NOW(), NOW());
+    ('first_debt_paid', 'Awarded for completing the first goal.', 40, NOW(), NOW()),
+    ('first_comment', 'Awarded for making your first comment.', 5, NOW(), NOW())    ;
 
 -- +goose Down
 DROP INDEX idx_award_code;

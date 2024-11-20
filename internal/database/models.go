@@ -14,6 +14,49 @@ import (
 	"github.com/sqlc-dev/pqtype"
 )
 
+type CommentAssociatedType string
+
+const (
+	CommentAssociatedTypeGroup CommentAssociatedType = "group"
+	CommentAssociatedTypeFeed  CommentAssociatedType = "feed"
+	CommentAssociatedTypeOther CommentAssociatedType = "other"
+)
+
+func (e *CommentAssociatedType) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = CommentAssociatedType(s)
+	case string:
+		*e = CommentAssociatedType(s)
+	default:
+		return fmt.Errorf("unsupported scan type for CommentAssociatedType: %T", src)
+	}
+	return nil
+}
+
+type NullCommentAssociatedType struct {
+	CommentAssociatedType CommentAssociatedType
+	Valid                 bool // Valid is true if CommentAssociatedType is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullCommentAssociatedType) Scan(value interface{}) error {
+	if value == nil {
+		ns.CommentAssociatedType, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.CommentAssociatedType.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullCommentAssociatedType) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.CommentAssociatedType), nil
+}
+
 type FeedApprovalStatus string
 
 const (
@@ -645,6 +688,18 @@ type Budget struct {
 	Description    sql.NullString
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
+}
+
+type Comment struct {
+	ID             int64
+	Content        string
+	UserID         int64
+	ParentID       sql.NullInt64
+	AssociatedType CommentAssociatedType
+	AssociatedID   int64
+	CreatedAt      sql.NullTime
+	UpdatedAt      sql.NullTime
+	Version        sql.NullInt32
 }
 
 type ContactU struct {

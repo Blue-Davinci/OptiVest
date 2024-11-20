@@ -65,6 +65,7 @@ func (app *application) routes() http.Handler {
 	v1Router.With(dynamicMiddleware.Then).Mount("/awards", app.awardRoutes())
 	v1Router.With(dynamicMiddleware.Then).Mount("/search-options", app.searchOptionRoutes())
 	v1Router.With(dynamicMiddleware.Then).Mount("/notifications", app.notifications())
+	v1Router.With(dynamicMiddleware.Then).Mount("/comments", app.comments())
 
 	// Moount the v1Router to the main base router
 	router.Mount("/v1", v1Router)
@@ -273,4 +274,13 @@ func (app *application) notifications() chi.Router {
 	notificationRoutes.Delete("/{notificationID}", app.deleteNotificationByIdHandler)
 	notificationRoutes.Delete("/", app.deleteAllNotificationsByUserIdHandler)
 	return notificationRoutes
+}
+
+// comments() is a method that returns a chi.Router that contains all the routes for the comments
+func (app *application) comments() chi.Router {
+	commentRoutes := chi.NewRouter()
+	commentRoutes.Post("/", app.createNewCommentHandler)
+	commentRoutes.Patch("/{commentID}", app.updateCommentHandler)
+	commentRoutes.Delete("/{commentID}", app.deleteCommentHandler)
+	return commentRoutes
 }
