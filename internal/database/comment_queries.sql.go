@@ -55,7 +55,37 @@ func (q *Queries) CreateNewComment(ctx context.Context, arg CreateNewCommentPara
 	return i, err
 }
 
+const createNewReaction = `-- name: CreateNewReaction :one
+INSERT INTO comment_reactions (
+    comment_id,
+    user_id
+)
+VALUES ($1, $2)
+RETURNING id,created_at, updated_at
+`
+
+type CreateNewReactionParams struct {
+	CommentID int64
+	UserID    int64
+}
+
+type CreateNewReactionRow struct {
+	ID        int64
+	CreatedAt sql.NullTime
+	UpdatedAt sql.NullTime
+}
+
+func (q *Queries) CreateNewReaction(ctx context.Context, arg CreateNewReactionParams) (CreateNewReactionRow, error) {
+	row := q.db.QueryRowContext(ctx, createNewReaction, arg.CommentID, arg.UserID)
+	var i CreateNewReactionRow
+	err := row.Scan(&i.ID, &i.CreatedAt, &i.UpdatedAt)
+	return i, err
+}
+
 const deleteComment = `-- name: DeleteComment :one
+
+
+
 DELETE FROM comments
 WHERE id = $1 AND user_id = $2
 RETURNING id
@@ -66,8 +96,27 @@ type DeleteCommentParams struct {
 	UserID int64
 }
 
+// Sort by creation time within each parent group
 func (q *Queries) DeleteComment(ctx context.Context, arg DeleteCommentParams) (int64, error) {
 	row := q.db.QueryRowContext(ctx, deleteComment, arg.ID, arg.UserID)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const deleteReaction = `-- name: DeleteReaction :one
+DELETE FROM comment_reactions
+WHERE comment_id = $1 AND user_id = $2
+RETURNING id
+`
+
+type DeleteReactionParams struct {
+	CommentID int64
+	UserID    int64
+}
+
+func (q *Queries) DeleteReaction(ctx context.Context, arg DeleteReactionParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, deleteReaction, arg.CommentID, arg.UserID)
 	var id int64
 	err := row.Scan(&id)
 	return id, err
@@ -108,6 +157,119 @@ func (q *Queries) GetCommentById(ctx context.Context, arg GetCommentByIdParams) 
 		&i.Version,
 	)
 	return i, err
+}
+
+const getCommentsWithReactionsByAssociatedId = `-- name: GetCommentsWithReactionsByAssociatedId :many
+WITH comments_with_likes AS (
+    SELECT 
+        c.id AS comment_id,
+        c.content,
+        c.user_id,
+        c.associated_type,
+        c.associated_id,
+        c.created_at,
+        c.updated_at,
+        c.parent_id,
+        u.first_name,
+        u.last_name,
+        u.profile_avatar_url,
+        COALESCE(gm.role, NULL) AS user_role, -- Role only if the type is 'group'
+        COUNT(cr.id) AS likes_count, -- Total likes for the comment
+        EXISTS (
+            SELECT 1 
+            FROM comment_reactions cr2 
+            WHERE cr2.comment_id = c.id AND cr2.user_id = $3 -- Requesting user ID
+        ) AS liked_by_requesting_user
+    FROM 
+        comments c
+    JOIN 
+        users u ON c.user_id = u.id
+    LEFT JOIN 
+        group_memberships gm ON gm.group_id = c.associated_id AND gm.user_id = u.id
+    LEFT JOIN 
+        comment_reactions cr ON cr.comment_id = c.id
+    WHERE 
+        c.associated_id = $1 -- Filter by associated_id
+        AND c.associated_type = $2 -- Filter by associated_type ('group', 'feed')
+        AND (
+            c.associated_type != 'group' -- For non-group types, no membership check
+            OR EXISTS (
+                SELECT 1
+                FROM group_memberships gm2
+                WHERE gm2.group_id = c.associated_id 
+                  AND gm2.user_id = $3 -- Requesting user ID
+                  AND gm2.status = 'accepted' -- Check for approved membership
+            )
+        )
+    GROUP BY 
+        c.id, u.id, gm.role
+)
+SELECT comment_id, content, user_id, associated_type, associated_id, created_at, updated_at, parent_id, first_name, last_name, profile_avatar_url, user_role, likes_count, liked_by_requesting_user 
+FROM comments_with_likes
+ORDER BY 
+    parent_id ASC NULLS FIRST, -- Ensure parent comments appear first
+    created_at ASC
+`
+
+type GetCommentsWithReactionsByAssociatedIdParams struct {
+	AssociatedID   int64
+	AssociatedType CommentAssociatedType
+	UserID         int64
+}
+
+type GetCommentsWithReactionsByAssociatedIdRow struct {
+	CommentID             int64
+	Content               string
+	UserID                int64
+	AssociatedType        CommentAssociatedType
+	AssociatedID          int64
+	CreatedAt             sql.NullTime
+	UpdatedAt             sql.NullTime
+	ParentID              sql.NullInt64
+	FirstName             string
+	LastName              string
+	ProfileAvatarUrl      string
+	UserRole              MembershipRole
+	LikesCount            int64
+	LikedByRequestingUser bool
+}
+
+func (q *Queries) GetCommentsWithReactionsByAssociatedId(ctx context.Context, arg GetCommentsWithReactionsByAssociatedIdParams) ([]GetCommentsWithReactionsByAssociatedIdRow, error) {
+	rows, err := q.db.QueryContext(ctx, getCommentsWithReactionsByAssociatedId, arg.AssociatedID, arg.AssociatedType, arg.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetCommentsWithReactionsByAssociatedIdRow
+	for rows.Next() {
+		var i GetCommentsWithReactionsByAssociatedIdRow
+		if err := rows.Scan(
+			&i.CommentID,
+			&i.Content,
+			&i.UserID,
+			&i.AssociatedType,
+			&i.AssociatedID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.ParentID,
+			&i.FirstName,
+			&i.LastName,
+			&i.ProfileAvatarUrl,
+			&i.UserRole,
+			&i.LikesCount,
+			&i.LikedByRequestingUser,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const updateComment = `-- name: UpdateComment :one

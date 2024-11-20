@@ -29,13 +29,19 @@ CREATE OR REPLACE FUNCTION award_first_comment()
 RETURNS TRIGGER AS $$
 BEGIN
     -- Check if this is the first comment by the user
-    IF (SELECT COUNT(*) FROM comments WHERE user_id = NEW.user_id) = 1 THEN
-        -- Insert the award for the first comment
+    -- Check if the user has already received the "first_comment" award
+    IF (SELECT COUNT(*) FROM user_awards ua
+        JOIN awards a ON a.id = ua.award_id
+        WHERE ua.user_id = NEW.user_id
+        AND a.code = 'first_comment') = 0 THEN
+
+        -- Insert the "first_comment" award for the user's first comment
         INSERT INTO user_awards (user_id, award_id, created_at)
         SELECT NEW.user_id, a.id, NOW()
         FROM awards a
         WHERE a.code = 'first_comment';
     END IF;
+    
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;

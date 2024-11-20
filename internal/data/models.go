@@ -28,6 +28,7 @@ type Models struct {
 	AwardManager               AwardManagerModel
 	SearchOptions              SearchOptionsModel
 	CommentManagerModel        CommentManagerModel
+	GeneralManagerModel        GeneralManagerModel
 }
 
 func NewModels(db *database.Queries) Models {
@@ -45,5 +46,6 @@ func NewModels(db *database.Queries) Models {
 		AwardManager:               AwardManagerModel{DB: db},
 		SearchOptions:              SearchOptionsModel{DB: db},
 		CommentManagerModel:        CommentManagerModel{DB: db},
+		GeneralManagerModel:        GeneralManagerModel{DB: db},
 	}
 }

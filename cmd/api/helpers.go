@@ -10,6 +10,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -680,4 +681,39 @@ func (app *application) notificationPreperationHelper(userID int64, messages []s
 		}
 	}
 	return nil
+}
+
+// groupAndNestComments nests and sorts comments into a tree structure
+func (app *application) groupAndNestComments(comments []*data.EnrichedComment) map[int64]*data.OrganizedComment {
+	// Create a map to group comments by parent ID
+	groupedComments := make(map[int64][]*data.EnrichedComment)
+	for _, comment := range comments {
+		groupedComments[comment.Comment.ParentID] = append(groupedComments[comment.Comment.ParentID], comment)
+	}
+
+	organized := make(map[int64]*data.OrganizedComment)
+
+	// Process parent comments
+	for _, parent := range groupedComments[0] { // Parent comments have ParentID = 0
+		organized[parent.Comment.ID] = &data.OrganizedComment{
+			Parent:  parent,
+			Replies: []*data.EnrichedComment{},
+		}
+	}
+
+	// Attach replies to their respective parents
+	for parentID, replies := range groupedComments {
+		if parentID == 0 {
+			continue // Skip parent comments
+		}
+		if parent, exists := organized[parentID]; exists {
+			// Sort replies for each parent by CreatedAt in descending order
+			sort.Slice(replies, func(i, j int) bool {
+				return replies[i].Comment.CreatedAt.After(replies[j].Comment.CreatedAt)
+			})
+			parent.Replies = replies
+		}
+	}
+
+	return organized
 }

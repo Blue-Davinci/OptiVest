@@ -57,6 +57,49 @@ func (ns NullCommentAssociatedType) Value() (driver.Value, error) {
 	return string(ns.CommentAssociatedType), nil
 }
 
+type ContactUsStatus string
+
+const (
+	ContactUsStatusPending    ContactUsStatus = "pending"
+	ContactUsStatusInprogress ContactUsStatus = "in progress"
+	ContactUsStatusResolved   ContactUsStatus = "resolved"
+)
+
+func (e *ContactUsStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = ContactUsStatus(s)
+	case string:
+		*e = ContactUsStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for ContactUsStatus: %T", src)
+	}
+	return nil
+}
+
+type NullContactUsStatus struct {
+	ContactUsStatus ContactUsStatus
+	Valid           bool // Valid is true if ContactUsStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullContactUsStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.ContactUsStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.ContactUsStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullContactUsStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.ContactUsStatus), nil
+}
+
 type FeedApprovalStatus string
 
 const (
@@ -702,16 +745,25 @@ type Comment struct {
 	Version        sql.NullInt32
 }
 
+type CommentReaction struct {
+	ID        int64
+	CommentID int64
+	UserID    int64
+	CreatedAt sql.NullTime
+	UpdatedAt sql.NullTime
+}
+
 type ContactU struct {
 	ID        int64
 	UserID    sql.NullInt64
 	Name      string
 	Email     string
-	Subject   sql.NullString
+	Subject   string
 	Message   string
-	Status    sql.NullString
+	Status    NullContactUsStatus
 	CreatedAt sql.NullTime
 	UpdatedAt sql.NullTime
+	Version   sql.NullInt32
 }
 
 type Debt struct {

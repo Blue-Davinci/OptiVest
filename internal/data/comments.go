@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/Blue-Davinci/OptiVest/internal/database"
@@ -20,6 +21,7 @@ const (
 
 var (
 	ErrInvalidAssociatedType = errors.New("invalid associated type")
+	ErrDuplicateReaction     = errors.New("duplicate reaction")
 )
 
 const (
@@ -28,6 +30,22 @@ const (
 	CommentAssociatedTypeOther = database.CommentAssociatedTypeOther
 )
 
+type OrganizedComment struct {
+	Parent  *EnrichedComment   `json:"parent"`
+	Replies []*EnrichedComment `json:"replies"`
+}
+
+// EnrichedComment represents a comment with additional user & reaction information
+type EnrichedComment struct {
+	UserName      string   `json:"user_name"`
+	UserAvatar    string   `json:"user_avatar"`
+	UserRole      string   `json:"user_role,omitempty"` // omit for non group comments
+	HasUserLiked  bool     `json:"has_user_liked"`      // true if the user has liked the comment
+	ReactionCount int64    `json:"reaction_count"`
+	Comment       *Comment `json:"comment"`
+}
+
+// Comment represents a comment in the database
 type Comment struct {
 	ID             int64                          `json:"id"`
 	Content        string                         `json:"content"`
@@ -37,7 +55,15 @@ type Comment struct {
 	AssociatedID   int64                          `json:"associated_id"`
 	CreatedAt      time.Time                      `json:"created_at"`
 	UpdatedAt      time.Time                      `json:"updated_at"`
-	Version        int32                          `json:"version"`
+	Version        int32                          `json:"version,omitempty"` // only used for updates
+}
+
+type CommentReaction struct {
+	ID        int64     `json:"id"`
+	CommentID int64     `json:"comment_id"`
+	UserID    int64     `json:"user_id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // MapCommentTypeToConst maps the comment type to the database constant
@@ -54,9 +80,45 @@ func (m CommentManagerModel) MapCommentTypeToConst(commentType string) (database
 	}
 }
 
+// ValidateComment validates the comment struct
 func ValidateComment(v *validator.Validator, comment *Comment) {
 	ValidateName(v, comment.Content, "content")
 	ValidateName(v, string(comment.AssociatedType), "associated_type")
+}
+
+// ValidateCommentReaction validates the comment reaction struct
+func ValidateCommentReaction(v *validator.Validator, reaction *CommentReaction) {
+	ValidateURLID(v, reaction.CommentID, "comment_id")
+}
+
+// GetCommentsWithReactionsByAssociatedId gets all comments with reactions and user information
+// We take in the user ID, the associated type, and the associated ID and return an enriched comment slice and an error if there is one
+func (m CommentManagerModel) GetCommentsWithReactionsByAssociatedId(userID int64, associatedType database.CommentAssociatedType, associatedID int64) ([]*EnrichedComment, error) {
+	ctx, cancel := contextGenerator(context.Background(), DefaultCommManDBContextTimeout)
+	defer cancel()
+	// get the comments
+	comments, err := m.DB.GetCommentsWithReactionsByAssociatedId(ctx, database.GetCommentsWithReactionsByAssociatedIdParams{
+		UserID:         userID,
+		AssociatedType: associatedType,
+		AssociatedID:   associatedID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	// create the enriched comments
+	enrichedComments := make([]*EnrichedComment, len(comments))
+	for i, comment := range comments {
+		enrichedComments[i] = &EnrichedComment{
+			UserName:      fmt.Sprintf("%s %s", comment.FirstName, comment.LastName),
+			UserAvatar:    comment.ProfileAvatarUrl,
+			UserRole:      string(comment.UserRole),
+			HasUserLiked:  comment.LikedByRequestingUser,
+			ReactionCount: comment.LikesCount,
+			Comment:       populateComment(comment),
+		}
+	}
+	// return
+	return enrichedComments, nil
 }
 
 // CreateNewComment creates a new comment in the database
@@ -73,7 +135,12 @@ func (m CommentManagerModel) CreateNewComment(userID int64, comment *Comment) er
 		AssociatedID:   comment.AssociatedID,
 	})
 	if err != nil {
-		return err
+		switch {
+		case err.Error() == `pq: insert or update on table "comments" violates foreign key constraint "comments_parent_id_fkey"`:
+			return ErrGeneralRecordNotFound
+		default:
+			return err
+		}
 	}
 	// fill in the comment
 	comment.ID = createdFeed.ID
@@ -158,6 +225,57 @@ func (m CommentManagerModel) GetCommentById(userID, commentID int64) (*Comment, 
 	return comment, nil
 }
 
+// CreateNewReaction creates a new reaction for a specific comment ID
+// We take in the user ID and a commentreaction struct and return an error if there is one
+func (m CommentManagerModel) CreateNewReaction(userID int64, reaction *CommentReaction) error {
+	ctx, cancel := contextGenerator(context.Background(), DefaultCommManDBContextTimeout)
+	defer cancel()
+	// insert
+	createdReaction, err := m.DB.CreateNewReaction(ctx, database.CreateNewReactionParams{
+		CommentID: reaction.CommentID,
+		UserID:    userID,
+	})
+	if err != nil {
+		switch {
+		// "pq: duplicate key value violates unique constraint \"comment_reactions_comment_id_user_id_key\""
+		case err.Error() == `pq: duplicate key value violates unique constraint "comment_reactions_comment_id_user_id_key"`:
+			return ErrDuplicateReaction
+		default:
+			return err
+		}
+	}
+	// fill in the reaction
+	reaction.ID = createdReaction.ID
+	reaction.UserID = userID
+	reaction.CreatedAt = createdReaction.CreatedAt.Time
+	reaction.UpdatedAt = createdReaction.UpdatedAt.Time
+	// return
+	return nil
+}
+
+// DeleteReaction deletes a reaction for a specific comment ID
+// We take the userID and the Comment ID and return an error if there is one
+func (m CommentManagerModel) DeleteReaction(userID, commentID int64) error {
+	ctx, cancel := contextGenerator(context.Background(), DefaultCommManDBContextTimeout)
+	defer cancel()
+	// delete
+	_, err := m.DB.DeleteReaction(ctx, database.DeleteReactionParams{
+		CommentID: commentID,
+		UserID:    userID,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return ErrGeneralRecordNotFound
+		default:
+			return err
+		}
+	}
+	// return
+	return nil
+}
+
+// populateComment() populates a comment struct from a database comment
 func populateComment(commentRow interface{}) *Comment {
 	switch comment := commentRow.(type) {
 	case database.Comment:
@@ -171,6 +289,17 @@ func populateComment(commentRow interface{}) *Comment {
 			CreatedAt:      comment.CreatedAt.Time,
 			UpdatedAt:      comment.UpdatedAt.Time,
 			Version:        comment.Version.Int32,
+		}
+	case database.GetCommentsWithReactionsByAssociatedIdRow:
+		return &Comment{
+			ID:             comment.CommentID,
+			Content:        comment.Content,
+			UserID:         comment.UserID,
+			ParentID:       comment.ParentID.Int64,
+			AssociatedType: comment.AssociatedType,
+			AssociatedID:   comment.AssociatedID,
+			CreatedAt:      comment.CreatedAt.Time,
+			UpdatedAt:      comment.UpdatedAt.Time,
 		}
 	default:
 		return nil

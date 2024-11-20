@@ -66,6 +66,8 @@ func (app *application) routes() http.Handler {
 	v1Router.With(dynamicMiddleware.Then).Mount("/search-options", app.searchOptionRoutes())
 	v1Router.With(dynamicMiddleware.Then).Mount("/notifications", app.notifications())
 	v1Router.With(dynamicMiddleware.Then).Mount("/comments", app.comments())
+	// mount general routes directly
+	v1Router.Post("/contact-us", app.createContactUsHandler)
 
 	// Moount the v1Router to the main base router
 	router.Mount("/v1", v1Router)
@@ -279,8 +281,13 @@ func (app *application) notifications() chi.Router {
 // comments() is a method that returns a chi.Router that contains all the routes for the comments
 func (app *application) comments() chi.Router {
 	commentRoutes := chi.NewRouter()
+	commentRoutes.Get("/", app.getCommentsWithReactionsByAssociatedIdHandler)
 	commentRoutes.Post("/", app.createNewCommentHandler)
 	commentRoutes.Patch("/{commentID}", app.updateCommentHandler)
 	commentRoutes.Delete("/{commentID}", app.deleteCommentHandler)
+
+	// Reaction
+	commentRoutes.Post("/reaction", app.createNewReactionHandler)
+	commentRoutes.Delete("/reaction/{commentID}", app.deleteReactionHandler)
 	return commentRoutes
 }

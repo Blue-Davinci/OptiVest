@@ -4,12 +4,23 @@
 CREATE OR REPLACE FUNCTION award_first_expense()
 RETURNS TRIGGER AS $$
 BEGIN
-    IF (SELECT COUNT(*) FROM expenses WHERE user_id = NEW.user_id) = 1 THEN
-        INSERT INTO user_awards (user_id, award_id, created_at)
-        SELECT NEW.user_id, a.id, NOW()
-        FROM awards a
-        WHERE a.code = 'first_expense';
+
+    -- Check if the user has already received the "first_expense" award
+    IF (SELECT COUNT(*) FROM user_awards ua
+        JOIN awards a ON a.id = ua.award_id
+        WHERE ua.user_id = NEW.user_id
+        AND a.code = 'first_expense') = 0 THEN
+
+        -- Check if this is the user's first expense
+        IF (SELECT COUNT(*) FROM expenses WHERE user_id = NEW.user_id) = 1 THEN
+            -- Insert the "first_expense" award for the user
+            INSERT INTO user_awards (user_id, award_id, created_at)
+            SELECT NEW.user_id, a.id, NOW()
+            FROM awards a
+            WHERE a.code = 'first_expense';
+        END IF;
     END IF;
+
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
@@ -25,11 +36,20 @@ EXECUTE FUNCTION award_first_expense();
 CREATE OR REPLACE FUNCTION award_first_goal()
 RETURNS TRIGGER AS $$
 BEGIN
-    IF (SELECT COUNT(*) FROM goals WHERE user_id = NEW.user_id) = 1 THEN
-        INSERT INTO user_awards (user_id, award_id, created_at)
-        SELECT NEW.user_id, a.id, NOW()
-        FROM awards a
-        WHERE a.code = 'first_goal';
+    -- Check if the user has already received the "first_goal" award
+    IF (SELECT COUNT(*) FROM user_awards ua
+        JOIN awards a ON a.id = ua.award_id
+        WHERE ua.user_id = NEW.user_id
+        AND a.code = 'first_goal') = 0 THEN
+
+        -- Check if this is the user's first goal
+        IF (SELECT COUNT(*) FROM goals WHERE user_id = NEW.user_id) = 1 THEN
+            -- Insert the "first_goal" award for the user
+            INSERT INTO user_awards (user_id, award_id, created_at)
+            SELECT NEW.user_id, a.id, NOW()
+            FROM awards a
+            WHERE a.code = 'first_goal';
+        END IF;
     END IF;
     RETURN NEW;
 END;
@@ -46,12 +66,20 @@ EXECUTE FUNCTION award_first_goal();
 CREATE OR REPLACE FUNCTION award_first_budget()
 RETURNS TRIGGER AS $$
 BEGIN
-    IF (SELECT COUNT(*) FROM budgets WHERE user_id = NEW.user_id) = 1 THEN
-        INSERT INTO user_awards (user_id, award_id, created_at)
-        SELECT NEW.user_id, a.id, NOW()
-        FROM awards a
-        WHERE a.code = 'first_budget';
-    END IF;
+    -- Check if the user has already received the "first_budget" award
+    IF (SELECT COUNT(*) FROM user_awards ua
+        JOIN awards a ON a.id = ua.award_id
+        WHERE ua.user_id = NEW.user_id
+        AND a.code = 'first_budget') = 0 THEN
+
+        -- Check if this is the user's first budget
+        IF (SELECT COUNT(*) FROM budgets WHERE user_id = NEW.user_id) = 1 THEN
+            -- Insert the "first_budget" award for the user
+            INSERT INTO user_awards (user_id, award_id, created_at)
+            SELECT NEW.user_id, a.id, NOW()
+            FROM awards a
+            WHERE a.code = 'first_budget';
+        END IF;
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
@@ -67,12 +95,23 @@ EXECUTE FUNCTION award_first_budget();
 CREATE OR REPLACE FUNCTION award_first_income()
 RETURNS TRIGGER AS $$
 BEGIN
-    -- Check if this is the user's first income
-    IF (SELECT COUNT(*) FROM income WHERE user_id = NEW.user_id) = 0 THEN
-        -- Insert award for first income into user_awards table
-        INSERT INTO user_awards (user_id, award_id, created_at)
-        VALUES (NEW.user_id, (SELECT id FROM awards WHERE code = 'first_income'), NOW());
+    -- Check if the user has already received the "first_income" award
+    IF (SELECT COUNT(*) FROM user_awards ua
+        JOIN awards a ON a.id = ua.award_id
+        WHERE ua.user_id = NEW.user_id
+        AND a.code = 'first_income') = 0 THEN
+
+        -- Check if this is the user's first income
+        IF (SELECT COUNT(*) FROM income WHERE user_id = NEW.user_id) = 0 THEN
+            -- Insert the "first_income" award for the user
+            INSERT INTO user_awards (user_id, award_id, created_at)
+            SELECT NEW.user_id, a.id, NOW()
+            FROM awards a
+            WHERE a.code = 'first_income';
+        END IF;
     END IF;
+
+   
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
