@@ -86,6 +86,7 @@ const deleteComment = `-- name: DeleteComment :one
 
 
 
+
 DELETE FROM comments
 WHERE id = $1 AND user_id = $2
 RETURNING id
@@ -96,7 +97,7 @@ type DeleteCommentParams struct {
 	UserID int64
 }
 
-// Sort by creation time within each parent group
+// Pagination: offset
 func (q *Queries) DeleteComment(ctx context.Context, arg DeleteCommentParams) (int64, error) {
 	row := q.db.QueryRowContext(ctx, deleteComment, arg.ID, arg.UserID)
 	var id int64
@@ -174,12 +175,13 @@ WITH comments_with_likes AS (
         u.last_name,
         u.profile_avatar_url,
         COALESCE(gm.role, NULL) AS user_role, -- Role only if the type is 'group'
-        COUNT(cr.id) AS likes_count, -- Total likes for the comment
+        COUNT(cr.id) AS likes_count,         -- Total likes for the comment
         EXISTS (
             SELECT 1 
             FROM comment_reactions cr2 
             WHERE cr2.comment_id = c.id AND cr2.user_id = $3 -- Requesting user ID
-        ) AS liked_by_requesting_user
+        ) AS liked_by_requesting_user,
+        COUNT(*) OVER() AS total_count      -- Total count for pagination
     FROM 
         comments c
     JOIN 
@@ -189,32 +191,36 @@ WITH comments_with_likes AS (
     LEFT JOIN 
         comment_reactions cr ON cr.comment_id = c.id
     WHERE 
-        c.associated_id = $1 -- Filter by associated_id
-        AND c.associated_type = $2 -- Filter by associated_type ('group', 'feed')
+        c.associated_id = $1               -- Filter by associated_id
+        AND c.associated_type = $2         -- Filter by associated_type ('group', 'feed')
         AND (
-            c.associated_type != 'group' -- For non-group types, no membership check
+            c.associated_type != 'group'   -- For non-group types, no membership check
             OR EXISTS (
                 SELECT 1
                 FROM group_memberships gm2
                 WHERE gm2.group_id = c.associated_id 
-                  AND gm2.user_id = $3 -- Requesting user ID
+                  AND gm2.user_id = $3     -- Requesting user ID
                   AND gm2.status = 'accepted' -- Check for approved membership
             )
         )
     GROUP BY 
         c.id, u.id, gm.role
 )
-SELECT comment_id, content, user_id, associated_type, associated_id, created_at, updated_at, parent_id, first_name, last_name, profile_avatar_url, user_role, likes_count, liked_by_requesting_user 
+SELECT comment_id, content, user_id, associated_type, associated_id, created_at, updated_at, parent_id, first_name, last_name, profile_avatar_url, user_role, likes_count, liked_by_requesting_user, total_count 
 FROM comments_with_likes
 ORDER BY 
     parent_id ASC NULLS FIRST, -- Ensure parent comments appear first
-    created_at ASC
+    created_at ASC             -- Sort by creation time within each parent group
+LIMIT $4                       -- Pagination: limit
+OFFSET $5
 `
 
 type GetCommentsWithReactionsByAssociatedIdParams struct {
 	AssociatedID   int64
 	AssociatedType CommentAssociatedType
 	UserID         int64
+	Limit          int32
+	Offset         int32
 }
 
 type GetCommentsWithReactionsByAssociatedIdRow struct {
@@ -232,10 +238,17 @@ type GetCommentsWithReactionsByAssociatedIdRow struct {
 	UserRole              MembershipRole
 	LikesCount            int64
 	LikedByRequestingUser bool
+	TotalCount            int64
 }
 
 func (q *Queries) GetCommentsWithReactionsByAssociatedId(ctx context.Context, arg GetCommentsWithReactionsByAssociatedIdParams) ([]GetCommentsWithReactionsByAssociatedIdRow, error) {
-	rows, err := q.db.QueryContext(ctx, getCommentsWithReactionsByAssociatedId, arg.AssociatedID, arg.AssociatedType, arg.UserID)
+	rows, err := q.db.QueryContext(ctx, getCommentsWithReactionsByAssociatedId,
+		arg.AssociatedID,
+		arg.AssociatedType,
+		arg.UserID,
+		arg.Limit,
+		arg.Offset,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -258,6 +271,7 @@ func (q *Queries) GetCommentsWithReactionsByAssociatedId(ctx context.Context, ar
 			&i.UserRole,
 			&i.LikesCount,
 			&i.LikedByRequestingUser,
+			&i.TotalCount,
 		); err != nil {
 			return nil, err
 		}

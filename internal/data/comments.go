@@ -93,7 +93,7 @@ func ValidateCommentReaction(v *validator.Validator, reaction *CommentReaction) 
 
 // GetCommentsWithReactionsByAssociatedId gets all comments with reactions and user information
 // We take in the user ID, the associated type, and the associated ID and return an enriched comment slice and an error if there is one
-func (m CommentManagerModel) GetCommentsWithReactionsByAssociatedId(userID int64, associatedType database.CommentAssociatedType, associatedID int64) ([]*EnrichedComment, error) {
+func (m CommentManagerModel) GetCommentsWithReactionsByAssociatedId(userID int64, associatedType database.CommentAssociatedType, associatedID int64, filters Filters) ([]*EnrichedComment, Metadata, error) {
 	ctx, cancel := contextGenerator(context.Background(), DefaultCommManDBContextTimeout)
 	defer cancel()
 	// get the comments
@@ -101,13 +101,17 @@ func (m CommentManagerModel) GetCommentsWithReactionsByAssociatedId(userID int64
 		UserID:         userID,
 		AssociatedType: associatedType,
 		AssociatedID:   associatedID,
+		Limit:          int32(filters.limit()),
+		Offset:         int32(filters.offset()),
 	})
 	if err != nil {
-		return nil, err
+		return nil, Metadata{}, err
 	}
 	// create the enriched comments
 	enrichedComments := make([]*EnrichedComment, len(comments))
+	totalCount := 0
 	for i, comment := range comments {
+		totalCount = int(comment.TotalCount)
 		enrichedComments[i] = &EnrichedComment{
 			UserName:      fmt.Sprintf("%s %s", comment.FirstName, comment.LastName),
 			UserAvatar:    comment.ProfileAvatarUrl,
@@ -117,8 +121,10 @@ func (m CommentManagerModel) GetCommentsWithReactionsByAssociatedId(userID int64
 			Comment:       populateComment(comment),
 		}
 	}
+	// metadata
+	metadata := calculateMetadata(totalCount, filters.Page, filters.PageSize)
 	// return
-	return enrichedComments, nil
+	return enrichedComments, metadata, nil
 }
 
 // CreateNewComment creates a new comment in the database

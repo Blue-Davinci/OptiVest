@@ -52,12 +52,13 @@ WITH comments_with_likes AS (
         u.last_name,
         u.profile_avatar_url,
         COALESCE(gm.role, NULL) AS user_role, -- Role only if the type is 'group'
-        COUNT(cr.id) AS likes_count, -- Total likes for the comment
+        COUNT(cr.id) AS likes_count,         -- Total likes for the comment
         EXISTS (
             SELECT 1 
             FROM comment_reactions cr2 
             WHERE cr2.comment_id = c.id AND cr2.user_id = $3 -- Requesting user ID
-        ) AS liked_by_requesting_user
+        ) AS liked_by_requesting_user,
+        COUNT(*) OVER() AS total_count      -- Total count for pagination
     FROM 
         comments c
     JOIN 
@@ -67,15 +68,15 @@ WITH comments_with_likes AS (
     LEFT JOIN 
         comment_reactions cr ON cr.comment_id = c.id
     WHERE 
-        c.associated_id = $1 -- Filter by associated_id
-        AND c.associated_type = $2 -- Filter by associated_type ('group', 'feed')
+        c.associated_id = $1               -- Filter by associated_id
+        AND c.associated_type = $2         -- Filter by associated_type ('group', 'feed')
         AND (
-            c.associated_type != 'group' -- For non-group types, no membership check
+            c.associated_type != 'group'   -- For non-group types, no membership check
             OR EXISTS (
                 SELECT 1
                 FROM group_memberships gm2
                 WHERE gm2.group_id = c.associated_id 
-                  AND gm2.user_id = $3 -- Requesting user ID
+                  AND gm2.user_id = $3     -- Requesting user ID
                   AND gm2.status = 'accepted' -- Check for approved membership
             )
         )
@@ -86,7 +87,10 @@ SELECT *
 FROM comments_with_likes
 ORDER BY 
     parent_id ASC NULLS FIRST, -- Ensure parent comments appear first
-    created_at ASC;            -- Sort by creation time within each parent group
+    created_at ASC             -- Sort by creation time within each parent group
+LIMIT $4                       -- Pagination: limit
+OFFSET $5;                     -- Pagination: offset
+
 
 
 

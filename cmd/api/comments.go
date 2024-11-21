@@ -14,12 +14,20 @@ func (app *application) getCommentsWithReactionsByAssociatedIdHandler(w http.Res
 	var input struct {
 		AssociatedID   int    `json:"associated_id"`
 		AssociatedType string `json:"associated_type"`
+		data.Filters
 	}
 	v := validator.New()
 	// Call r.URL.Query() to get the url.Values map containing the query string data.
 	qs := r.URL.Query()
 	input.AssociatedID = app.readInt(qs, "associated_id", 0, v)
 	input.AssociatedType = app.readString(qs, "associated_type", "")
+	//get the page & pagesizes as ints and set to the embedded struct
+	input.Filters.Page = app.readInt(qs, "page", 1, v)
+	input.Filters.PageSize = app.readInt(qs, "page_size", 18, v)
+	// We don't use any sort for this endpoint
+	input.Filters.Sort = app.readString(qs, "", "")
+	// None of the sort values are supported for this endpoint
+	input.Filters.SortSafelist = []string{"", ""}
 	// validate the associated type
 	commentType, err := app.models.CommentManagerModel.MapCommentTypeToConst(input.AssociatedType)
 	if err != nil {
@@ -32,14 +40,14 @@ func (app *application) getCommentsWithReactionsByAssociatedIdHandler(w http.Res
 		return
 	}
 	// get the comments
-	comments, err := app.models.CommentManagerModel.GetCommentsWithReactionsByAssociatedId(app.contextGetUser(r).ID, commentType, int64(input.AssociatedID))
+	comments, metadata, err := app.models.CommentManagerModel.GetCommentsWithReactionsByAssociatedId(app.contextGetUser(r).ID, commentType, int64(input.AssociatedID), input.Filters)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
 	}
 	organizedComments := app.groupAndNestComments(comments)
 	// send the response
-	err = app.writeJSON(w, http.StatusOK, envelope{"comments": organizedComments}, nil)
+	err = app.writeJSON(w, http.StatusOK, envelope{"comments": organizedComments, "metadata": metadata}, nil)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 	}
