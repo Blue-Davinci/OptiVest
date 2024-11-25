@@ -70,7 +70,7 @@ func (m GeneralManagerModel) CreateContactUs(userID int64, contactUs *ContactUs)
 	defer cancel()
 	// create a contact us request
 	updatedContactUs, err := m.DB.CreateContactUs(ctx, database.CreateContactUsParams{
-		UserID:  sql.NullInt64{Int64: userID, Valid: true},
+		UserID:  sql.NullInt64{Int64: userID, Valid: userID != 0},
 		Name:    contactUs.Name,
 		Email:   contactUs.Email,
 		Subject: contactUs.Subject,
