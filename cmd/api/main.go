@@ -113,6 +113,7 @@ type config struct {
 		awardurl           string
 		groupurl           string
 		groupinvitationurl string
+		applogourl         string
 	}
 	scheduler struct {
 		trackMonthlyGoalsCron        *cron.Cron
@@ -236,6 +237,7 @@ func main() {
 	flag.StringVar(&cfg.frontend.awardurl, "frontend-award-url", "http://localhost:5173/awards", "Frontend Award URL")
 	flag.StringVar(&cfg.frontend.groupurl, "frontend-group-url", "http://localhost:5173/dashboard/groups", "Frontend Group URL")
 	flag.StringVar(&cfg.frontend.groupinvitationurl, "frontend-group-invite-url", "http://localhost:5173/dashboard/groups/invitation", "Frontend Group invitation URL")
+	flag.StringVar(&cfg.frontend.applogourl, "frontend-app-logo-url", "https://i.ibb.co/hZdMWvh/optivest-cropped.png", "Frontend App Logo URL")
 	// Limit configuration
 	flag.IntVar(&cfg.limit.monthlyGoalProcessingBatchLimit, "monthly-goal-batch-limit", 100, "Batching Limit for Monthly Goal Processing")
 	flag.IntVar(&cfg.limit.recurringExpenseTrackerBurstLimit, "recurring-expense-burst-limit", 100, "Batch Limit for Recurring Expense Tracker")
@@ -271,7 +273,7 @@ func main() {
 	// Initialize Redis connection
 	rdb, err := openRedis(cfg)
 	if err != nil {
-		logger.Fatal("Error while connecting to Redis.", zap.String("error", err.Error()))
+		logger.Fatal("Error while connecting to REDIS.", zap.String("error", err.Error()))
 	}
 	logger.Info("Redis connection established", zap.String("addr", cfg.redis.addr))
 	// create our connection pull
@@ -309,7 +311,7 @@ func main() {
 	}
 	// start schedulers
 	app.startSchedulers()
-
+	logger.Info("Loaded Cors Origins", zap.Strings("origins", cfg.cors.trustedOrigins))
 	err = app.server()
 	if err != nil {
 		logger.Fatal("Error while starting server.", zap.String("error", err.Error()))

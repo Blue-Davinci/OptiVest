@@ -19,6 +19,7 @@ import (
 func (app *application) convertAndGetExchangeRate(source_currency, target_currency string) (*data.ExchangeRateResponse, error) {
 	// Quick validation
 	if source_currency == "" || target_currency == "" {
+		//app.logger.Error("Empty currency provided", zap.String("source_currency", source_currency), zap.String("target_currency", target_currency))
 		return nil, data.ErrorEmptyCurrency
 	}
 

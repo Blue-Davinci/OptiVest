@@ -83,6 +83,7 @@ func (app *application) userRoutes(dynamicMiddleware *alice.Chain) chi.Router {
 	userRoutes.Put("/password", app.updateUserPasswordHandler)
 	userRoutes.With(dynamicMiddleware.Then).Patch("/mfa", app.setupMFAHandler)
 	userRoutes.With(dynamicMiddleware.Then).Patch("/mfa/verify", app.verifiy2FASetupHandler)
+	userRoutes.With(dynamicMiddleware.Then).Post("/logout", app.logoutUserHandler)
 	return userRoutes
 }
 
@@ -158,6 +159,9 @@ func (app *application) groupRoutes() chi.Router {
 	groupRoutes.Post("/expenses", app.createNewGroupExpenseHandler)
 	groupRoutes.Delete("/expenses/{groupExpenseID}", app.deleteGroupExpenseHandler)
 
+	// Public groups
+	groupRoutes.Get("/public", app.getAllPublicGroupsHandler)
+	groupRoutes.Post("/public", app.createNewPublicMembershipHandler)
 	return groupRoutes
 }
 

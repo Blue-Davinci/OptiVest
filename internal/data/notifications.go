@@ -28,6 +28,8 @@ const (
 
 const (
 	NotificationTypeDefault             = "default"
+	NotificationTypeUserRegistration    = "user_registration"
+	NotificationTypeUserWelcome         = "user_welcome"
 	NotificationTypeFeeds               = "feeds"
 	NotificationTypeFinancialTracking   = "financial_tracking"
 	NotificationTypeFinancialManagement = "financial_management"

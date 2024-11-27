@@ -336,6 +336,73 @@ func (app *application) createNewGroupInvitation(w http.ResponseWriter, r *http.
 	app.PublishNotificationToRedis(inviteeUser.ID, data.NotificationTypeGroupInvite, notificationContent)
 }
 
+// createNewPublicMembershipHandler() will create a new public membership for a group
+// We will take in a user's input which should contain the group's ID
+// We neeed to check if the group exists and if the user is a member of the group
+// We will also then check if the group is private or public, if it is private we will return an error
+// If the group is public, we will create a new public membership
+func (app *application) createNewPublicMembershipHandler(w http.ResponseWriter, r *http.Request) {
+	// input
+	var input struct {
+		GroupID int64 `json:"group_id"`
+	}
+	// decode the input
+	err := app.readJSON(w, r, &input)
+	if err != nil {
+		app.badRequestResponse(w, r, err)
+		return
+	}
+	// make a validator
+	v := validator.New()
+	// get the group by the details
+	group, err := app.models.FinancialGroupManager.GetGroupById(input.GroupID)
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrGeneralRecordNotFound):
+			v.AddError("group_id", "this group does not exist")
+			app.failedValidationResponse(w, r, v.Errors)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
+	// check if the group is private
+	if group.IsPrivate {
+		v.AddError("group_id", "this group is private")
+		app.failedValidationResponse(w, r, v.Errors)
+		return
+	}
+	// check if the group's members are already maxed out
+	isMaxedOut, err := app.models.FinancialGroupManager.CheckIfGroupMembersAreMaxedOut(input.GroupID)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+		return
+	}
+	if isMaxedOut {
+		v.AddError("group_id", "this group has reached its maximum member count")
+		app.failedValidationResponse(w, r, v.Errors)
+		return
+	}
+	// create a new public membership
+	membershipID, err := app.models.FinancialGroupManager.CreateNewPublicMembership(app.contextGetUser(r).ID, input.GroupID)
+	// if we get a ErrUserGroupMembershipExists error, we will return a 409
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrUserGroupMembershipExists):
+			app.failedValidationResponse(w, r, map[string]string{"group_id": "you are already a member of this group"})
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
+	// send the membership ID and a message in the response
+	err = app.writeJSON(w, http.StatusCreated, envelope{"message": "public membership created", "membership_id": membershipID}, nil)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+	}
+
+}
+
 // updateGroupInvitationStatusHandler() will update the status of a group invitation
 // we will mainly just use it to change the status of the group invitation
 func (app *application) updateGroupInvitationStatusHandler(w http.ResponseWriter, r *http.Request) {
@@ -769,6 +836,45 @@ func (app *application) getAllGroupsCreatedByUserHandler(w http.ResponseWriter, 
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 	}
+}
+
+// getAllPublicGroupsHandler() will get all the public groups
+// This route supports both group name searches as well as pagination
+func (app *application) getAllPublicGroupsHandler(w http.ResponseWriter, r *http.Request) {
+	// input for the name and the filters
+	var input struct {
+		Name string `json:"name"`
+		data.Filters
+	}
+	// make validator
+	v := validator.New()
+	// get the query params
+	qs := r.URL.Query()
+	input.Name = app.readString(qs, "name", "")
+	// get the filters
+	input.Filters.Page = app.readInt(qs, "page", 1, v)
+	input.Filters.PageSize = app.readInt(qs, "page_size", 18, v)
+	// We don't use any sort for this endpoint
+	input.Filters.Sort = app.readString(qs, "", "")
+	// None of the sort values are supported for this endpoint
+	input.Filters.SortSafelist = []string{"", ""}
+	// get all the public groups
+	groups, metadata, err := app.models.FinancialGroupManager.GetAllPublicGroups(app.contextGetUser(r).ID, input.Name, input.Filters)
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrGeneralRecordNotFound):
+			app.notFoundResponse(w, r)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
+	// send the groups in the response
+	err = app.writeJSON(w, http.StatusOK, envelope{"groups": groups, "metadata": metadata}, nil)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+	}
+
 }
 
 // getAllGroupsUserIsMemberOfHandler() will get all the groups the user is a member of

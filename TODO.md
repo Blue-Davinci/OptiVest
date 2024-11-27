@@ -47,6 +47,10 @@
    - **User Preferences**: Allow users to customize their notification preferences.
    - **Event Triggers**: Set up notifications for different events such as new comments, likes, subscription renewals, and monthly report availability.
 
+8. **Enhance Investment Portfolio Flow**
+   - **Include Concurrency on per API Request:** Use concurrency to decrease the time duration of the AI financial analysis. Currrently
+                                                 it takes around 30-40s for complete processing. We should get it down to < 10-20s
+
 ## Additional Notes
 
 - Maintain high security standards for payment and user data.

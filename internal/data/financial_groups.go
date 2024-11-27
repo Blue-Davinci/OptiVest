@@ -29,10 +29,11 @@ const (
 )
 
 var (
-	ErrGroupNameExists       = errors.New("group name already exists")
-	ErrInvalidStatusType     = errors.New("invalid status type")
-	ErrGroupInvitationExists = errors.New("group invitation already exists")
-	ErrOverFunding           = errors.New("overfunding is not allowed, please check the amount")
+	ErrGroupNameExists           = errors.New("group name already exists")
+	ErrInvalidStatusType         = errors.New("invalid status type")
+	ErrGroupInvitationExists     = errors.New("group invitation already exists")
+	ErrOverFunding               = errors.New("overfunding is not allowed, please check the amount")
+	ErrUserGroupMembershipExists = errors.New("user group membership already exists")
 )
 
 type FinancialGroupManagerModel struct {
@@ -88,6 +89,12 @@ type EnrichedGroupTransaction struct {
 	GroupTransaction        []*GroupTransactionWithGoalName `json:"group_transaction"`
 	TotalTransactionAmount  decimal.Decimal                 `json:"total_transaction_amount"`
 	LatestTransactionAmount decimal.Decimal                 `json:"latest_transaction_amount"`
+}
+
+// EnrichedPublicGroup struct represents a public group' enriched group data with additional information
+type EnrichedPublicGroup struct {
+	IsUserAMember bool           `json:"is_user_a_member"`
+	EnrichedGroup *EnrichedGroup `json:"enriched_group"`
 }
 
 // GroupTransactionWithGoalName struct represents a group transaction with the goal name
@@ -320,6 +327,60 @@ func (m FinancialGroupManagerModel) GetGroupById(groupID int64) (*Group, error) 
 	group := populateGroup(returnedGroup)
 	// we are good now
 	return group, nil
+}
+
+// GetAllPublicGroups() retrieves all the public groups
+// This endpoint supports pagination as well ass a name search for the group name
+// We take in a filter as well as a name's query
+// We return an []*Enriched, Metadata and error if any occurred
+func (m FinancialGroupManagerModel) GetAllPublicGroups(userID int64, groupName string, filters Filters) ([]*EnrichedPublicGroup, Metadata, error) {
+	ctx, cancel := contextGenerator(context.Background(), DefualtFinManGroupsContextTimeout)
+	defer cancel()
+	// get the group info
+	publicGroups, err := m.DB.GetAllPublicGroups(ctx, database.GetAllPublicGroupsParams{
+		Column1: groupName,
+		Offset:  int32(filters.offset()),
+		Limit:   int32(filters.limit()),
+		UserID:  sql.NullInt64{Int64: userID, Valid: true},
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return nil, Metadata{}, ErrGeneralRecordNotFound
+		default:
+			return nil, Metadata{}, err
+		}
+	}
+	// check the length
+	if len(publicGroups) == 0 {
+		return nil, Metadata{}, ErrGeneralRecordNotFound
+	}
+	// create an enriched group's slice
+	var enrichedPublicGroups []*EnrichedPublicGroup
+	totalGroupCount := 0
+	// get our details
+	for _, publicGroup := range publicGroups {
+		totalGroupCount = int(publicGroup.TotalPublicGroups)
+		group, err := populateEnrichedGroup(publicGroup)
+		if err != nil {
+			switch {
+			case errors.Is(err, ErrTypeConversionError):
+				continue
+			default:
+				return nil, Metadata{}, err
+			}
+		}
+		// append to the slice
+		enrichedPublicGroup := &EnrichedPublicGroup{
+			IsUserAMember: publicGroup.IsUserAMember,
+			EnrichedGroup: group,
+		}
+		enrichedPublicGroups = append(enrichedPublicGroups, enrichedPublicGroup)
+	}
+	// make the metadata
+	metadata := calculateMetadata(totalGroupCount, filters.Page, filters.PageSize)
+	// we are good now
+	return enrichedPublicGroups, metadata, nil
 }
 
 // GetAllGroupsCreatedByUser() retrieves all the groups created by a user
@@ -727,6 +788,30 @@ func (m FinancialGroupManagerModel) CreateNewGroupInvitation(userID int64, invit
 	invitation.ExpirationDate = inviteDetail.ExpirationDate
 	// we are good now
 	return nil
+}
+
+// CreateNewPublicMembership() creates a new public membership for a user
+// We only require the user ID and the group ID
+// This is used when a user joins a public group
+func (m FinancialGroupManagerModel) CreateNewPublicMembership(userID, groupID int64) (int64, error) {
+	// get our context
+	ctx, cancel := contextGenerator(context.Background(), DefualtFinManGroupsContextTimeout)
+	defer cancel()
+	// insert the data
+	createdUser, err := m.DB.CreateNewPublicMembership(ctx, database.CreateNewPublicMembershipParams{
+		UserID:  sql.NullInt64{Int64: userID, Valid: true},
+		GroupID: sql.NullInt64{Int64: groupID, Valid: true},
+	})
+	if err != nil {
+		switch {
+		case err.Error() == `pq: duplicate key value violates unique constraint "unique_group_user_membership"`:
+			return 0, ErrUserGroupMembershipExists
+		default:
+			return 0, err
+		}
+	}
+	// we are good now
+	return createdUser.ID, nil
 }
 
 // UpdateExpiredGroupInvitations() updates the status of expired group invitations
@@ -1166,6 +1251,55 @@ func populateEnrichedGroup(enrichedGroupRow interface{}) (*EnrichedGroup, error)
 			LatestTransactionAmount: decimal.RequireFromString(group.LatestTransactionAmount),
 		}
 		return enrichedGroup, nil
+	case database.GetAllPublicGroupsRow:
+		var groupGoals []*SampleGroupGoal
+		// type assert topgoals to byte
+		topGoals, ok := group.TopGoals.([]byte)
+		if !ok {
+			return nil, ErrTypeConversionError
+		}
+		// unmarshal
+		err := json.Unmarshal(topGoals, &groupGoals)
+		if err != nil {
+			return nil, err
+		}
+		// get the group members
+		var groupMembers []*GroupMember
+		// type assert topgoals to byte
+		topMembers, ok := group.TopMembers.([]byte)
+		if !ok {
+			return nil, ErrTypeConversionError
+		}
+		// unmarshal
+		err = json.Unmarshal(topMembers, &groupMembers)
+		if err != nil {
+			return nil, err
+		}
+
+		// get latest member
+		var latestMember *GroupMember
+		// type assert topgoals to byte
+		latestMemberByte, ok := group.LatestMember.([]byte)
+		if !ok {
+			return nil, ErrTypeConversionError
+		}
+		// unmarshal
+		err = json.Unmarshal(latestMemberByte, &latestMember)
+		if err != nil {
+			return nil, err
+		}
+		// create an enriched group
+		enrichedGroup := &EnrichedGroup{
+			Group:                   populateGroup(group),
+			GroupGoals:              groupGoals,
+			TotalMembers:            group.TotalMembers.Int64,
+			LatestMember:            latestMember,
+			GroupMembers:            groupMembers,
+			TotalGroupTransactions:  decimal.RequireFromString(group.TotalGroupTransactions),
+			LatestTransactionAmount: decimal.RequireFromString(group.LatestTransactionAmount),
+		}
+		return enrichedGroup, nil
+
 	default:
 		return nil, fmt.Errorf("error in type assertion")
 	}
@@ -1220,6 +1354,21 @@ func populateGroup(groupRow interface{}) *Group {
 			Version:        int(group.Version.Int32),
 		}
 	case database.GetDetailedGroupByIdRow:
+		return &Group{
+			ID:             group.ID,
+			CreatorUserID:  group.CreatorUserID.Int64,
+			GroupImageURL:  group.GroupImageUrl,
+			Name:           group.Name,
+			IsPrivate:      group.IsPrivate.Bool,
+			MaxMemberCount: int(group.MaxMemberCount.Int32),
+			Description:    group.Description.String,
+			ActivityCount:  int(group.ActivityCount.Int32),
+			LastActivityAt: group.LastActivityAt.Time,
+			CreatedAt:      group.CreatedAt.Time,
+			UpdatedAt:      group.UpdatedAt.Time,
+			Version:        int(group.Version.Int32),
+		}
+	case database.GetAllPublicGroupsRow:
 		return &Group{
 			ID:             group.ID,
 			CreatorUserID:  group.CreatorUserID.Int64,

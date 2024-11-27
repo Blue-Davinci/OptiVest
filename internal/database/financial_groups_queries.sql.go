@@ -253,6 +253,29 @@ func (q *Queries) CreateNewGroupTransaction(ctx context.Context, arg CreateNewGr
 	return i, err
 }
 
+const createNewPublicMembership = `-- name: CreateNewPublicMembership :one
+INSERT INTO group_memberships (group_id, user_id, status, approval_time)
+VALUES ($1, $2,'accepted', NOW())
+RETURNING id, approval_time
+`
+
+type CreateNewPublicMembershipParams struct {
+	GroupID sql.NullInt64
+	UserID  sql.NullInt64
+}
+
+type CreateNewPublicMembershipRow struct {
+	ID           int64
+	ApprovalTime sql.NullTime
+}
+
+func (q *Queries) CreateNewPublicMembership(ctx context.Context, arg CreateNewPublicMembershipParams) (CreateNewPublicMembershipRow, error) {
+	row := q.db.QueryRowContext(ctx, createNewPublicMembership, arg.GroupID, arg.UserID)
+	var i CreateNewPublicMembershipRow
+	err := row.Scan(&i.ID, &i.ApprovalTime)
+	return i, err
+}
+
 const createNewUserGroup = `-- name: CreateNewUserGroup :one
 INSERT INTO groups (
     creator_user_id, group_image_url, name, is_private, max_member_count, description
@@ -612,6 +635,169 @@ func (q *Queries) GetAllGroupsUserIsMemberOf(ctx context.Context, userID sql.Nul
 			&i.TopGoals,
 			&i.TotalGroupTransactions,
 			&i.LatestTransactionAmount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getAllPublicGroups = `-- name: GetAllPublicGroups :many
+WITH public_groups AS (
+    SELECT g.id, g.creator_user_id, g.group_image_url, g.name, g.is_private, g.max_member_count, g.description, g.activity_count, g.last_activity_at, g.created_at, g.updated_at, g.version
+    FROM groups g
+    WHERE g.is_private = FALSE
+      AND ($1 = '' OR to_tsvector('simple', g.name) @@ plainto_tsquery('simple', $1))
+),
+
+top_members AS (
+    SELECT gm.group_id, gm.user_id, u.first_name, gm.role, u.profile_avatar_url,
+           ROW_NUMBER() OVER (PARTITION BY gm.group_id ORDER BY gm.request_time DESC) AS row_num
+    FROM group_memberships gm
+    JOIN users u ON gm.user_id = u.id
+    WHERE gm.status = 'accepted'
+),
+
+group_member_stats AS (
+    SELECT gm.group_id,
+           COUNT(*) AS total_members,
+           MAX(u.id) AS latest_member_id,
+           MAX(u.first_name) AS latest_member_first_name,
+           MAX(u.profile_avatar_url) AS latest_member_avatar,
+           MAX(gm.role) AS latest_member_role
+    FROM group_memberships gm
+    JOIN users u ON gm.user_id = u.id
+    WHERE gm.status = 'accepted'
+    GROUP BY gm.group_id
+),
+
+top_goals AS (
+    SELECT gg.group_id, gg.goal_name, gg.target_amount, gg.current_amount,
+           ROW_NUMBER() OVER (PARTITION BY gg.group_id ORDER BY gg.created_at DESC) AS row_num
+    FROM group_goals gg
+    WHERE gg.status = 'ongoing'
+),
+
+group_transaction_stats AS (
+    SELECT gg.group_id,
+           COUNT(gt.id) AS total_transactions,
+           MAX(gt.amount)::NUMERIC AS latest_transaction_amount
+    FROM group_transactions gt
+    JOIN group_goals gg ON gt.goal_id = gg.id
+    GROUP BY gg.group_id
+),
+
+total_count AS (
+    SELECT COUNT(*) AS total_public_groups
+    FROM public_groups
+),
+
+user_memberships AS (
+    SELECT gm.group_id, TRUE AS is_user_a_member
+    FROM group_memberships gm
+    WHERE gm.user_id = $4 AND gm.status = 'accepted'
+)
+
+SELECT pg.id, pg.creator_user_id, pg.group_image_url, pg.name, pg.is_private, pg.max_member_count, pg.description, pg.activity_count, pg.last_activity_at, pg.created_at, pg.updated_at, pg.version, 
+       (SELECT total_public_groups FROM total_count) AS total_public_groups,
+       COALESCE(
+           (SELECT jsonb_agg(jsonb_build_object('user_id', tm.user_id, 'first_name', tm.first_name, 'role', tm.role, 'profile_avatar_url', tm.profile_avatar_url))
+            FROM top_members tm
+            WHERE tm.group_id = pg.id AND tm.row_num <= 5), '[]'::jsonb) AS top_members,
+       gms.total_members,
+       COALESCE(jsonb_build_object(
+           'user_id', gms.latest_member_id, 
+           'first_name', gms.latest_member_first_name, 
+           'role', gms.latest_member_role,
+           'profile_avatar_url', gms.latest_member_avatar
+       ), '{}'::jsonb) AS latest_member,
+       COALESCE(
+           (SELECT jsonb_agg(jsonb_build_object('goal_name', tg.goal_name, 'target_amount', tg.target_amount, 'current_amount', tg.current_amount))
+            FROM top_goals tg
+            WHERE tg.group_id = pg.id AND tg.row_num <= 5), '[]'::jsonb) AS top_goals,
+       COALESCE(gts.total_transactions, 0)::NUMERIC AS total_group_transactions,
+       COALESCE(gts.latest_transaction_amount, 0)::NUMERIC AS latest_transaction_amount,
+       COALESCE(um.is_user_a_member, FALSE) AS is_user_a_member
+FROM public_groups pg
+LEFT JOIN group_member_stats gms ON pg.id = gms.group_id
+LEFT JOIN group_transaction_stats gts ON pg.id = gts.group_id
+LEFT JOIN user_memberships um ON pg.id = um.group_id
+ORDER BY pg.last_activity_at DESC
+OFFSET $2 LIMIT $3
+`
+
+type GetAllPublicGroupsParams struct {
+	Column1 interface{}
+	Offset  int32
+	Limit   int32
+	UserID  sql.NullInt64
+}
+
+type GetAllPublicGroupsRow struct {
+	ID                      int64
+	CreatorUserID           sql.NullInt64
+	GroupImageUrl           string
+	Name                    string
+	IsPrivate               sql.NullBool
+	MaxMemberCount          sql.NullInt32
+	Description             sql.NullString
+	ActivityCount           sql.NullInt32
+	LastActivityAt          sql.NullTime
+	CreatedAt               sql.NullTime
+	UpdatedAt               sql.NullTime
+	Version                 sql.NullInt32
+	TotalPublicGroups       int64
+	TopMembers              interface{}
+	TotalMembers            sql.NullInt64
+	LatestMember            interface{}
+	TopGoals                interface{}
+	TotalGroupTransactions  string
+	LatestTransactionAmount string
+	IsUserAMember           bool
+}
+
+func (q *Queries) GetAllPublicGroups(ctx context.Context, arg GetAllPublicGroupsParams) ([]GetAllPublicGroupsRow, error) {
+	rows, err := q.db.QueryContext(ctx, getAllPublicGroups,
+		arg.Column1,
+		arg.Offset,
+		arg.Limit,
+		arg.UserID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetAllPublicGroupsRow
+	for rows.Next() {
+		var i GetAllPublicGroupsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.CreatorUserID,
+			&i.GroupImageUrl,
+			&i.Name,
+			&i.IsPrivate,
+			&i.MaxMemberCount,
+			&i.Description,
+			&i.ActivityCount,
+			&i.LastActivityAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Version,
+			&i.TotalPublicGroups,
+			&i.TopMembers,
+			&i.TotalMembers,
+			&i.LatestMember,
+			&i.TopGoals,
+			&i.TotalGroupTransactions,
+			&i.LatestTransactionAmount,
+			&i.IsUserAMember,
 		); err != nil {
 			return nil, err
 		}

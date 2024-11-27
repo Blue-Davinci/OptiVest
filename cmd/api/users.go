@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -110,6 +111,18 @@ func (app *application) registerUserHandler(w http.ResponseWriter, r *http.Reque
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 	}
+
+	// send a notification to the user on successful registration
+	notificationContent := data.NotificationContent{
+		Message: fmt.Sprintf("Welcome %s, your account has been successfully created. Please check your email for activation instructions.", user.FirstName),
+		Meta: data.NotificationMeta{
+			Url:      app.config.frontend.baseurl,
+			ImageUrl: app.config.frontend.applogourl,
+			Tags:     "welcome, registration, account",
+		},
+	}
+	// send the notification to the user
+	err = app.PublishNotificationToRedis(user.ID, data.NotificationTypeUserRegistration, notificationContent)
 }
 
 // activateUserHandler() Handles activating a user. Inactive users cannot perform a multitude
@@ -196,6 +209,17 @@ func (app *application) activateUserHandler(w http.ResponseWriter, r *http.Reque
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 	}
+	// Send a welcome notification'
+	notificationContent := data.NotificationContent{
+		Message: fmt.Sprintf("%s, your account has been successfully activated. Welcome to OptiVest!", user.FirstName),
+		Meta: data.NotificationMeta{
+			Url:      app.config.frontend.baseurl,
+			ImageUrl: app.config.frontend.applogourl,
+			Tags:     "welcome, activation, account",
+		},
+	}
+	// send the notification to the user
+	app.PublishNotificationToRedis(user.ID, data.NotificationTypeUserWelcome, notificationContent)
 }
 
 // updateUserPasswordHandler() Verifies the password reset token and sets a new password for the user.
@@ -269,6 +293,20 @@ func (app *application) updateUserPasswordHandler(w http.ResponseWriter, r *http
 	// Send the user a confirmation message.
 	env := envelope{"message": "your password was successfully reset"}
 	err = app.writeJSON(w, http.StatusOK, env, nil)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+	}
+}
+
+// logoutUserHandler() is the main endpoint responsible for logging out the user.
+// Currently, we will just terminate a user's SSE connection if they have one.
+func (app *application) logoutUserHandler(w http.ResponseWriter, r *http.Request) {
+	// Get the user from the context
+	userID := app.contextGetUser(r).ID
+	// use app.RemoveClient to remove the user
+	app.RemoveClient(userID)
+	// write 200 ok
+	err := app.writeJSON(w, http.StatusOK, envelope{"message": "you have been logged out"}, nil)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 	}
