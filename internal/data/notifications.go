@@ -30,6 +30,7 @@ const (
 	NotificationTypeDefault             = "default"
 	NotificationTypeUserRegistration    = "user_registration"
 	NotificationTypeUserWelcome         = "user_welcome"
+	NotificationTypeAccount             = "account_update"
 	NotificationTypeFeeds               = "feeds"
 	NotificationTypeFinancialTracking   = "financial_tracking"
 	NotificationTypeFinancialManagement = "financial_management"

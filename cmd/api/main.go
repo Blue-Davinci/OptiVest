@@ -107,6 +107,7 @@ type config struct {
 	frontend struct {
 		baseurl            string
 		activationurl      string
+		accountsettings    string
 		loginurl           string
 		passwordreseturl   string
 		callback_url       string
@@ -238,6 +239,7 @@ func main() {
 	flag.StringVar(&cfg.frontend.groupurl, "frontend-group-url", "http://localhost:5173/dashboard/groups", "Frontend Group URL")
 	flag.StringVar(&cfg.frontend.groupinvitationurl, "frontend-group-invite-url", "http://localhost:5173/dashboard/groups/invitation", "Frontend Group invitation URL")
 	flag.StringVar(&cfg.frontend.applogourl, "frontend-app-logo-url", "https://i.ibb.co/hZdMWvh/optivest-cropped.png", "Frontend App Logo URL")
+	flag.StringVar(&cfg.frontend.accountsettings, "frontend-account-settings", "http://localhost:5173/dashboard/account", "Frontend Account Settings URL")
 	// Limit configuration
 	flag.IntVar(&cfg.limit.monthlyGoalProcessingBatchLimit, "monthly-goal-batch-limit", 100, "Batching Limit for Monthly Goal Processing")
 	flag.IntVar(&cfg.limit.recurringExpenseTrackerBurstLimit, "recurring-expense-burst-limit", 100, "Batch Limit for Recurring Expense Tracker")

@@ -88,8 +88,6 @@ func (q *Queries) CheckIfGroupMembersAreMaxedOut(ctx context.Context, groupID sq
 }
 
 const createNewGroupExpense = `-- name: CreateNewGroupExpense :one
-
-
 INSERT INTO group_expenses (
     group_id, 
     member_id, 
@@ -115,7 +113,6 @@ type CreateNewGroupExpenseRow struct {
 	UpdatedAt sql.NullTime
 }
 
-// Assuming you have a status column for member approval
 func (q *Queries) CreateNewGroupExpense(ctx context.Context, arg CreateNewGroupExpenseParams) (CreateNewGroupExpenseRow, error) {
 	row := q.db.QueryRowContext(ctx, createNewGroupExpense,
 		arg.GroupID,

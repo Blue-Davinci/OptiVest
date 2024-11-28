@@ -83,6 +83,10 @@ func (app *application) userRoutes(dynamicMiddleware *alice.Chain) chi.Router {
 	userRoutes.Put("/password", app.updateUserPasswordHandler)
 	userRoutes.With(dynamicMiddleware.Then).Patch("/mfa", app.setupMFAHandler)
 	userRoutes.With(dynamicMiddleware.Then).Patch("/mfa/verify", app.verifiy2FASetupHandler)
+	// account
+	userRoutes.With(dynamicMiddleware.Then).Get("/account", app.getUserInformationHandler)
+	userRoutes.With(dynamicMiddleware.Then).Patch("/account", app.updateUserInformationHandler)
+	// /logout : for logging out
 	userRoutes.With(dynamicMiddleware.Then).Post("/logout", app.logoutUserHandler)
 	return userRoutes
 }

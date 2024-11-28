@@ -29,6 +29,7 @@ type Models struct {
 	SearchOptions              SearchOptionsModel
 	CommentManagerModel        CommentManagerModel
 	GeneralManagerModel        GeneralManagerModel
+	AlgoManager                AlgoManager
 }
 
 func NewModels(db *database.Queries) Models {
@@ -47,5 +48,6 @@ func NewModels(db *database.Queries) Models {
 		SearchOptions:              SearchOptionsModel{DB: db},
 		CommentManagerModel:        CommentManagerModel{DB: db},
 		GeneralManagerModel:        GeneralManagerModel{DB: db},
+		AlgoManager:                AlgoManager{DB: db},
 	}
 }

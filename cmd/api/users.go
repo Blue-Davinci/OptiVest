@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Blue-Davinci/OptiVest/internal/data"
+	"github.com/Blue-Davinci/OptiVest/internal/database"
 	"github.com/Blue-Davinci/OptiVest/internal/validator"
 	"go.uber.org/zap"
 )
@@ -296,6 +297,129 @@ func (app *application) updateUserPasswordHandler(w http.ResponseWriter, r *http
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 	}
+}
+
+// getUserInformationHandler() is responsible for fetching the user's information.
+// soo far we will just return the User as obtained from the context.
+// we will need to also impliment an account, award and statistic return
+func (app *application) getUserInformationHandler(w http.ResponseWriter, r *http.Request) {
+	// Get the user from the context
+	user := app.contextGetUser(r)
+	// get the awards for the user
+	awards, err := app.models.AwardManager.GetAllAwardsForUserByID(user.ID)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+		return
+	}
+	// get the account rating and statistics for the user
+	accountStats, err := app.models.AlgoManager.GetAccountStatisticsByUserId(user.ID, user.CreatedAt, awards)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+		return
+	}
+	// Send the user back to the client
+	err = app.writeJSON(w, http.StatusOK, envelope{"user": user, "awards": awards, "accountStats": accountStats}, nil)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+	}
+}
+
+// updateUserInformationHandler() is responsible for updating the user's information.
+// This handler will accept a JSON request containing the user's new information and
+// update the user's record in the database.
+// Users can currently be allowed to update their:
+// 1) Personal Info which include :- their first name, last name, phone number, profile avatar URL,
+// address, country code, currency code
+// 2)investment settings which include:- Time horizon and Risk Tolerance.
+func (app *application) updateUserInformationHandler(w http.ResponseWriter, r *http.Request) {
+	// an input struct to hold all possible changes. This route supports partial updates, so we
+	// set pointers to the fields we want to update.
+	var input struct {
+		FirstName        *string `json:"first_name"`
+		LastName         *string `json:"last_name"`
+		ProfileAvatarURL *string `json:"profile_avatar_url"`
+		PhoneNumber      *string `json:"phone_number"`
+		Address          *string `json:"address"`
+		CountryCode      *string `json:"country_code"`
+		CurrencyCode     *string `json:"currency_code"`
+		// Investment Settings
+		TimeHorizon   *string `json:"time_horizon"`
+		RiskTolerance *string `json:"risk_tolerance"`
+	}
+	// acquire the user from the context
+	user := app.contextGetUser(r)
+	// read the JSON request and store it in the input struct
+	err := app.readJSON(w, r, &input)
+	if err != nil {
+		app.badRequestResponse(w, r, err)
+		return
+	}
+	// check if the user is trying to update any of the fields
+	if input.FirstName != nil {
+		user.FirstName = *input.FirstName
+	}
+	if input.LastName != nil {
+		user.LastName = *input.LastName
+	}
+	if input.ProfileAvatarURL != nil {
+		user.ProfileAvatarURL = *input.ProfileAvatarURL
+	}
+	if input.PhoneNumber != nil {
+		user.PhoneNumber = *input.PhoneNumber
+	}
+	if input.Address != nil {
+		user.Address = *input.Address
+	}
+	if input.CountryCode != nil {
+		user.CountryCode = *input.CountryCode
+	}
+	if input.CurrencyCode != nil {
+		user.CurrencyCode = *input.CurrencyCode
+	}
+	// check if the user is trying to update any of the investment settings
+	if input.TimeHorizon != nil {
+		// map the string to a time horizon enum using the mapTimeHorizon function
+		timeHorizon := app.models.Users.MapTimeHorizonTypeToConstant(*input.TimeHorizon)
+		user.TimeHorizon = timeHorizon
+	}
+	if input.RiskTolerance != nil {
+		// map the string to a risk tolerance enum using the mapRiskTolerance function
+		riskTolerance := app.models.Users.MapRiskToleranceTypeToConstant(*input.RiskTolerance)
+		user.RiskTolerance = database.NullRiskToleranceType{RiskToleranceType: riskTolerance, Valid: true}
+	}
+	// Perform validation on the user struct before saving the new user
+	v := validator.New()
+	if data.ValidateUser(v, user); !v.Valid() {
+		app.failedValidationResponse(w, r, v.Errors)
+		return
+	}
+	// update the user in the database
+	err = app.models.Users.UpdateUser(user, app.config.encryption.key)
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrEditConflict):
+			app.editConflictResponse(w, r)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
+	// send the updated user back to the client
+	err = app.writeJSON(w, http.StatusOK, envelope{"user": user}, nil)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+	}
+	// notify the user of the successful update
+	notificationContent := data.NotificationContent{
+		Message: fmt.Sprintf("%s, your account information has been successfully updated.", user.FirstName),
+		Meta: data.NotificationMeta{
+			Url:      app.config.frontend.accountsettings, // Direct the user to the account settings page
+			ImageUrl: app.config.frontend.applogourl,
+			Tags:     "account, update, notification",
+		},
+	}
+	// Send the notification to the user
+	app.PublishNotificationToRedis(user.ID, data.NotificationTypeAccount, notificationContent)
 }
 
 // logoutUserHandler() is the main endpoint responsible for logging out the user.
