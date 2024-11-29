@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base32"
+	"strings"
 	"time"
 
 	"github.com/Blue-Davinci/OptiVest/internal/database"
@@ -70,6 +71,45 @@ func generateToken(userID int64, ttl time.Duration, scope string) (*Token, error
 	// that we store in the `hash` field of our database table.
 	hash := sha256.Sum256([]byte(token.Plaintext))
 	token.Hash = hash[:]
+	return token, nil
+}
+
+// generateRecoveryCodea() creates recovery codes for a user after a successful MFA opt-IN
+// We accept the userID and the number of codes to generate as input parameters.
+// We generate a random 16-byte slice, encode it to a base-32-encoded string, and
+// append it to the recovery codes slice. We then generate a SHA-256 hash of the plaintext
+func generateRecoveryCodes(codeCount int) (*RecoveryCodes, error) {
+	// Struct to hold the recovery codes and their combined hash
+	token := &RecoveryCodes{}
+
+	// Initialize a slice for recovery codes
+	var allCodes []string
+
+	for i := 0; i < codeCount; i++ {
+		// Generate random bytes for each code
+		randomBytes := make([]byte, 16)
+		_, err := rand.Read(randomBytes)
+		if err != nil {
+			return nil, err
+		}
+
+		// Encode the bytes into a base32 string and append to codes
+		recoveryCode := base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(randomBytes)
+		allCodes = append(allCodes, recoveryCode)
+	}
+
+	// Store the plaintext recovery codes in the struct
+	token.RecoveryCodes = allCodes
+
+	// Concatenate all the codes into a single string
+	concatenatedCodes := strings.Join(allCodes, "")
+
+	// Generate a SHA-256 hash of the concatenated string
+	combinedHash := sha256.Sum256([]byte(concatenatedCodes))
+
+	// Store the combined hash in the struct
+	token.CodeHash = combinedHash[:]
+
 	return token, nil
 }
 

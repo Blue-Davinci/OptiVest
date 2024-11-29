@@ -30,6 +30,7 @@ type Models struct {
 	CommentManagerModel        CommentManagerModel
 	GeneralManagerModel        GeneralManagerModel
 	AlgoManager                AlgoManager
+	MFAManager                 MFAManager
 }
 
 func NewModels(db *database.Queries) Models {
@@ -49,5 +50,6 @@ func NewModels(db *database.Queries) Models {
 		CommentManagerModel:        CommentManagerModel{DB: db},
 		GeneralManagerModel:        GeneralManagerModel{DB: db},
 		AlgoManager:                AlgoManager{DB: db},
+		MFAManager:                 MFAManager{DB: db},
 	}
 }

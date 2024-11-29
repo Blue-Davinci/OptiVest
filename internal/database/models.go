@@ -1000,6 +1000,15 @@ type Notification struct {
 	RedisKey         sql.NullString
 }
 
+type RecoveryCode struct {
+	ID        int64
+	UserID    int64
+	CodeHash  []byte
+	Used      sql.NullBool
+	CreatedAt sql.NullTime
+	UpdatedAt sql.NullTime
+}
+
 type RecurringExpense struct {
 	ID                 int64
 	UserID             int64

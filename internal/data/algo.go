@@ -143,6 +143,7 @@ func (m AlgoManager) CalculateAccountRating(stats AccountStats, awards []*Award)
 	finalScore = finalScore.Add(decimal.NewFromFloat(math.Log1p(float64(stats.TotalIncomeSources))).Mul(decimal.NewFromFloat(weightIncome)))
 	finalScore = finalScore.Add(scaledGroups.Add(scaledGroupsCreated).Mul(decimal.NewFromFloat(weightGroups)))
 	finalScore = finalScore.Add(accountAgeFactor.Mul(decimal.NewFromFloat(weightAccountAge)))
+	finalScore = finalScore.Add(normalizedAwards.Mul(decimal.NewFromFloat(weightAwards)))
 	finalScore = finalScore.Add(randomFactor)
 
 	// Scale to [0, 100]

@@ -9,7 +9,6 @@ import (
 
 	"github.com/Blue-Davinci/OptiVest/internal/data"
 	"github.com/Blue-Davinci/OptiVest/internal/validator"
-	"github.com/go-redis/redis/v8"
 	"github.com/pquerna/otp"
 	"github.com/pquerna/otp/totp"
 	"go.uber.org/zap"
@@ -20,30 +19,32 @@ import (
 func (app *application) setupMFAHandler(w http.ResponseWriter, r *http.Request) {
 	// Get the user from the context
 	user := app.contextGetUser(r)
+	// redis key
+	redisKey := fmt.Sprintf("%s:%d", data.RedisMFASetupPendingPrefix, user.ID)
 	// Check if the user has already enabled MFA
 	if user.MFAEnabled {
 		app.badRequestResponse(w, r, fmt.Errorf("MFA is already enabled for this user"))
 		return
 	}
-	// check if there is an existing pending session
-	saveValue, _, err := app.fetchRedisDataForUser(data.RedisMFASetupPendingPrefix, user.ID)
+	// check if there is an existing pending session in REDIS, we do this by checking if the key exists
+	mfaSession, err := getFromCache[*data.MFASession](context.Background(), app.RedisDB, redisKey)
 	if err != nil {
 		switch {
-		case errors.Is(err, data.ErrRedisMFAKeyNotFound):
-			// if we could not find the key, we continue
-			// continue
+		case errors.Is(err, ErrNoDataFoundInRedis):
+			// no data found in redis so we can proceed
+			// do nothing
 		default:
 			app.serverErrorResponse(w, r, err)
 			return
 		}
 	}
-	// if the key exists, we return an error
-	if saveValue == "pending" {
+	// if there is an existing pending session, we return an error
+	if mfaSession != nil {
 		app.badRequestResponse(w, r, data.ErrRedisMFAKeyAlreadyExists)
 		return
 	}
 	// Generate a new MFA secret
-	secret, redisKey, err := app.totpTokenGenerator(user.Email, data.RedisMFASetupPendingPrefix, "pending", user.ID)
+	secret, err := app.totpTokenGenerator(user.Email, redisKey, data.MFAStatusPending)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
@@ -56,8 +57,7 @@ func (app *application) setupMFAHandler(w http.ResponseWriter, r *http.Request) 
 		app.serverErrorResponse(w, r, err)
 		return
 	}
-
-	app.logger.Info("MFA setup pending status saved to redis", zap.String("used key", redisKey), zap.String("saved value", saveValue))
+	app.logger.Info("MFA setup pending status saved to redis", zap.String("used key", redisKey))
 
 	// Return the QR code to the user
 	err = app.writeJSON(w, http.StatusOK, envelope{"qr_code": secret.URL()}, nil)
@@ -66,41 +66,27 @@ func (app *application) setupMFAHandler(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
-// fetchRedisDataForUser() fetches the data from redis for a user. We use this
-// function to fetch the MFA setup status for a user
-func (app *application) fetchRedisDataForUser(key string, userID int64) (string, string, error) {
-	// Fetch the data from redis
-	redisKey := app.returnFormattedRedisKeys(key, userID)
-	statusCmd := app.RedisDB.Get(context.Background(), redisKey)
-	value, err := statusCmd.Result()
-	app.logger.Info("MFA status fetched from redis", zap.String("key", redisKey), zap.String("value", value))
-	if err == redis.Nil {
-		return "", "", data.ErrRedisMFAKeyNotFound
-	} else if err != nil {
-		return "", "", err
-	}
-	return value, redisKey, nil
-}
-
-// TTL
-func (app *application) totpTokenGenerator(userEmail, prefix, value string, userID int64) (*otp.Key, string, error) {
+// totpTokenGenerator() generates a new TOTP token for a user. We generate a new
+// secret key for the user, and save the user's email and the status of the 2FA setup session to redis
+func (app *application) totpTokenGenerator(userEmail, redisKey, value string) (*otp.Key, error) {
 	secret, err := totp.Generate(totp.GenerateOpts{
 		Issuer:      app.config.api.name,
 		AccountName: userEmail,
 	})
 	app.logger.Info("Email used", zap.String("email", userEmail), zap.String("Issuer", app.config.api.name))
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 	// save a 2fa status to redis including their user id
-	redisKey := app.returnFormattedRedisKeys(prefix, userID)
-	statusCmd := app.RedisDB.SetEX(context.Background(), redisKey, value, data.DefaulRedistUserMFATTLS)
-	if err := statusCmd.Err(); err != nil {
-		return nil, "", err
+	err = setToCache(context.Background(), app.RedisDB, redisKey, &data.MFASession{
+		Email: userEmail,
+		Value: value,
+	}, data.DefaulRedistUserMFATTLS)
+	if err != nil {
+		return nil, err
 	}
 	app.logger.Info("-- MFA setup pending status saved to redis", zap.String("key", redisKey))
-	app.fetchRedisDataForUser(prefix, userID)
-	return secret, redisKey, nil
+	return secret, nil
 }
 
 // verifiy2FASetupHandler() verifies the 2FA setup for a user. We check if the
@@ -121,9 +107,21 @@ func (app *application) verifiy2FASetupHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 	// Check if the user has a pending 2FA setup
-	value, redisKey, err := app.fetchRedisDataForUser(data.RedisMFASetupPendingPrefix, user.ID)
+	// If they do NOT have a pending 2FA setup, we return an error
+	redisKey := fmt.Sprintf("%s:%d", data.RedisMFASetupPendingPrefix, user.ID)
+	mfaSession, err := getFromCache[*data.MFASession](context.Background(), app.RedisDB, redisKey)
 	if err != nil {
-		app.serverErrorResponse(w, r, err)
+		switch {
+		case errors.Is(err, ErrNoDataFoundInRedis):
+			app.badRequestResponse(w, r, data.ErrRedisMFAKeyNotFound)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
+	// verify the user's email is the same as the one in the session
+	if (*mfaSession).Email != user.Email {
+		app.badRequestResponse(w, r, fmt.Errorf("there is an issue with your MFA session. Please try again"))
 		return
 	}
 	// read the body into the input struct
@@ -143,7 +141,7 @@ func (app *application) verifiy2FASetupHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 	// log the value
-	app.logger.Info("MFA setup pending status fetched from redis", zap.String("key", redisKey), zap.String("value", value))
+	app.logger.Info("MFA setup pending status fetched from redis", zap.String("key", redisKey))
 	// Verify the code and delete the secret, if there is an error, we abort
 	err = app.validateAndDeleteTOTP(mfaToken.TOTPCode, user.MFASecret, redisKey)
 	if err != nil {
@@ -155,6 +153,14 @@ func (app *application) verifiy2FASetupHandler(w http.ResponseWriter, r *http.Re
 		}
 		return
 	}
+	// before we update the user, let us attampt to save & generate the recovery codes
+	// this is to ensure that the user has recovery codes in case they lose their device
+	// and if it fails, we do not update the user
+	recoveryCodes, err := app.models.MFAManager.CreateNewRecoveryCode(user.ID)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+		return
+	}
 	// Update the user's MFA status
 	user.MFAEnabled = true
 	// Save the user to the DB
@@ -164,19 +170,44 @@ func (app *application) verifiy2FASetupHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 	app.logger.Info("MFA setup pending status removed from redis", zap.String("key", redisKey))
-
-	// Return a success response
+	// Return a success response and the recovery codes
 	err = app.writeJSON(w, http.StatusOK, envelope{
-		"user_id":    user.ID,
-		"first_name": user.FirstName,
-		"last_name":  user.LastName,
-		"message":    "MFA Succesfully enabled",
+		"first_name":       user.FirstName,
+		"last_name":        user.LastName,
+		"message":          "Your MFA request has been succesfully enabled. Please save your recovery codes",
+		"recovery_details": recoveryCodes,
 	}, nil)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 	}
+	// send an email to the user
+	app.background(func() {
+		data := map[string]any{
+			"firstName": user.FirstName,
+			"lastName":  user.LastName,
+		}
+		err := app.mailer.Send(user.Email, "mfa_acknowledgment.tmpl", data)
+		if err != nil {
+			app.logger.Error("Error sending 2fa acknowledgment email", zap.Error(err))
+		}
+	})
+	// send a notification to the user
+	notificationContent := data.NotificationContent{
+		Message: fmt.Sprintf(("%s, your MFA request has been succesfully enabled. Remember to save your recovery codes safely and securely. They are the only way to get your account in cases where your device is lost or damaged"), user.FirstName),
+		Meta: data.NotificationMeta{
+			Url:      app.config.frontend.profileurl,
+			ImageUrl: app.config.frontend.applogourl,
+			Tags:     "mfa,security",
+		},
+	}
+	err = app.PublishNotificationToRedis(user.ID, data.NotificationTypeAccount, notificationContent)
+	if err != nil {
+		app.logger.Error("Error publishing MFA notification to redis", zap.Error(err))
+	}
 }
 
+// validateAndDeleteTOTP() validates the TOTP code that the user sends. If the code is
+// valid, we delete the secret from the DB
 func (app *application) validateAndDeleteTOTP(TOTPCode, MFASecret, redisKey string) error {
 	opts := totp.ValidateOpts{
 		Period:    30,                // Time step in seconds (default is 30)
@@ -193,7 +224,7 @@ func (app *application) validateAndDeleteTOTP(TOTPCode, MFASecret, redisKey stri
 	if !valid {
 		return data.ErrInvalidTOTPCode
 	}
-	// if the code is valid, we delete the secret
+	// if the code is valid, we delete the secret from REDIS
 	delCmd := app.RedisDB.Del(context.Background(), redisKey)
 	if err := delCmd.Err(); err != nil {
 		return err

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -91,20 +92,22 @@ func (app *application) performMFAOnLogin(w http.ResponseWriter, r *http.Request
 		app.serverErrorResponse(w, r, err)
 		return
 	}
+	// make the REDIS key
+	redisKey := fmt.Sprintf("%s:%d", data.RedisMFALoginPendingPrefix, user.ID)
 	// check if there is an existing pending MFA setup for the user
-	saveValue, _, err := app.fetchRedisDataForUser(data.RedisMFALoginPendingPrefix, user.ID)
+	mfaSession, err := getFromCache[*data.MFASession](context.Background(), app.RedisDB, redisKey)
 	if err != nil {
 		switch {
-		case errors.Is(err, data.ErrRedisMFAKeyNotFound):
-			// if we could not find the key, we continue
-			// continue
+		case errors.Is(err, ErrNoDataFoundInRedis):
+			// no data found in redis so we can proceed
+			// do nothing
 		default:
 			app.serverErrorResponse(w, r, err)
 			return
 		}
 	}
-	// if the key exists, we return an error
-	if saveValue != "" {
+	// if there is an existing pending session, we return an error
+	if mfaSession != nil {
 		app.badRequestResponse(w, r, data.ErrRedisMFAKeyAlreadyExists)
 		return
 	}
@@ -125,14 +128,14 @@ func (app *application) performMFAOnLogin(w http.ResponseWriter, r *http.Request
 	}
 	// generate our TOTP token using the encrypted Token as the value
 	// for the key we will use the RedisMFALoginPendingPrefix
-	_, redisKey, err := app.totpTokenGenerator(user.Email, data.RedisMFALoginPendingPrefix, mfaToken.Plaintext, user.ID)
+	_, err = app.totpTokenGenerator(user.Email, redisKey, mfaToken.Plaintext)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
 	}
 	app.logger.Info("MFA login totp generated with this key", zap.String("plain text saved", mfaToken.Plaintext), zap.String("user email", user.Email))
 	app.logger.Info(("MFA Login, we use the following user secret"), zap.String("secret", user.MFASecret), zap.String("redis key", redisKey))
-	// we will now send the user the encrypted token and the QR code
+	// we will now send the user the encrypted token and the email
 	err = app.writeJSON(w, http.StatusOK, envelope{
 		"totp_token": encryptedToken,
 		"email":      user.Email,
@@ -188,7 +191,6 @@ func (app *application) validateMFALoginAttemptHandler(w http.ResponseWriter, r 
 		TOTPCode  string `json:"totp_code"`
 		Email     string `json:"email"`
 	}
-
 	// IF THEY DO, we read the body into the input struct
 	// read the body into the input struct
 	err := app.readJSON(w, r, &input)
@@ -222,11 +224,19 @@ func (app *application) validateMFALoginAttemptHandler(w http.ResponseWriter, r 
 		}
 		return
 	}
+	// make redis key
+	redisKey := fmt.Sprintf("%s:%d", data.RedisMFALoginPendingPrefix, user.ID)
 	// check if user has a pending MFA login session, if not we return an error
-	value, redisKey, err := app.fetchRedisDataForUser(data.RedisMFALoginPendingPrefix, user.ID)
+	mfaSession, err := getFromCache[*data.MFASession](context.Background(), app.RedisDB, redisKey)
 	if err != nil {
-		app.serverErrorResponse(w, r, err)
-		return
+		switch {
+		case errors.Is(err, ErrNoDataFoundInRedis):
+			// no data found in redis so we can proceed
+			// do nothing
+		default:
+			app.serverErrorResponse(w, r, err)
+			return
+		}
 	}
 	// Decode our key
 	encryption_key, err := data.DecodeEncryptionKey(app.config.encryption.key)
@@ -240,11 +250,11 @@ func (app *application) validateMFALoginAttemptHandler(w http.ResponseWriter, r 
 		app.serverErrorResponse(w, r, err)
 		return
 	}
-	app.logger.Info("MFA setup pending status decrypted token", zap.String("decryptedToken", decryptedToken), zap.String("stored token", value))
+	app.logger.Info("MFA setup pending status decrypted token", zap.String("decryptedToken", decryptedToken), zap.String("stored token", (*mfaSession).Value))
 	app.logger.Info("Recieved TOTP Code", zap.String("TOTPCode", mfaToken.TOTPCode), zap.String("Recieved TOTPToken", mfaToken.TOTPToken))
 
 	// check if the decrypted token matches the one in redis
-	if decryptedToken != value {
+	if decryptedToken != (*mfaSession).Value {
 		app.invalidCredentialsResponse(w, r)
 		return
 	}
@@ -333,7 +343,7 @@ func (app *application) createPasswordResetTokenHandler(w http.ResponseWriter, r
 		// input.Email address provided by the client in this request.
 		err = app.mailer.Send(user.Email, "token_password_reset.tmpl", data)
 		if err != nil {
-			app.logger.Error(err.Error())
+			app.logger.Error("Error sending password reset email", zap.Error(err))
 		}
 	})
 	// Send a 202 Accepted response and confirmation message to the client.

@@ -67,7 +67,7 @@ type User struct {
 	CountryCode      string                         `json:"country_code"`       // Two-letter ISO country code for region-specific financial services
 	CurrencyCode     string                         `json:"currency_code"`      // Default currency (ISO 4217) for transactions and accounts
 	MFAEnabled       bool                           `json:"mfa_enabled"`        // Multi-factor authentication (MFA) enabled
-	MFASecret        string                         `json:"mfa_secret"`         // Secret key for TOTP-based MFA
+	MFASecret        string                         `json:"-"`                  // Secret key for TOTP-based MFA
 	MFAStatus        database.MfaStatusType         `json:"mfa_status"`         // Status of MFA (pending, accepted, rejected)
 	MFALastChecked   *time.Time                     `json:"mfa_last_checked"`   // Timestamp of the last MFA check, can be NULL
 	RiskTolerance    database.NullRiskToleranceType `json:"risk_tolerance"`     // Risk Tolerance Level, low, medium, high
