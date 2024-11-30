@@ -28,8 +28,9 @@ const (
 
 // constants for tags to be used during REDIS operations
 const (
-	RedisMFASetupPendingPrefix = "mfa_setup_pending"
-	RedisMFALoginPendingPrefix = "mfa_login_pending"
+	RedisMFASetupPendingPrefix         = "mfa_setup_pending"
+	RedisMFALoginPendingPrefix         = "mfa_login_pending"
+	RedisMFAResetPasswordPendingPrefix = "mfa_reset_password_pending"
 )
 
 const (

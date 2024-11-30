@@ -32,3 +32,65 @@ func (q *Queries) CreateNewRecoveryCode(ctx context.Context, arg CreateNewRecove
 	err := row.Scan(&i.ID, &i.CreatedAt)
 	return i, err
 }
+
+const deleteRecoveryCodeByID = `-- name: DeleteRecoveryCodeByID :one
+DELETE FROM recovery_codes
+WHERE id = $1 AND user_id = $2
+RETURNING id
+`
+
+type DeleteRecoveryCodeByIDParams struct {
+	ID     int64
+	UserID int64
+}
+
+func (q *Queries) DeleteRecoveryCodeByID(ctx context.Context, arg DeleteRecoveryCodeByIDParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, deleteRecoveryCodeByID, arg.ID, arg.UserID)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const getRecoveryCodesByUserID = `-- name: GetRecoveryCodesByUserID :one
+SELECT id, user_id, code_hash, used, created_at, updated_at
+FROM recovery_codes
+WHERE user_id = $1 AND used = FALSE
+`
+
+func (q *Queries) GetRecoveryCodesByUserID(ctx context.Context, userID int64) (RecoveryCode, error) {
+	row := q.db.QueryRowContext(ctx, getRecoveryCodesByUserID, userID)
+	var i RecoveryCode
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.CodeHash,
+		&i.Used,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const markRecoveryCodeAsUsed = `-- name: MarkRecoveryCodeAsUsed :one
+UPDATE recovery_codes
+SET used = TRUE
+WHERE id = $1 AND user_id = $2
+RETURNING id, updated_at
+`
+
+type MarkRecoveryCodeAsUsedParams struct {
+	ID     int64
+	UserID int64
+}
+
+type MarkRecoveryCodeAsUsedRow struct {
+	ID        int64
+	UpdatedAt sql.NullTime
+}
+
+func (q *Queries) MarkRecoveryCodeAsUsed(ctx context.Context, arg MarkRecoveryCodeAsUsedParams) (MarkRecoveryCodeAsUsedRow, error) {
+	row := q.db.QueryRowContext(ctx, markRecoveryCodeAsUsed, arg.ID, arg.UserID)
+	var i MarkRecoveryCodeAsUsedRow
+	err := row.Scan(&i.ID, &i.UpdatedAt)
+	return i, err
+}

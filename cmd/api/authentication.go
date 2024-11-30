@@ -293,6 +293,8 @@ func (app *application) createPasswordResetTokenHandler(w http.ResponseWriter, r
 	// Parse and validate the user's email address.
 	var input struct {
 		Email string `json:"email"`
+		// ToDo: Add TOTP Code Here only for users with MFA enabled
+		TOTPCode string `json:"totp_code"`
 	}
 	err := app.readJSON(w, r, &input)
 	if err != nil {
@@ -326,6 +328,24 @@ func (app *application) createPasswordResetTokenHandler(w http.ResponseWriter, r
 		return
 	}
 
+	// ToDO: Add MFA Check Here Branching to MFATOTP Checker Handler To Verify MFA
+	// Return 401 Unauthorized if the user has MFA enabled and TOTP code is not provided
+	if user.MFAEnabled {
+		err := app.validateTOTPResetPasswordHandler(input.TOTPCode, user)
+		if err != nil {
+			// if user has mfaenable and did not actually provide a TOTP code, we return an unauthorized error
+			switch {
+			case errors.Is(err, data.ErrInvalidTOTPCode):
+				// return an unauthorized error
+				app.authenticationRequiredResponse(w, r)
+			default:
+				// otherwise return a 500 internal server error
+				app.serverErrorResponse(w, r, err)
+			}
+			return
+		}
+	}
+
 	// Otherwise, create a new password reset token with a 45-minute expiry time.
 	token, err := app.models.Tokens.New(user.ID, 45*time.Minute, data.ScopePasswordReset)
 	if err != nil {
@@ -356,6 +376,69 @@ func (app *application) createPasswordResetTokenHandler(w http.ResponseWriter, r
 	}
 }
 
+// validateTOTPResetPasswordHandler() is a helper that validates the TOTP code for the user when
+// They have MFA enabled and are trying to reset their password. We check if the user has provided
+// a TOTP code, if not, we cache the session and return an error. If the user has provided a TOTP code,
+// We proceed and check if there is a pending MFA session, if not we return an error. If everyhing is good,
+// We perform a validation on the TOTP code using data.ValidateTOTPCode, and continue to do a secret
+// validation via validateAndDeleteTOTP passing the token, secret and redis key
+// If everything is okay, we return nil otherwise we return an error
+func (app *application) validateTOTPResetPasswordHandler(totpCode string, user *data.User) error {
+	// create our redis key with RedisMFAResetPasswordPendingPrefix
+	redisKey := fmt.Sprintf("%s:%d", data.RedisMFAResetPasswordPendingPrefix, user.ID)
+	// check if the user has provided a TOTP code, if not, REDIS cache the session and return an error
+	if totpCode == "" {
+		// cache the session
+		err := setToCache(context.Background(), app.RedisDB, redisKey, &data.MFASession{
+			Email: user.Email,
+			Value: data.MFAStatusPending,
+		}, data.DefaulRedistUserMFATTLS)
+		if err != nil {
+			return err
+		}
+		return data.ErrInvalidTOTPCode
+	}
+	// check if there is a pending MFA session, if not we return an error
+	_, err := getFromCache[*data.MFASession](context.Background(), app.RedisDB, redisKey)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrNoDataFoundInRedis):
+			// return an error
+			return data.ErrRedisMFAKeyNotFound
+		default:
+			// return a 500 internal server error
+			return err
+		}
+	}
+	// validate the TOTP code
+	mfaToken := &data.MFAToken{
+		TOTPCode: totpCode,
+	}
+	v := validator.New()
+	// validate the input
+	if data.ValidateTOTPCode(v, mfaToken); !v.Valid() {
+		return data.ErrInvalidTOTPCode
+	}
+	// verify the code and delete the secret, if there is an error, we abort
+	err = app.validateAndDeleteTOTP(mfaToken.TOTPCode, user.MFASecret, redisKey)
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrInvalidTOTPCode):
+			return data.ErrInvalidTOTPCode
+		default:
+			return err
+		}
+	}
+	// everything is okay
+	return nil
+}
+
+// createManualActivationTokenHandler() is the main endpoint responsible for creating a new activation
+// token for the user. This endpoint is used when the user wants to activate their account manually.
+// Or when the user did not receive the activation email. We accept a users email address, validate it,
+// and then check if the user exists in the database. If the user exists, we then check if the user has
+// already been activated. If the user has not been activated, we create a new activation token with a 3-day
+// expiry time and send it to the user's email address.
 func (app *application) createManualActivationTokenHandler(w http.ResponseWriter, r *http.Request) {
 	// Parse and validate the user's email address.
 	var input struct {

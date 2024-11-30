@@ -2,6 +2,7 @@ package data
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"time"
 
@@ -20,12 +21,12 @@ type MFAToken struct {
 }
 
 type RecoveryCodeDetail struct {
-	ID            int64     `json:"id"`
-	UserID        int64     `json:"user_id"`
-	RecoveryCodes []string  `json:"recovery_codes"`
-	Used          bool      `json:"used,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at,omitempty"`
+	ID            int64          `json:"id"`
+	UserID        int64          `json:"user_id"`
+	RecoveryCodes *RecoveryCodes `json:"recovery_codes"`
+	Used          bool           `json:"used,omitempty"`
+	CreatedAt     time.Time      `json:"created_at"`
+	UpdatedAt     time.Time      `json:"updated_at,omitempty"`
 }
 
 type RecoveryCodes struct {
@@ -91,12 +92,84 @@ func (m MFAManager) CreateNewRecoveryCode(userID int64) (*RecoveryCodeDetail, er
 	}
 	// Make the recovery code detail struct
 	recoveryCodeDetails := &RecoveryCodeDetail{
-		ID:            codeDetail.ID,
-		UserID:        userID,
-		RecoveryCodes: recoveryCodes.RecoveryCodes,
-		Used:          false,
-		CreatedAt:     codeDetail.CreatedAt.Time,
+		ID:     codeDetail.ID,
+		UserID: userID,
+		RecoveryCodes: &RecoveryCodes{
+			RecoveryCodes: recoveryCodes.RecoveryCodes,
+		},
+		Used:      false,
+		CreatedAt: codeDetail.CreatedAt.Time,
 	}
 	// we are good to go
 	return recoveryCodeDetails, nil
+}
+
+// GetRecoveryCodesByUserID() fetches the recovery codes for a user by their user ID
+// We shall return the *RecoveryCodeDetail and error
+func (m MFAManager) GetRecoveryCodesByUserID(userID int64) (*RecoveryCodeDetail, error) {
+	ctx, cancel := contextGenerator(context.Background(), DefaultMFAManTimeout)
+	defer cancel()
+	// Fetch the recovery codes from the database
+	codeDetail, err := m.DB.GetRecoveryCodesByUserID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	// Make the recovery code detail struct
+	recoveryCodeDetails := &RecoveryCodeDetail{
+		ID:     codeDetail.ID,
+		UserID: userID,
+		RecoveryCodes: &RecoveryCodes{
+			CodeHash: codeDetail.CodeHash,
+		},
+		Used:      codeDetail.Used.Bool,
+		CreatedAt: codeDetail.CreatedAt.Time,
+		UpdatedAt: codeDetail.UpdatedAt.Time,
+	}
+	// we are good to go
+	return recoveryCodeDetails, nil
+}
+
+// MarkRecoveryCodeAsUsed() marks a recovery code as used by its ID and user ID
+// We also return an editconflict error if the recovery code has already been used
+// We shall return the error
+func (m MFAManager) MarkRecoveryCodeAsUsed(id, userID int64) error {
+	ctx, cancel := contextGenerator(context.Background(), DefaultMFAManTimeout)
+	defer cancel()
+	// Mark the recovery code as used in the database
+	_, err := m.DB.MarkRecoveryCodeAsUsed(ctx, database.MarkRecoveryCodeAsUsedParams{
+		ID:     id,
+		UserID: userID,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return ErrGeneralRecordNotFound
+		default:
+			return err
+		}
+	}
+	// we are good to go
+	return nil
+}
+
+// DeleteRecoveryCodeByID() deletes a recovery code by its ID
+// We shall return the error
+func (m MFAManager) DeleteRecoveryCodeByID(id, userID int64) error {
+	ctx, cancel := contextGenerator(context.Background(), DefaultMFAManTimeout)
+	defer cancel()
+	// Delete the recovery code from the database
+	_, err := m.DB.DeleteRecoveryCodeByID(ctx, database.DeleteRecoveryCodeByIDParams{
+		ID:     id,
+		UserID: userID,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return ErrGeneralRecordNotFound
+		default:
+			return err
+		}
+	}
+	// we are good to go
+	return nil
 }
