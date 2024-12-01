@@ -23,7 +23,7 @@ func (app *application) setupMFAHandler(w http.ResponseWriter, r *http.Request) 
 	redisKey := fmt.Sprintf("%s:%d", data.RedisMFASetupPendingPrefix, user.ID)
 	// Check if the user has already enabled MFA
 	if user.MFAEnabled {
-		app.badRequestResponse(w, r, fmt.Errorf("MFA is already enabled for this user"))
+		app.badRequestResponse(w, r, data.ErrMFAlreadyEnabled)
 		return
 	}
 	// check if there is an existing pending session in REDIS, we do this by checking if the key exists

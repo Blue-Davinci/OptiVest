@@ -137,7 +137,8 @@ func (app *application) performMFAOnLogin(w http.ResponseWriter, r *http.Request
 	app.logger.Info("MFA login totp generated with this key", zap.String("plain text saved", mfaToken.Plaintext), zap.String("user email", user.Email))
 	app.logger.Info(("MFA Login, we use the following user secret"), zap.String("secret", user.MFASecret), zap.String("redis key", redisKey))
 	// we will now send the user the encrypted token and the email
-	err = app.writeJSON(w, http.StatusOK, envelope{
+	// returning a 403 Forbidden status code
+	err = app.writeJSON(w, http.StatusForbidden, envelope{
 		"totp_token": encryptedToken,
 		"email":      user.Email,
 	}, nil)

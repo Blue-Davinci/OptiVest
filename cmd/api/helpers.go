@@ -93,10 +93,9 @@ func (app *application) readIDParam(r *http.Request, parameterName string) (int6
 	return id, nil
 }
 
-func (app *application) returnFormattedRedisKeys(key string, userID int64) string {
-	return fmt.Sprintf("%s:%d", key, userID)
-}
-
+// jsonReadAndHandleError() is a helper function that takes an error as a parameter and
+// returns a cleaned-up error message. This is used to provide more information in the
+// event of a JSON decoding error.
 func (app *application) jsonReadAndHandleError(err error) error {
 	if err != nil {
 		// Vars to carry our errors
@@ -155,6 +154,8 @@ func (app *application) isProfileComplete(user *data.User) bool {
 }
 
 // The background() helper accepts an arbitrary function as a parameter.
+// It launches a background goroutine to execute the function.
+// The done() method of the WaitGroup is called when the goroutine completes.
 func (app *application) background(fn func()) {
 	app.wg.Add(1)
 	// Launch a background goroutine.
@@ -356,6 +357,7 @@ func validateURL(input string) error {
 	return nil
 }
 
+// calculateEstimatedPayoffDate() calculates the estimated payoff date for a debt
 func (app *application) calculateEstimatedPayoffDate(debt *data.Debt) (time.Time, error) {
 	if debt.MinimumPayment.LessThanOrEqual(decimal.NewFromFloat(0)) {
 		return time.Time{}, errors.New("minimum payment cannot be zero or negative")
@@ -412,6 +414,10 @@ func (app *application) calculateInterestPayment(debt *data.Debt) (decimal.Decim
 	return interestPayment, nil
 }
 
+// aunthenticatorHelper() is a helper function for the authentication middleware
+// It takes in a request and returns a user and an error
+// It retrieves the value of the Authorization header from the request. This will
+// return the empty string "" if there is no such header found.
 func (app *application) aunthenticatorHelper(r *http.Request) (*data.User, error) {
 	// Retrieve the value of the Authorization header from the request. This will
 	// return the empty string "" if there is no such header found.

@@ -82,8 +82,8 @@ func (app *application) userRoutes(dynamicMiddleware *alice.Chain) chi.Router {
 	userRoutes.Put("/activated", app.activateUserHandler)
 	userRoutes.Put("/password", app.updateUserPasswordHandler)
 	userRoutes.Post("/recovery", app.validateRecoveryCodeHandler)
-	userRoutes.With(dynamicMiddleware.Then).Patch("/mfa", app.setupMFAHandler)
-	userRoutes.With(dynamicMiddleware.Then).Patch("/mfa/verify", app.verifiy2FASetupHandler)
+	userRoutes.With(dynamicMiddleware.Then).Post("/mfa", app.setupMFAHandler)
+	userRoutes.With(dynamicMiddleware.Then).Post("/mfa/verify", app.verifiy2FASetupHandler)
 	// account
 	userRoutes.With(dynamicMiddleware.Then).Get("/account", app.getUserInformationHandler)
 	userRoutes.With(dynamicMiddleware.Then).Patch("/account", app.updateUserInformationHandler)
@@ -97,7 +97,7 @@ func (app *application) apiKeyRoutes() chi.Router {
 	apiKeyRoutes := chi.NewRouter()
 	// initial request for token
 	apiKeyRoutes.Post("/authentication", app.createAuthenticationApiKeyHandler)
-	apiKeyRoutes.Patch("/authentication/verify", app.validateMFALoginAttemptHandler)
+	apiKeyRoutes.Post("/authentication/verify", app.validateMFALoginAttemptHandler)
 	// /password-reset : for sending keys for resetting passwords
 	apiKeyRoutes.Post("/password-reset", app.createPasswordResetTokenHandler)
 	apiKeyRoutes.Post("/recovery", app.initializeRecoveryByRecoveryCodes)

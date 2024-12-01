@@ -22,6 +22,12 @@ type MFAToken struct {
 	Email     string `json:"email"`
 }
 
+var (
+	ErrMFAlreadyEnabled         = errors.New("mfa is already enabled for this user")
+	ErrRedisMFAKeyNotFound      = errors.New("key not found in Redis")
+	ErrRedisMFAKeyAlreadyExists = errors.New("user already has a pending mfa session. please complete the session before starting a new one")
+)
+
 type RecoveryCodeDetail struct {
 	ID            int64          `json:"id"`
 	UserID        int64          `json:"user_id"`
@@ -63,10 +69,8 @@ const (
 )
 
 var (
-	ErrMFANotEnabled            = errors.New("mfa is not enabled for this user")
-	ErrInvalidTOTPCode          = errors.New("TOTP code is invalid")
-	ErrRedisMFAKeyNotFound      = errors.New("key not found in Redis")
-	ErrRedisMFAKeyAlreadyExists = errors.New("user already has a pending mfa session. please complete the session before starting a new one")
+	ErrMFANotEnabled   = errors.New("mfa is not enabled for this user")
+	ErrInvalidTOTPCode = errors.New("TOTP code is invalid")
 )
 
 func ValidateTOTPCode(v *validator.Validator, mfaToken *MFAToken) {
