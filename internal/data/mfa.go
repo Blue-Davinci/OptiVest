@@ -2,6 +2,8 @@ package data
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
 	"database/sql"
 	"errors"
 	"time"
@@ -27,6 +29,21 @@ type RecoveryCodeDetail struct {
 	Used          bool           `json:"used,omitempty"`
 	CreatedAt     time.Time      `json:"created_at"`
 	UpdatedAt     time.Time      `json:"updated_at,omitempty"`
+}
+
+// Matches() compares the concatenated recovery codes with the provided plaintext password
+// We generate the SHA-256 hash of the concatenated string
+func (p *RecoveryCodeDetail) Matches(concatenatedPlainTextStr string) (bool, error) {
+	// Generate the SHA-256 hash of the concatenated string
+	generatedHash := sha256.Sum256([]byte(concatenatedPlainTextStr))
+
+	// Use subtle.ConstantTimeCompare for a timing-attack-resistant comparison
+	if subtle.ConstantTimeCompare(generatedHash[:], p.RecoveryCodes.CodeHash) == 1 {
+		return true, nil
+	}
+
+	// If the hashes do not match, return false
+	return false, nil
 }
 
 type RecoveryCodes struct {

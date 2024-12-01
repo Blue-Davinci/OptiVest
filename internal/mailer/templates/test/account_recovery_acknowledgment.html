@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Account Recovery Acknowledgment - OptiVest</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f5f5f5;
+            margin: 0;
+            padding: 0;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background: #ffffff;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        .header {
+            background: #111211;
+            padding: 20px;
+            text-align: center;
+            color: #ffffff;
+        }
+        .header img {
+            max-width: 200px;
+            transition: transform 0.3s ease;
+        }
+        .header img:hover {
+            transform: scale(1.05);
+        }
+        .content {
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .content h1 {
+            font-size: 22px;
+            margin-bottom: 10px;
+            color: #4CAF50;
+            font-weight: normal;
+            text-align: center;
+        }
+        .content p {
+            margin-bottom: 15px;
+        }
+        .btn {
+            display: inline-block;
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            color: white;
+            border-radius: 5px;
+            text-decoration: none;
+            margin-top: 15px;
+            text-align: center;
+            transition: background-color 0.3s ease, transform 0.3s ease;
+        }
+        .btn:hover {
+            background-color: #45a049;
+            transform: translateY(-2px);
+        }
+        .btn:active {
+            background-color: #3e8e41;
+        }
+        .footer {
+            background: #f1f1f1;
+            text-align: center;
+            padding: 15px;
+        }
+        .footer a {
+            margin: 0 10px;
+        }
+        .footer img {
+            width: 24px;
+            height: 24px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <img src="https://i.ibb.co/qMDqr7K/optivest-high-resolution-logo-transparent.png" alt="OptiVest Logo">
+        </div>
+        <div class="content">
+            <h1>Account Recovery Complete</h1>
+            <p>Hello {{.firstName}} {{.lastName}},</p>
+            <p>Congratulations! Your OptiVest account recovery is now complete. Here’s what you need to know:</p>
+            <ul>
+                <li><strong>Reset Your Account Password:</strong> You can now securely reset your password. Click the button below:</li>
+                <a href="{{.resetPasswordURL}}" class="btn">Reset Password</a>
+                <li><strong>Recovery Codes Expired:</strong> Your previous recovery codes are now <strong>expired</strong>. Generate new ones in your account settings.</li>
+                <li><strong>Multi-Factor Authentication (MFA):</strong> Any MFA linked to your account has been <strong>closed</strong>. We recommend re-enabling MFA in your account settings for added security.</li>
+            </ul>
+            <p>If you did not complete this recovery process or believe your account is still at risk, contact us immediately at <a href="mailto:support@optivest.com">support@optivest.com</a>.</p>
+            <p>Best regards,<br>The OptiVest Team</p>
+        </div>
+        <div class="footer">
+            <p>Follow us:</p>
+            <a href="https://twitter.com/OptiVest"><img src="https://img.icons8.com/ios-filled/50/000000/twitter.png" alt="Twitter"></a>
+            <a href="https://facebook.com/OptiVest"><img src="https://img.icons8.com/ios-filled/50/000000/facebook-new.png" alt="Facebook"></a>
+            <a href="https://instagram.com/OptiVest"><img src="https://img.icons8.com/ios-filled/50/000000/instagram-new.png" alt="Instagram"></a>
+        </div>
+    </div>
+</body>
+</html>

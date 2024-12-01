@@ -29,6 +29,7 @@ const (
 	ScopeAuthentication = "authentication"
 	ScopePasswordReset  = "password-reset"
 	ScopeMFALogin       = "mfa-login"
+	ScopeRecovery       = "recovery-codes"
 )
 
 // Define a Token struct to hold the data for an individual token. This includes the
@@ -45,7 +46,18 @@ type Token struct {
 // Check that the plaintext token has been provided and is exactly 26 bytes long.
 func ValidateTokenPlaintext(v *validator.Validator, tokenPlaintext string) {
 	v.Check(tokenPlaintext != "", "token", "must be provided")
-	v.Check(len(tokenPlaintext) == 26, "token", "must be 26 bytes long")
+	v.Check(len(tokenPlaintext) == 26, "token", "must be valid")
+}
+
+// ValidateRecoveryCodes() checks that first the lenght of the recovery codes slice is 5
+// and for each of the codes, the length is 26 bytes
+func ValidateRecovery(v *validator.Validator, recoveryCodes []string, tokenPlainText string) {
+	v.Check(len(recoveryCodes) == 5, "recovery_codes", "must be a valid bundle")
+	for _, code := range recoveryCodes {
+		v.Check(len(code) == 26, "recovery_codes", "must be valid")
+	}
+	// validate token plaintext
+	ValidateTokenPlaintext(v, tokenPlainText)
 }
 
 // Create a Token instance containing the user ID, expiry, and scope information.

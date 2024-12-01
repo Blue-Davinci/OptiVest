@@ -81,6 +81,7 @@ func (app *application) userRoutes(dynamicMiddleware *alice.Chain) chi.Router {
 	// /activation : for activating accounts
 	userRoutes.Put("/activated", app.activateUserHandler)
 	userRoutes.Put("/password", app.updateUserPasswordHandler)
+	userRoutes.Post("/recovery", app.validateRecoveryCodeHandler)
 	userRoutes.With(dynamicMiddleware.Then).Patch("/mfa", app.setupMFAHandler)
 	userRoutes.With(dynamicMiddleware.Then).Patch("/mfa/verify", app.verifiy2FASetupHandler)
 	// account
@@ -99,6 +100,7 @@ func (app *application) apiKeyRoutes() chi.Router {
 	apiKeyRoutes.Patch("/authentication/verify", app.validateMFALoginAttemptHandler)
 	// /password-reset : for sending keys for resetting passwords
 	apiKeyRoutes.Post("/password-reset", app.createPasswordResetTokenHandler)
+	apiKeyRoutes.Post("/recovery", app.initializeRecoveryByRecoveryCodes)
 	// manual token request
 	apiKeyRoutes.Post("/resend-activation", app.createManualActivationTokenHandler)
 	return apiKeyRoutes

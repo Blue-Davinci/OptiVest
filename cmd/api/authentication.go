@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Blue-Davinci/OptiVest/internal/data"
@@ -500,5 +501,194 @@ func (app *application) createManualActivationTokenHandler(w http.ResponseWriter
 	err = app.writeJSON(w, http.StatusAccepted, env, nil)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
+	}
+}
+
+// ToDo: Add handlers for recovering account with recovery codes
+// 1) First, a handler that will send an email to the user with a link to recover their account
+// - This handler needs to check if the user has MFA enabled, if they do, we need to send them an email
+// with a link to recover their account using their recovery codes
+// 2) A handler that will validate the recovery code and allow the user to reset their password
+// In the process remove MFA from their account by updating the user. It also needs to set the
+// recovery code to used in the database
+func (app *application) initializeRecoveryByRecoveryCodes(w http.ResponseWriter, r *http.Request) {
+	// Parse and validate the user's email address.
+	var input struct {
+		Email string `json:"email"`
+	}
+	err := app.readJSON(w, r, &input)
+	if err != nil {
+		app.badRequestResponse(w, r, err)
+		return
+	}
+	v := validator.New()
+	if data.ValidateEmail(v, input.Email); !v.Valid() {
+		app.failedValidationResponse(w, r, v.Errors)
+		return
+	}
+	// Try to retrieve the corresponding user record for the email address. If it can't
+	// be found, return an error message to the client.
+	user, err := app.models.Users.GetByEmail(input.Email, app.config.encryption.key)
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrGeneralRecordNotFound):
+			v.AddError("email", "no matching email address found")
+			app.failedValidationResponse(w, r, v.Errors)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
+	// Return an error if the user has not been activated.
+	if !user.Activated {
+		v.AddError("email", "user account has not been activated")
+		app.failedValidationResponse(w, r, v.Errors)
+		return
+	}
+	// Return an error if the user has not enabled MFA
+	if !user.MFAEnabled {
+		v.AddError("email", "user account has not enabled MFA")
+		app.failedValidationResponse(w, r, v.Errors)
+		return
+	}
+	// Otherwise, create a new recovery token with 15-minute expiry time.
+	token, err := app.models.Tokens.New(user.ID, 15*time.Minute, data.ScopeRecovery)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+		return
+	}
+	// Email the user with their additional recovery token.
+	app.background(func() {
+		data := map[string]any{
+			"recoveryCodesURL": app.config.frontend.recoveryurl + token.Plaintext,
+			"firstName":        user.FirstName,
+			"lastName":         user.LastName,
+		}
+		// Since email addresses MAY be case sensitive, notice that we are sending this
+		// email using the address stored in our database for the user --- not to the
+		// input.Email address provided by the client in this request.
+		err = app.mailer.Send(user.Email, "account_recovery.tmpl", data)
+		if err != nil {
+			app.logger.Info("An error occurred while sending the recovery email", zap.Error(err))
+		}
+	})
+	// Send a 202 Accepted response and confirmation message to the client.
+	env := envelope{"message": "an email will be sent to you containing recovery instructions"}
+	err = app.writeJSON(w, http.StatusAccepted, env, nil)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+	}
+
+}
+
+// validateRecoveryCodeHandler() is a handler method that verifies the recovery code for the user when
+// They have MFA enabled and are trying to recover their account. This endpoint will receive the []recovery code
+// and the token from the email sent via the initializeRecoveryByRecoveryCodes() handler. We first validate the
+// []codes as well as the tokenplaintext, Then we use GetForToken to get the recovery code from the database passing
+// in data.ScopeRecovery as the scope. We then need to get the hashed version of the recovery code from the database
+// and compare it to the hashed version of the concatenated recovery codes. If they match, we proceed to update the user
+// and remove the MFA from their account. We also need to set the recovery code to used in the database
+func (app *application) validateRecoveryCodeHandler(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		RecoveryCodes  []string `json:"recovery_codes"`
+		TokenPlaintext string   `json:"token_plaintext"`
+	}
+	// read the body into the input struct
+	err := app.readJSON(w, r, &input)
+	if err != nil {
+		app.badRequestResponse(w, r, err)
+		return
+	}
+	// validate the input
+	v := validator.New()
+	// validate the input
+	if data.ValidateRecovery(v, input.RecoveryCodes, input.TokenPlaintext); !v.Valid() {
+		app.failedValidationResponse(w, r, v.Errors)
+		return
+	}
+	// get the user from the database
+	user, err := app.models.Users.GetForToken(data.ScopeRecovery, input.TokenPlaintext, app.config.encryption.key)
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrGeneralRecordNotFound):
+			v.AddError("token", "invalid or expired password reset token")
+			app.failedValidationResponse(w, r, v.Errors)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
+	// get the recovery code from the database
+	recoveryCode, err := app.models.MFAManager.GetRecoveryCodesByUserID(user.ID)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+		return
+	}
+	//concatenate the recovery codes
+	joinedRecoveryCodes := strings.Join(input.RecoveryCodes, "")
+	// we will use the matches method in  recoveryCodes to compare the hashed version of the concatenated recovery codes
+	// passing in the hashedRecoveryCode
+	// check if the password matches
+	match, err := recoveryCode.Matches(joinedRecoveryCodes)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+		return
+	}
+	// compare it to the hashed version of the concatenated recovery codes
+	// if password doesn't match then we shout
+	if !match {
+		app.invalidCredentialsResponse(w, r)
+		return
+	}
+	// update the user and remove the MFA from their account
+	user.MFAEnabled = false
+	user.MFASecret = ""
+	// Save the user to the DB
+	err = app.models.Users.UpdateUser(user, app.config.encryption.key)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+		return
+	}
+	// set the recovery code to used in the database
+	err = app.models.MFAManager.MarkRecoveryCodeAsUsed(recoveryCode.ID, user.ID)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+		return
+	}
+	// log
+	app.logger.Info("Recovery validation attempt", zap.Int64("user_id", user.ID), zap.Bool("success", match))
+	// ToDo: Think if we should delete the recovery code from the database
+
+	// Email the user using account_recovery_acknowledgment.tmpl acknowledging that their account has been recovered
+	// and that they can now proceed to reset their password
+	app.background(func() {
+		data := map[string]any{
+			"firstName":        user.FirstName,
+			"lastName":         user.LastName,
+			"resetPasswordURL": app.config.frontend.passwordreseturl,
+		}
+		err := app.mailer.Send(user.Email, "account_recovery_acknowledgment.tmpl", data)
+		if err != nil {
+			app.logger.Error("Error sending recovery acknowledgment email", zap.Error(err))
+		}
+	})
+	// Send a 200 OK response and confirmation message to the client.
+	message := envelope{"message": "Your account has been successfully recovered"}
+	err = app.writeJSON(w, http.StatusOK, message, nil)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+	}
+	// send notification to the user
+	notificationContent := data.NotificationContent{
+		Message: fmt.Sprintf("%s, your account has been successfully recovered. We recommend you re-enable MFA and link to your current device", user.FirstName),
+		Meta: data.NotificationMeta{
+			Url:      app.config.frontend.profileurl,
+			ImageUrl: app.config.frontend.applogourl,
+			Tags:     "recovery,mfa,security",
+		},
+	}
+	err = app.PublishNotificationToRedis(user.ID, data.NotificationTypeAccount, notificationContent)
+	if err != nil {
+		app.logger.Error("Error publishing MFA notification to redis", zap.Error(err))
 	}
 }
