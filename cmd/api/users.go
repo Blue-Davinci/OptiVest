@@ -14,15 +14,16 @@ import (
 
 func (app *application) registerUserHandler(w http.ResponseWriter, r *http.Request) {
 	var input struct {
-		FirstName    string    `json:"first_name"`
-		LastName     string    `json:"last_name"`
-		Email        string    `json:"email"`
-		Password     string    `json:"password"`
-		PhoneNumber  string    `json:"phone_number"`
-		DOB          time.Time `json:"dob"`
-		Address      string    `json:"address"`
-		CountryCode  string    `json:"country_code"`
-		CurrencyCode string    `json:"currency_code"`
+		FirstName     string    `json:"first_name"`
+		LastName      string    `json:"last_name"`
+		Email         string    `json:"email"`
+		Password      string    `json:"password"`
+		PhoneNumber   string    `json:"phone_number"`
+		DOB           time.Time `json:"dob"`
+		Address       string    `json:"address"`
+		CountryCode   string    `json:"country_code"`
+		CurrencyCode  string    `json:"currency_code"`
+		TermsAccepted bool      `json:"terms_accepted"`
 	}
 	err := app.readJSON(w, r, &input)
 	if err != nil {
@@ -54,11 +55,10 @@ func (app *application) registerUserHandler(w http.ResponseWriter, r *http.Reque
 	}
 	// Perform validation on the user struct before saving the new user
 	v := validator.New()
-	if data.ValidateUser(v, user); !v.Valid() {
+	if data.ValidateUserRegistration(v, user, input.TermsAccepted); !v.Valid() {
 		app.failedValidationResponse(w, r, v.Errors)
 		return
 	}
-
 	// insert our user to the DB
 	err = app.models.Users.CreateNewUser(user, app.config.encryption.key)
 	if err != nil {

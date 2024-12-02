@@ -55,7 +55,7 @@ func (app *application) authenticationRequiredResponse(w http.ResponseWriter, r 
 // needs to be activated to proceed.
 func (app *application) inactiveAccountResponse(w http.ResponseWriter, r *http.Request) {
 	message := "your user account must be activated to access this resource"
-	app.errorResponse(w, r, http.StatusForbidden, message)
+	app.errorResponse(w, r, http.StatusLocked, message)
 }
 
 // The badRequestResponse() method will be used to send a 400 Bad Request status code and
@@ -86,6 +86,11 @@ func (app *application) editConflictResponse(w http.ResponseWriter, r *http.Requ
 // The invalidCredentialsResponse() method will return invalid token credential error
 func (app *application) invalidCredentialsResponse(w http.ResponseWriter, r *http.Request) {
 	message := "invalid authentication credentials"
+	app.errorResponse(w, r, http.StatusUnauthorized, message)
+}
+
+func (app *application) sessionExpiredResponse(w http.ResponseWriter, r *http.Request) {
+	message := "session expired or not found. please log in again"
 	app.errorResponse(w, r, http.StatusUnauthorized, message)
 }
 

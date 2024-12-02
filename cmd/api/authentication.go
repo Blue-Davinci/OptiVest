@@ -139,6 +139,7 @@ func (app *application) performMFAOnLogin(w http.ResponseWriter, r *http.Request
 	// we will now send the user the encrypted token and the email
 	// returning a 403 Forbidden status code
 	err = app.writeJSON(w, http.StatusForbidden, envelope{
+		"message":    "Multi-factor authentication is required to proceed.",
 		"totp_token": encryptedToken,
 		"email":      user.Email,
 	}, nil)
@@ -233,12 +234,12 @@ func (app *application) validateMFALoginAttemptHandler(w http.ResponseWriter, r 
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrNoDataFoundInRedis):
-			// no data found in redis so we can proceed
-			// do nothing
+			// return error
+			app.sessionExpiredResponse(w, r)
 		default:
 			app.serverErrorResponse(w, r, err)
-			return
 		}
+		return
 	}
 	// Decode our key
 	encryption_key, err := data.DecodeEncryptionKey(app.config.encryption.key)

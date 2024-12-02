@@ -163,6 +163,14 @@ func ValidatePhoneNumber(v *validator.Validator, phone_number, region string) {
 
 }
 
+// ValidateUserRegistration() is a validator that checks the input during user registration.
+func ValidateUserRegistration(v *validator.Validator, user *User, termsAccepted bool) {
+	ValidateUser(v, user)
+	ValidateBoolean(v, termsAccepted, "terms_accepted")
+	v.Check(termsAccepted, "terms", "must be accepted")
+}
+
+// ValidateUser() is a validator that checks the input during user creation and updates.
 func ValidateUser(v *validator.Validator, user *User) {
 	// Call the standalone ValidateName() helper.
 	ValidateName(v, user.FirstName, "first_name")
