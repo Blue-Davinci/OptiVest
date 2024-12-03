@@ -4,15 +4,17 @@ Recover access to your OptiVest account
 
 {{define "plainBody"}}
 Hello {{.firstName}}, 
-You requested to recover access to your OptiVest account. Please click the link below to enter your recovery codes and regain access:
+You requested to recover access to your OptiVest account. Please follow the link below and enter the recovery token provided:
 
-{{.recoveryCodesURL}}
+Recovery link: {{.recoveryCodesURL}}
+Recovery token: {{.tokenPlaintext}}
 
 This link is valid for 15 minutes. If it expires or you did not request this, please contact our support team immediately at support@optivest.com.
 
 Best regards,  
 The OptiVest Team
 {{ end }}
+
 
 {{define "htmlBody"}}
 <!DOCTYPE html>
@@ -44,10 +46,6 @@ The OptiVest Team
         }
         .header img {
             max-width: 200px;
-            transition: transform 0.3s ease;
-        }
-        .header img:hover {
-            transform: scale(1.05);
         }
         .content {
             padding: 20px;
@@ -57,7 +55,6 @@ The OptiVest Team
             font-size: 22px;
             margin-bottom: 10px;
             color: #4CAF50;
-            font-weight: normal;
             text-align: center;
         }
         .content p {
@@ -72,26 +69,19 @@ The OptiVest Team
             text-decoration: none;
             margin-top: 15px;
             text-align: center;
-            transition: background-color 0.3s ease, transform 0.3s ease;
         }
         .btn:hover {
             background-color: #45a049;
-            transform: translateY(-2px);
         }
-        .btn:active {
-            background-color: #3e8e41;
-        }
-        .footer {
-            background: #f1f1f1;
+        .recovery-token {
+            background: #f9f9f9;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            margin: 20px 0;
+            font-size: 18px;
             text-align: center;
-            padding: 15px;
-        }
-        .footer a {
-            margin: 0 10px;
-        }
-        .footer img {
-            width: 24px;
-            height: 24px;
+            word-break: break-all;
         }
     </style>
 </head>
@@ -103,17 +93,12 @@ The OptiVest Team
         <div class="content">
             <h1>Recover Your Account</h1>
             <p>Hello {{.firstName}} {{.lastName}},</p>
-            <p>You recently requested to recover access to your OptiVest account. Please click the button below to enter your recovery codes and regain access:</p>
+            <p>You recently requested to recover access to your OptiVest account. Please follow the link below and use the provided recovery token:</p>
             <a href="{{.recoveryCodesURL}}" class="btn">Recover Account</a>
-            <p><strong>Important:</strong> This link will expire in <strong>15 minutes</strong>. If it expires or you did not make this request, please contact our support team immediately at <a href="mailto:support@optivest.com">support@optivest.com</a>.</p>
-            <p>If you need any assistance, feel free to reach out to us.</p>
+            <p><strong>Your Recovery Token:</strong></p>
+            <div class="recovery-token">{{.tokenPlaintext}}</div>
+            <p><strong>Note:</strong> Copy the above token and paste it into the recovery page after clicking the link. This link and token will expire in <strong>15 minutes</strong>. If it expires or you did not make this request, please contact our support team immediately at <a href="mailto:support@optivest.com">support@optivest.com</a>.</p>
             <p>Best regards,<br>The OptiVest Team</p>
-        </div>
-        <div class="footer">
-            <p>Follow us:</p>
-            <a href="https://twitter.com/OptiVest"><img src="https://img.icons8.com/ios-filled/50/000000/twitter.png" alt="Twitter"></a>
-            <a href="https://facebook.com/OptiVest"><img src="https://img.icons8.com/ios-filled/50/000000/facebook-new.png" alt="Facebook"></a>
-            <a href="https://instagram.com/OptiVest"><img src="https://img.icons8.com/ios-filled/50/000000/instagram-new.png" alt="Instagram"></a>
         </div>
     </div>
 </body>

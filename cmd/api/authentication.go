@@ -326,8 +326,7 @@ func (app *application) createPasswordResetTokenHandler(w http.ResponseWriter, r
 	}
 	// Return an error message if the user is not activated.
 	if !user.Activated {
-		v.AddError("email", "user account must be activated")
-		app.failedValidationResponse(w, r, v.Errors)
+		app.inactiveAccountResponse(w, r)
 		return
 	}
 
@@ -340,7 +339,7 @@ func (app *application) createPasswordResetTokenHandler(w http.ResponseWriter, r
 			switch {
 			case errors.Is(err, data.ErrInvalidTOTPCode):
 				// return an unauthorized error
-				app.authenticationRequiredResponse(w, r)
+				app.invalidAuthenticationTokenResponse(w, r)
 			default:
 				// otherwise return a 500 internal server error
 				app.serverErrorResponse(w, r, err)
@@ -562,7 +561,8 @@ func (app *application) initializeRecoveryByRecoveryCodes(w http.ResponseWriter,
 	// Email the user with their additional recovery token.
 	app.background(func() {
 		data := map[string]any{
-			"recoveryCodesURL": app.config.frontend.recoveryurl + token.Plaintext,
+			"recoveryCodesURL": app.config.frontend.recoveryurl,
+			"tokenPlaintext":   token.Plaintext,
 			"firstName":        user.FirstName,
 			"lastName":         user.LastName,
 		}

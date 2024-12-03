@@ -243,7 +243,7 @@ func main() {
 	flag.StringVar(&cfg.frontend.applogourl, "frontend-app-logo-url", "https://i.ibb.co/hZdMWvh/optivest-cropped.png", "Frontend App Logo URL")
 	flag.StringVar(&cfg.frontend.accountsettings, "frontend-account-settings", "http://localhost:5173/dashboard/account", "Frontend Account Settings URL")
 	flag.StringVar(&cfg.frontend.profileurl, "frontend-profile-url", "http://localhost:5173/dashboard/account", "Frontend Profile URL")
-	flag.StringVar(&cfg.frontend.recoveryurl, "frontend-recovery-url", "http://localhost:5173/password/recovery?token=", "Frontend Recovery URL")
+	flag.StringVar(&cfg.frontend.recoveryurl, "frontend-recovery-url", "http://localhost:5173/passwordreset/recovery/validate", "Frontend Recovery URL")
 	// Limit configuration
 	flag.IntVar(&cfg.limit.monthlyGoalProcessingBatchLimit, "monthly-goal-batch-limit", 100, "Batching Limit for Monthly Goal Processing")
 	flag.IntVar(&cfg.limit.recurringExpenseTrackerBurstLimit, "recurring-expense-burst-limit", 100, "Batch Limit for Recurring Expense Tracker")
