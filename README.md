@@ -3,7 +3,7 @@
  <img width=200px height=190px src="https://i.ibb.co/hZdMWvh/optivest-cropped.png" alt="Project logo"></a>
 </p>
 
-<h3 align="center">OptiVest</h3>
+<h3 align="center">OptiVest </h3>
 
 <div align="center">
 
