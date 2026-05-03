@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 	"time"
 
@@ -313,8 +314,10 @@ func (app *application) getStockInvestmentDataHandler(symbol string, riskFreeRat
 	}
 
 	if cachedResponse != nil {
-		// Data found in cache, perform and log the calculations
-		app.performAndLogCalculations(cachedResponse, riskFreeRate)
+		// Data found in cache, perform the calculations once. The previous
+		// version called performAndLogCalculations twice on this branch and
+		// discarded the first return value, doubling the CPU cost on every
+		// cache hit and producing duplicate "Average Daily Return" log lines.
 		returns, sharpe_ratio, sortino_ratio := app.performAndLogCalculations(cachedResponse, riskFreeRate)
 		newStockAnalysisStatistics := data.StockAnalysisStatistics{
 			Returns:      returns,
@@ -431,17 +434,40 @@ func (app *application) getAverageDailyReturn(timeseriesData *data.TimeSeriesDai
 	return dailyReturns
 }
 
+// filterTimeSeriesBetweenYears returns the daily entries from response whose
+// date falls in the inclusive [lastYear, currentYear] window, sorted by date
+// in ascending order.
+//
+// Sorting is essential: calculateDailyReturns walks the slice computing
+// (price[i] - price[i-1]) / price[i-1], which only produces meaningful
+// returns when consecutive entries are chronological neighbours. Iterating
+// response.DailyTimeSeries directly would inherit Go's randomized map order
+// and produce different Sharpe / Sortino ratios on every call — a real
+// financial-accuracy bug, not just a determinism nuisance.
 func filterTimeSeriesBetweenYears(response *data.TimeSeriesDailyResponse, lastYear int) []data.TimeSeriesDailyData {
-	var filteredData []data.TimeSeriesDailyData
+	type dated struct {
+		date  time.Time
+		entry data.TimeSeriesDailyData
+	}
+
 	currentYear := time.Now().Year()
+	pairs := make([]dated, 0, len(response.DailyTimeSeries))
 
 	for dateStr, tsData := range response.DailyTimeSeries {
 		date, err := time.Parse("2006-01-02", dateStr)
 		if err == nil && date.Year() <= currentYear && date.Year() >= lastYear {
-			filteredData = append(filteredData, tsData)
+			pairs = append(pairs, dated{date: date, entry: tsData})
 		}
 	}
 
+	sort.Slice(pairs, func(i, j int) bool {
+		return pairs[i].date.Before(pairs[j].date)
+	})
+
+	filteredData := make([]data.TimeSeriesDailyData, len(pairs))
+	for i, p := range pairs {
+		filteredData[i] = p.entry
+	}
 	return filteredData
 }
 
@@ -531,20 +557,32 @@ func downsideDeviation(returns []decimal.Decimal) decimal.Decimal {
 }
 
 // sharpeRatio() calculates the Sharpe ratio from a slice of decimal.Decimal values and a risk-free rate
+// sharpeRatio computes the Sharpe ratio for a series of returns. When the
+// returns have zero volatility (e.g. a brand-new symbol whose history is
+// effectively flat in the analysis window) the divisor is zero and the
+// shopspring/decimal Div panics; we return decimal.Zero in that case rather
+// than crashing the entire stock-analysis pipeline. Callers that need to
+// distinguish "undefined" from "exactly zero" can re-derive the volatility
+// themselves; we deliberately avoid surfacing an error here because the
+// surrounding code path is best-effort.
 func sharpeRatio(returns []decimal.Decimal, riskFreeRate decimal.Decimal) decimal.Decimal {
 	avgReturn := calculateAverage(returns)
-	volatility := calculateStandardDeviation(returns) // Assuming you have this function
-
-	// (avgReturn - riskFreeRate) / volatility
+	volatility := calculateStandardDeviation(returns)
+	if volatility.IsZero() {
+		return decimal.Zero
+	}
 	return avgReturn.Sub(riskFreeRate).Div(volatility)
 }
 
-// sortinoRatio() calculates the Sortino ratio from a slice of decimal.Decimal values and a risk-free rate
+// sortinoRatio computes the Sortino ratio. Same divide-by-zero treatment as
+// sharpeRatio: a stock with no negative returns in the window has zero
+// downside deviation, which would otherwise panic.
 func sortinoRatio(returns []decimal.Decimal, riskFreeRate decimal.Decimal) decimal.Decimal {
 	avgReturn := calculateAverage(returns)
-	downsideVolatility := downsideDeviation(returns) // Call downside deviation function
-
-	// (avgReturn - riskFreeRate) / downsideVolatility
+	downsideVolatility := downsideDeviation(returns)
+	if downsideVolatility.IsZero() {
+		return decimal.Zero
+	}
 	return avgReturn.Sub(riskFreeRate).Div(downsideVolatility)
 }
 
