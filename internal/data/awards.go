@@ -25,11 +25,11 @@ type Award struct {
 	UpdatedAt     time.Time `json:"updated_at"`
 }
 
-// CreateNewUserAward() is a method that creates a new user award
-// We accept a user ID and an award ID
-// We return a created at and an error if there is one
-func (m AwardManagerModel) CreateNewUserAward(userID int64, awardID int32) (time.Time, error) {
-	ctx, cancel := contextGenerator(context.Background(), DefaultAwManDBContextTimeout)
+// CreateNewUserAward creates a new user award row. ctx flows from the
+// caller (typically a goroutine driven by the awards background scheduler
+// or a request handler).
+func (m AwardManagerModel) CreateNewUserAward(ctx context.Context, userID int64, awardID int32) (time.Time, error) {
+	ctx, cancel := contextGenerator(ctx, DefaultAwManDBContextTimeout)
 	defer cancel()
 	// create a new user award
 	createdAt, err := m.DB.CreateNewUserAward(ctx, database.CreateNewUserAwardParams{
@@ -42,11 +42,9 @@ func (m AwardManagerModel) CreateNewUserAward(userID int64, awardID int32) (time
 	return createdAt, nil
 }
 
-// GetAwardByAwardID() is a method that returns an award by ID
-// We accept an award ID
-// We return an award and an error if there is one
-func (m AwardManagerModel) GetAwardByAwardID(awardID int32) (*Award, error) {
-	ctx, cancel := contextGenerator(context.Background(), DefaultAwManDBContextTimeout)
+// GetAwardByAwardID returns an award by ID. ctx flows from the caller.
+func (m AwardManagerModel) GetAwardByAwardID(ctx context.Context, awardID int32) (*Award, error) {
+	ctx, cancel := contextGenerator(ctx, DefaultAwManDBContextTimeout)
 	defer cancel()
 	// get an award by ID
 	awardRow, err := m.DB.GetAwardByAwardID(ctx, awardID)
@@ -58,10 +56,9 @@ func (m AwardManagerModel) GetAwardByAwardID(awardID int32) (*Award, error) {
 	return award, nil
 }
 
-// GetAllAwards() is a method that returns all the awards
-// We return a *slice of awards and an error if there is one
-func (m AwardManagerModel) GetAllAwards() ([]*Award, error) {
-	ctx, cancel := contextGenerator(context.Background(), DefaultAwManDBContextTimeout)
+// GetAllAwards returns all awards. ctx flows from the caller.
+func (m AwardManagerModel) GetAllAwards(ctx context.Context) ([]*Award, error) {
+	ctx, cancel := contextGenerator(ctx, DefaultAwManDBContextTimeout)
 	defer cancel()
 	// get all the awards
 	awardRows, err := m.DB.GetAllAwards(ctx)
@@ -81,11 +78,10 @@ func (m AwardManagerModel) GetAllAwards() ([]*Award, error) {
 	return awards, nil
 }
 
-// GetAllAwardsForUserByID() is a method that returns all the awards for a user by ID
-// We accept a user ID
-// We return a *slice of awards and an error if there is one
-func (m AwardManagerModel) GetAllAwardsForUserByID(userID int64) ([]*Award, error) {
-	ctx, cancel := contextGenerator(context.Background(), DefaultAwManDBContextTimeout)
+// GetAllAwardsForUserByID returns all the awards for a user by ID. ctx
+// flows from the caller.
+func (m AwardManagerModel) GetAllAwardsForUserByID(ctx context.Context, userID int64) ([]*Award, error) {
+	ctx, cancel := contextGenerator(ctx, DefaultAwManDBContextTimeout)
 	defer cancel()
 	// get all the awards for a user by ID
 	awardRows, err := m.DB.GetAllAwardsForUserByID(ctx, userID)

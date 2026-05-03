@@ -27,8 +27,10 @@ type BudgetIDNameSearchOption struct {
 	Name string `json:"name"`
 }
 
-func (s SearchOptionsModel) GetDistinctBudgetCategory(userID int64) ([]*BudgetCategorySearchOption, error) {
-	ctx, cancel := contextGenerator(context.Background(), DefaultSearchOptionDBContextTimeout)
+// GetDistinctBudgetCategory returns the distinct budget categories for a
+// user. ctx flows from the originating HTTP request.
+func (s SearchOptionsModel) GetDistinctBudgetCategory(ctx context.Context, userID int64) ([]*BudgetCategorySearchOption, error) {
+	ctx, cancel := contextGenerator(ctx, DefaultSearchOptionDBContextTimeout)
 	defer cancel()
 	// get data for the search options
 	budgetCategories, err := s.DB.GetDistinctBudgetCategory(ctx, userID)
@@ -56,9 +58,10 @@ func (s SearchOptionsModel) GetDistinctBudgetCategory(userID int64) ([]*BudgetCa
 	return searchOptions, nil
 }
 
-// GetDistincBudgetIdBudgetName returns the distinct budget id and budget name
-func (s SearchOptionsModel) GetDistinctBudgetIdBudgetName(userID int64) ([]*BudgetIDNameSearchOption, error) {
-	ctx, cancel := contextGenerator(context.Background(), DefaultSearchOptionDBContextTimeout)
+// GetDistinctBudgetIdBudgetName returns the distinct budget id and budget
+// name for a user. ctx flows from the originating HTTP request.
+func (s SearchOptionsModel) GetDistinctBudgetIdBudgetName(ctx context.Context, userID int64) ([]*BudgetIDNameSearchOption, error) {
+	ctx, cancel := contextGenerator(ctx, DefaultSearchOptionDBContextTimeout)
 	defer cancel()
 	// get data for the search options
 	budgets, err := s.DB.GetDistinctBudgetIdBudgetName(ctx, userID)

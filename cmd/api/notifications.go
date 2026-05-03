@@ -446,7 +446,7 @@ func (app *application) listenToAwardNotifications() {
 					}
 					// convert the award ID to int32
 					// get the award by award ID
-					award, err := app.models.AwardManager.GetAwardByAwardID(payload.AwardID)
+					award, err := app.models.AwardManager.GetAwardByAwardID(app.ctx, payload.AwardID)
 					if err != nil {
 						app.logger.Error("Failed to get award by award ID", zap.Error(err))
 						continue

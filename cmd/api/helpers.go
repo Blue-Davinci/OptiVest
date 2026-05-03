@@ -452,7 +452,7 @@ func (app *application) aunthenticatorHelper(r *http.Request) (*data.User, error
 	// again calling the invalidAuthenticationTokenResponse() helper if no
 	// matching record was found. IMPORTANT: Notice that we are using
 	// ScopeAuthentication as the first parameter here.
-	user, err := app.models.Users.GetForToken(data.ScopeAuthentication, token, app.config.encryption.key)
+	user, err := app.models.Users.GetForToken(r.Context(), data.ScopeAuthentication, token, app.config.encryption.key)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):

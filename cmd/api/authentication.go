@@ -39,7 +39,7 @@ func (app *application) createAuthenticationApiKeyHandler(w http.ResponseWriter,
 		return
 	}
 	// get the user from the database
-	user, err := app.models.Users.GetByEmail(input.Email, app.config.encryption.key)
+	user, err := app.models.Users.GetByEmail(r.Context(), input.Email, app.config.encryption.key)
 	if err != nil {
 		switch {
 		// if the user is not found, we return an invalid credentials response
@@ -115,7 +115,7 @@ func (app *application) performMFAOnLogin(w http.ResponseWriter, r *http.Request
 	// Generate a token with Scope mfa-login which will be used as a validation token
 	// and stored in redis as the value to our key. We will also send it to the user and
 	// require the user to send it back to us to validate their login
-	mfaToken, err := app.models.Tokens.New(user.ID, 5*time.Minute, data.ScopeMFALogin)
+	mfaToken, err := app.models.Tokens.New(r.Context(), user.ID, 5*time.Minute, data.ScopeMFALogin)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
@@ -158,7 +158,7 @@ func (app *application) performMFAOnLogin(w http.ResponseWriter, r *http.Request
 // time to whatever you want from the caller.
 func (app *application) generateAuthenticationTokenAndLogin(user *data.User, timeToLeave time.Duration, scope string, w http.ResponseWriter, r *http.Request) {
 	// Generate a new authentication token with a 72-hour expiry time and the scope 'authentication'.
-	bearer_token, err := app.models.Tokens.New(user.ID, timeToLeave, scope)
+	bearer_token, err := app.models.Tokens.New(r.Context(), user.ID, timeToLeave, scope)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
@@ -217,7 +217,7 @@ func (app *application) validateMFALoginAttemptHandler(w http.ResponseWriter, r 
 		return
 	}
 	// get the user from the database
-	user, err := app.models.Users.GetByEmail(input.Email, app.config.encryption.key)
+	user, err := app.models.Users.GetByEmail(r.Context(), input.Email, app.config.encryption.key)
 	if err != nil {
 		switch {
 		// if the user is not found, we return an invalid credentials response
@@ -279,7 +279,7 @@ func (app *application) validateMFALoginAttemptHandler(w http.ResponseWriter, r 
 	now := time.Now()
 	user.MFALastChecked = &now
 	// Save the user to the DB
-	err = app.models.Users.UpdateUser(user, app.config.encryption.key)
+	err = app.models.Users.UpdateUser(r.Context(), user, app.config.encryption.key)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
@@ -312,7 +312,7 @@ func (app *application) createPasswordResetTokenHandler(w http.ResponseWriter, r
 	}
 	// Try to retrieve the corresponding user record for the email address. If it can't
 	// be found, return an error message to the client.
-	user, err := app.models.Users.GetByEmail(input.Email, app.config.encryption.key)
+	user, err := app.models.Users.GetByEmail(r.Context(), input.Email, app.config.encryption.key)
 	if err != nil {
 		switch {
 		// We willl use a generic error message to avoid leaking information about which
@@ -350,7 +350,7 @@ func (app *application) createPasswordResetTokenHandler(w http.ResponseWriter, r
 	}
 
 	// Otherwise, create a new password reset token with a 45-minute expiry time.
-	token, err := app.models.Tokens.New(user.ID, 45*time.Minute, data.ScopePasswordReset)
+	token, err := app.models.Tokens.New(r.Context(), user.ID, 45*time.Minute, data.ScopePasswordReset)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
@@ -450,7 +450,7 @@ func (app *application) createManualActivationTokenHandler(w http.ResponseWriter
 	}
 	// Try to retrieve the corresponding user record for the email address. If it can't
 	// be found, return an error message to the client.
-	user, err := app.models.Users.GetByEmail(input.Email, app.config.encryption.key)
+	user, err := app.models.Users.GetByEmail(r.Context(), input.Email, app.config.encryption.key)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -468,7 +468,7 @@ func (app *application) createManualActivationTokenHandler(w http.ResponseWriter
 		return
 	}
 	// Otherwise, create a new activation token.
-	token, err := app.models.Tokens.New(user.ID, 3*24*time.Hour, data.ScopeActivation)
+	token, err := app.models.Tokens.New(r.Context(), user.ID, 3*24*time.Hour, data.ScopeActivation)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
@@ -521,7 +521,7 @@ func (app *application) initializeRecoveryByRecoveryCodes(w http.ResponseWriter,
 	}
 	// Try to retrieve the corresponding user record for the email address. If it can't
 	// be found, return an error message to the client.
-	user, err := app.models.Users.GetByEmail(input.Email, app.config.encryption.key)
+	user, err := app.models.Users.GetByEmail(r.Context(), input.Email, app.config.encryption.key)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -545,7 +545,7 @@ func (app *application) initializeRecoveryByRecoveryCodes(w http.ResponseWriter,
 		return
 	}
 	// Otherwise, create a new recovery token with 15-minute expiry time.
-	token, err := app.models.Tokens.New(user.ID, 15*time.Minute, data.ScopeRecovery)
+	token, err := app.models.Tokens.New(r.Context(), user.ID, 15*time.Minute, data.ScopeRecovery)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
@@ -601,7 +601,7 @@ func (app *application) validateRecoveryCodeHandler(w http.ResponseWriter, r *ht
 		return
 	}
 	// get the user from the database
-	user, err := app.models.Users.GetForToken(data.ScopeRecovery, input.TokenPlaintext, app.config.encryption.key)
+	user, err := app.models.Users.GetForToken(r.Context(), data.ScopeRecovery, input.TokenPlaintext, app.config.encryption.key)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -613,7 +613,7 @@ func (app *application) validateRecoveryCodeHandler(w http.ResponseWriter, r *ht
 		return
 	}
 	// get the recovery code from the database
-	recoveryCode, err := app.models.MFAManager.GetRecoveryCodesByUserID(user.ID)
+	recoveryCode, err := app.models.MFAManager.GetRecoveryCodesByUserID(r.Context(), user.ID)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
@@ -638,13 +638,13 @@ func (app *application) validateRecoveryCodeHandler(w http.ResponseWriter, r *ht
 	user.MFAEnabled = false
 	user.MFASecret = ""
 	// Save the user to the DB
-	err = app.models.Users.UpdateUser(user, app.config.encryption.key)
+	err = app.models.Users.UpdateUser(r.Context(), user, app.config.encryption.key)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
 	}
 	// set the recovery code to used in the database
-	err = app.models.MFAManager.MarkRecoveryCodeAsUsed(recoveryCode.ID, user.ID)
+	err = app.models.MFAManager.MarkRecoveryCodeAsUsed(r.Context(), recoveryCode.ID, user.ID)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return

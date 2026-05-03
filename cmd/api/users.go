@@ -60,7 +60,7 @@ func (app *application) registerUserHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	// insert our user to the DB
-	err = app.models.Users.CreateNewUser(user, app.config.encryption.key)
+	err = app.models.Users.CreateNewUser(r.Context(), user, app.config.encryption.key)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrDuplicateEmail):
@@ -75,7 +75,7 @@ func (app *application) registerUserHandler(w http.ResponseWriter, r *http.Reque
 	app.logger.Info("registering a new user", zap.String("email", user.Email), zap.Int("user id", int(user.ID)))
 	// After the user record has been created in the database, generate a new activation
 	// token for the user.
-	token, err := app.models.Tokens.New(user.ID, data.DefaultTokenExpiryTime, data.ScopeActivation)
+	token, err := app.models.Tokens.New(r.Context(), user.ID, data.DefaultTokenExpiryTime, data.ScopeActivation)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
@@ -148,7 +148,7 @@ func (app *application) activateUserHandler(w http.ResponseWriter, r *http.Reque
 	// Retrieve the details of the user associated with the token using the
 	// GetForToken() method. If no matching record is found, then we let the
 	// client know that the token they provided is not valid.
-	user, err := app.models.Users.GetForToken(data.ScopeActivation, input.TokenPlaintext, app.config.encryption.key)
+	user, err := app.models.Users.GetForToken(r.Context(), data.ScopeActivation, input.TokenPlaintext, app.config.encryption.key)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -164,7 +164,7 @@ func (app *application) activateUserHandler(w http.ResponseWriter, r *http.Reque
 	user.Activated = true
 	// Save the updated user record in our database, checking for any edit conflicts in
 	// the same way that we did for our movie records.
-	err = app.models.Users.UpdateUser(user, app.config.encryption.key)
+	err = app.models.Users.UpdateUser(r.Context(), user, app.config.encryption.key)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrEditConflict):
@@ -176,7 +176,7 @@ func (app *application) activateUserHandler(w http.ResponseWriter, r *http.Reque
 	}
 	// If everything went successfully, then we delete all activation tokens for the
 	// user.
-	err = app.models.Tokens.DeleteAllForUser(data.ScopeActivation, user.ID)
+	err = app.models.Tokens.DeleteAllForUser(r.Context(), data.ScopeActivation, user.ID)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
@@ -244,7 +244,7 @@ func (app *application) updateUserPasswordHandler(w http.ResponseWriter, r *http
 	}
 	// Retrieve the details of the user associated with the password reset token,
 	// returning an error message if no matching record was found.
-	user, err := app.models.Users.GetForToken(data.ScopePasswordReset, input.TokenPlaintext, app.config.encryption.key)
+	user, err := app.models.Users.GetForToken(r.Context(), data.ScopePasswordReset, input.TokenPlaintext, app.config.encryption.key)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -263,7 +263,7 @@ func (app *application) updateUserPasswordHandler(w http.ResponseWriter, r *http
 	}
 	// Save the updated user record in our database, checking for any edit conflicts as
 	// normal.
-	err = app.models.Users.UpdateUser(user, app.config.encryption.key)
+	err = app.models.Users.UpdateUser(r.Context(), user, app.config.encryption.key)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrEditConflict):
@@ -274,7 +274,7 @@ func (app *application) updateUserPasswordHandler(w http.ResponseWriter, r *http
 		return
 	}
 	// If everything was successful, then delete all password reset tokens for the user.
-	err = app.models.Tokens.DeleteAllForUser(data.ScopePasswordReset, user.ID)
+	err = app.models.Tokens.DeleteAllForUser(r.Context(), data.ScopePasswordReset, user.ID)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
@@ -306,13 +306,13 @@ func (app *application) getUserInformationHandler(w http.ResponseWriter, r *http
 	// Get the user from the context
 	user := app.contextGetUser(r)
 	// get the awards for the user
-	awards, err := app.models.AwardManager.GetAllAwardsForUserByID(user.ID)
+	awards, err := app.models.AwardManager.GetAllAwardsForUserByID(r.Context(), user.ID)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
 	}
 	// get the account rating and statistics for the user
-	accountStats, err := app.models.AlgoManager.GetAccountStatisticsByUserId(user.ID, user.CreatedAt, awards)
+	accountStats, err := app.models.AlgoManager.GetAccountStatisticsByUserId(r.Context(), user.ID, user.CreatedAt, awards)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
@@ -394,7 +394,7 @@ func (app *application) updateUserInformationHandler(w http.ResponseWriter, r *h
 		return
 	}
 	// update the user in the database
-	err = app.models.Users.UpdateUser(user, app.config.encryption.key)
+	err = app.models.Users.UpdateUser(r.Context(), user, app.config.encryption.key)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrEditConflict):

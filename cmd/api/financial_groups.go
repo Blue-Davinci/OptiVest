@@ -267,7 +267,7 @@ func (app *application) createNewGroupInvitation(w http.ResponseWriter, r *http.
 		return
 	}
 	// check if invitee exists
-	inviteeUser, err := app.models.Users.GetByEmail(input.InviteeUserEmail, app.config.encryption.key)
+	inviteeUser, err := app.models.Users.GetByEmail(r.Context(), input.InviteeUserEmail, app.config.encryption.key)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):

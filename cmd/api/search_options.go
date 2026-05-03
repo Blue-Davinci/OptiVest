@@ -14,7 +14,7 @@ func (app *application) getDistinctBudgetCategoryHandler(w http.ResponseWriter, 
 	// extract user
 	userID := app.contextGetUser(r).ID
 	// get the data
-	budgetCategories, err := app.models.SearchOptions.GetDistinctBudgetCategory(userID)
+	budgetCategories, err := app.models.SearchOptions.GetDistinctBudgetCategory(r.Context(), userID)
 	if err != nil {
 		switch {
 		case err == data.ErrGeneralRecordNotFound:
@@ -39,7 +39,7 @@ func (app *application) getDistinctBudgetIdBudgetNameHandler(w http.ResponseWrit
 	// extract user
 	userID := app.contextGetUser(r).ID
 	// get the data
-	budgetIDNames, err := app.models.SearchOptions.GetDistinctBudgetIdBudgetName(userID)
+	budgetIDNames, err := app.models.SearchOptions.GetDistinctBudgetIdBudgetName(r.Context(), userID)
 	if err != nil {
 		switch {
 		case err == data.ErrGeneralRecordNotFound:

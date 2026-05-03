@@ -54,7 +54,7 @@ func (app *application) createContactUsHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 	// save the contact us request in the database
-	err = app.models.GeneralManagerModel.CreateContactUs(user.ID, contactUs)
+	err = app.models.GeneralManagerModel.CreateContactUs(r.Context(), user.ID, contactUs)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return

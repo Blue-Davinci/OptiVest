@@ -63,10 +63,11 @@ func ValidateContactUs(v *validator.Validator, contactUs *ContactUs) {
 	ValidateName(v, contactUs.Message, "message")
 }
 
-// CreateContactUs adds a contact Us request for a user with a specific email
-// We recieve a userID, if any, and a contact us struct
-func (m GeneralManagerModel) CreateContactUs(userID int64, contactUs *ContactUs) error {
-	ctx, cancel := contextGenerator(context.Background(), DefaultGenManDBContextTimeout)
+// CreateContactUs adds a contact-us request for a user with a specific
+// email. We receive a userID (if any) and a contact-us struct. ctx flows
+// from the originating HTTP request.
+func (m GeneralManagerModel) CreateContactUs(ctx context.Context, userID int64, contactUs *ContactUs) error {
+	ctx, cancel := contextGenerator(ctx, DefaultGenManDBContextTimeout)
 	defer cancel()
 	// create a contact us request
 	updatedContactUs, err := m.DB.CreateContactUs(ctx, database.CreateContactUsParams{
