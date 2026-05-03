@@ -186,7 +186,7 @@ func (app *application) trackMonthlyGoals() {
 // It will be called every day at midnight to update the expired group invitations.
 func (app *application) trackExpiredGroupInvitations() {
 	app.logger.Info("Starting the expired group invitations tracking cron job..", zap.String("time", time.Now().String()))
-	err := app.models.FinancialGroupManager.UpdateExpiredGroupInvitations()
+	err := app.models.FinancialGroupManager.UpdateExpiredGroupInvitations(app.ctx)
 	if err != nil {
 		app.logger.Error("Error tracking expired group invitations", zap.Error(err))
 	}

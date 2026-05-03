@@ -42,7 +42,7 @@ func (app *application) createNewUserGroupHandler(w http.ResponseWriter, r *http
 		return
 	}
 	// create a new group
-	err = app.models.FinancialGroupManager.CreateNewUserGroup(app.contextGetUser(r).ID, group)
+	err = app.models.FinancialGroupManager.CreateNewUserGroup(r.Context(), app.contextGetUser(r).ID, group)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGroupNameExists):
@@ -81,7 +81,7 @@ func (app *application) updateUserGroupHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 	// get the group by the details
-	group, err := app.models.FinancialGroupManager.GetGroupById(groupID)
+	group, err := app.models.FinancialGroupManager.GetGroupById(r.Context(), groupID)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -120,7 +120,7 @@ func (app *application) updateUserGroupHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 	// update the group
-	err = app.models.FinancialGroupManager.UpdateUserGroup(groupID, app.contextGetUser(r).ID, group)
+	err = app.models.FinancialGroupManager.UpdateUserGroup(r.Context(), groupID, app.contextGetUser(r).ID, group)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGroupNameExists):
@@ -153,7 +153,7 @@ func (app *application) updateGroupUserRoleHandler(w http.ResponseWriter, r *htt
 		return
 	}
 	// get the group by the details
-	_, err = app.models.FinancialGroupManager.GetGroupById(groupID)
+	_, err = app.models.FinancialGroupManager.GetGroupById(r.Context(), groupID)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -186,7 +186,7 @@ func (app *application) updateGroupUserRoleHandler(w http.ResponseWriter, r *htt
 		return
 	}
 	// update the user role
-	updatedAt, err := app.models.FinancialGroupManager.UpdateGroupUserRole(groupID, input.UserID, app.contextGetUser(r).ID, mappedRole)
+	updatedAt, err := app.models.FinancialGroupManager.UpdateGroupUserRole(r.Context(), groupID, input.UserID, app.contextGetUser(r).ID, mappedRole)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrEditConflict):
@@ -232,7 +232,7 @@ func (app *application) createNewGroupInvitation(w http.ResponseWriter, r *http.
 	}
 
 	// get the group by the details
-	group, err := app.models.FinancialGroupManager.GetGroupById(input.GroupID)
+	group, err := app.models.FinancialGroupManager.GetGroupById(r.Context(), input.GroupID)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -256,7 +256,7 @@ func (app *application) createNewGroupInvitation(w http.ResponseWriter, r *http.
 		return
 	}
 	// check if the group has reached its maximum member count
-	isMaxedOut, err := app.models.FinancialGroupManager.CheckIfGroupMembersAreMaxedOut(input.GroupID)
+	isMaxedOut, err := app.models.FinancialGroupManager.CheckIfGroupMembersAreMaxedOut(r.Context(), input.GroupID)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
@@ -302,13 +302,13 @@ func (app *application) createNewGroupInvitation(w http.ResponseWriter, r *http.
 		return
 	}
 	// delete any existing group invitation that is not pending
-	err = app.models.FinancialGroupManager.DeleteNonPendingGroupInvitationsForUser(input.GroupID, input.InviteeUserEmail)
+	err = app.models.FinancialGroupManager.DeleteNonPendingGroupInvitationsForUser(r.Context(), input.GroupID, input.InviteeUserEmail)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
 	}
 	// create a new group invitation
-	err = app.models.FinancialGroupManager.CreateNewGroupInvitation(app.contextGetUser(r).ID, groupInvitation)
+	err = app.models.FinancialGroupManager.CreateNewGroupInvitation(r.Context(), app.contextGetUser(r).ID, groupInvitation)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGroupInvitationExists):
@@ -355,7 +355,7 @@ func (app *application) createNewPublicMembershipHandler(w http.ResponseWriter, 
 	// make a validator
 	v := validator.New()
 	// get the group by the details
-	group, err := app.models.FinancialGroupManager.GetGroupById(input.GroupID)
+	group, err := app.models.FinancialGroupManager.GetGroupById(r.Context(), input.GroupID)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -373,7 +373,7 @@ func (app *application) createNewPublicMembershipHandler(w http.ResponseWriter, 
 		return
 	}
 	// check if the group's members are already maxed out
-	isMaxedOut, err := app.models.FinancialGroupManager.CheckIfGroupMembersAreMaxedOut(input.GroupID)
+	isMaxedOut, err := app.models.FinancialGroupManager.CheckIfGroupMembersAreMaxedOut(r.Context(), input.GroupID)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
@@ -384,7 +384,7 @@ func (app *application) createNewPublicMembershipHandler(w http.ResponseWriter, 
 		return
 	}
 	// create a new public membership
-	membershipID, err := app.models.FinancialGroupManager.CreateNewPublicMembership(app.contextGetUser(r).ID, input.GroupID)
+	membershipID, err := app.models.FinancialGroupManager.CreateNewPublicMembership(r.Context(), app.contextGetUser(r).ID, input.GroupID)
 	// if we get a ErrUserGroupMembershipExists error, we will return a 409
 	if err != nil {
 		switch {
@@ -424,7 +424,7 @@ func (app *application) updateGroupInvitationStatusHandler(w http.ResponseWriter
 		return
 	}
 	// get the group invitation by the details
-	groupInvitation, err := app.models.FinancialGroupManager.GetGroupInvitationById(groupID, input.InviteeEmail)
+	groupInvitation, err := app.models.FinancialGroupManager.GetGroupInvitationById(r.Context(), groupID, input.InviteeEmail)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -452,7 +452,7 @@ func (app *application) updateGroupInvitationStatusHandler(w http.ResponseWriter
 		return
 	}
 	// update the group invitation status
-	err = app.models.FinancialGroupManager.UpdateGroupInvitationStatus(mappedStatus, groupInvitation)
+	err = app.models.FinancialGroupManager.UpdateGroupInvitationStatus(r.Context(), mappedStatus, groupInvitation)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrEditConflict):
@@ -509,7 +509,7 @@ func (app *application) createNewGroupGoalHandler(w http.ResponseWriter, r *http
 		return
 	}
 	// check if the group exists
-	_, err = app.models.FinancialGroupManager.GetGroupById(input.GroupID)
+	_, err = app.models.FinancialGroupManager.GetGroupById(r.Context(), input.GroupID)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -536,7 +536,7 @@ func (app *application) createNewGroupGoalHandler(w http.ResponseWriter, r *http
 		return
 	}
 	// create a new group goal
-	err = app.models.FinancialGroupManager.CreateNewGroupGoal(app.contextGetUser(r).ID, groupGoal)
+	err = app.models.FinancialGroupManager.CreateNewGroupGoal(r.Context(), app.contextGetUser(r).ID, groupGoal)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGroupNameExists):
@@ -577,7 +577,7 @@ func (app *application) updateGroupGoalHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 	// get the group goal by the details
-	groupGoal, err := app.models.FinancialGroupManager.GetGroupGoalById(groupID)
+	groupGoal, err := app.models.FinancialGroupManager.GetGroupGoalById(r.Context(), groupID)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -604,7 +604,7 @@ func (app *application) updateGroupGoalHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 	// update the group goal
-	err = app.models.FinancialGroupManager.UpdateGroupGoal(app.contextGetUser(r).ID, groupGoal)
+	err = app.models.FinancialGroupManager.UpdateGroupGoal(r.Context(), app.contextGetUser(r).ID, groupGoal)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGroupNameExists):
@@ -642,7 +642,7 @@ func (app *application) createNewGroupTransactionHandler(w http.ResponseWriter, 
 		return
 	}
 	// check if user is member and group exists
-	err = app.models.FinancialGroupManager.CheckIfGroupExistsAndUserIsMember(app.contextGetUser(r).ID, input.GroupID)
+	err = app.models.FinancialGroupManager.CheckIfGroupExistsAndUserIsMember(r.Context(), app.contextGetUser(r).ID, input.GroupID)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -653,7 +653,7 @@ func (app *application) createNewGroupTransactionHandler(w http.ResponseWriter, 
 		return
 	}
 	// check if Goal exists
-	groupGoal, err := app.models.FinancialGroupManager.GetGroupGoalById(input.GoalID)
+	groupGoal, err := app.models.FinancialGroupManager.GetGroupGoalById(r.Context(), input.GoalID)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -685,7 +685,7 @@ func (app *application) createNewGroupTransactionHandler(w http.ResponseWriter, 
 		return
 	}
 	// create a new group transaction
-	err = app.models.FinancialGroupManager.CreateNewGroupTransaction(app.contextGetUser(r).ID, groupTransaction)
+	err = app.models.FinancialGroupManager.CreateNewGroupTransaction(r.Context(), app.contextGetUser(r).ID, groupTransaction)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrOverFunding):
@@ -716,7 +716,7 @@ func (app *application) deleteGroupTransactionHandler(w http.ResponseWriter, r *
 		return
 	}
 	// delete the group transaction
-	_, err = app.models.FinancialGroupManager.DeleteGroupTransaction(app.contextGetUser(r).ID, groupTransactionID)
+	_, err = app.models.FinancialGroupManager.DeleteGroupTransaction(r.Context(), app.contextGetUser(r).ID, groupTransactionID)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -751,7 +751,7 @@ func (app *application) createNewGroupExpenseHandler(w http.ResponseWriter, r *h
 		return
 	}
 	// check if user is member and group exists
-	err = app.models.FinancialGroupManager.CheckIfGroupExistsAndUserIsMember(app.contextGetUser(r).ID, input.GroupID)
+	err = app.models.FinancialGroupManager.CheckIfGroupExistsAndUserIsMember(r.Context(), app.contextGetUser(r).ID, input.GroupID)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -776,7 +776,7 @@ func (app *application) createNewGroupExpenseHandler(w http.ResponseWriter, r *h
 		return
 	}
 	// create a new group expense
-	err = app.models.FinancialGroupManager.CreateNewGroupExpense(app.contextGetUser(r).ID, groupExpense)
+	err = app.models.FinancialGroupManager.CreateNewGroupExpense(r.Context(), app.contextGetUser(r).ID, groupExpense)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
@@ -799,7 +799,7 @@ func (app *application) deleteGroupExpenseHandler(w http.ResponseWriter, r *http
 		return
 	}
 	// delete the group expense
-	_, err = app.models.FinancialGroupManager.DeleteGroupExpense(app.contextGetUser(r).ID, groupExpenseID)
+	_, err = app.models.FinancialGroupManager.DeleteGroupExpense(r.Context(), app.contextGetUser(r).ID, groupExpenseID)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -821,7 +821,7 @@ func (app *application) deleteGroupExpenseHandler(w http.ResponseWriter, r *http
 // we will return a list of groups created by the user
 func (app *application) getAllGroupsCreatedByUserHandler(w http.ResponseWriter, r *http.Request) {
 	// get all the groups created by the user
-	groups, err := app.models.FinancialGroupManager.GetAllGroupsCreatedByUser(app.contextGetUser(r).ID)
+	groups, err := app.models.FinancialGroupManager.GetAllGroupsCreatedByUser(r.Context(), app.contextGetUser(r).ID)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -859,7 +859,7 @@ func (app *application) getAllPublicGroupsHandler(w http.ResponseWriter, r *http
 	// None of the sort values are supported for this endpoint
 	input.Filters.SortSafelist = []string{"", ""}
 	// get all the public groups
-	groups, metadata, err := app.models.FinancialGroupManager.GetAllPublicGroups(app.contextGetUser(r).ID, input.Name, input.Filters)
+	groups, metadata, err := app.models.FinancialGroupManager.GetAllPublicGroups(r.Context(), app.contextGetUser(r).ID, input.Name, input.Filters)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -882,7 +882,7 @@ func (app *application) getAllPublicGroupsHandler(w http.ResponseWriter, r *http
 func (app *application) getAllGroupsUserIsMemberOfHandler(w http.ResponseWriter, r *http.Request) {
 	app.logger.Info("getting all groups user is a member of")
 	// get all the groups the user is a member of
-	groups, err := app.models.FinancialGroupManager.GetAllGroupsUserIsMemberOf(app.contextGetUser(r).ID)
+	groups, err := app.models.FinancialGroupManager.GetAllGroupsUserIsMemberOf(r.Context(), app.contextGetUser(r).ID)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -934,7 +934,7 @@ func (app *application) getGroupTransactionsByGroupIdHandler(w http.ResponseWrit
 		return
 	}
 	// get all the transactions for the group
-	transactions, metadata, err := app.models.FinancialGroupManager.GetGroupTransactionsByGroupId(app.contextGetUser(r).ID, groupID, input.GoalID, input.Filters)
+	transactions, metadata, err := app.models.FinancialGroupManager.GetGroupTransactionsByGroupId(r.Context(), app.contextGetUser(r).ID, groupID, input.GoalID, input.Filters)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -987,7 +987,7 @@ func (app *application) getGroupExpensesByGroupIdHandler(w http.ResponseWriter, 
 		return
 	}
 	// get all the expenses for the group
-	expenses, metadata, err := app.models.FinancialGroupManager.GetGroupExpensesByGroupId(app.contextGetUser(r).ID, groupID, input.Category, input.Filters)
+	expenses, metadata, err := app.models.FinancialGroupManager.GetGroupExpensesByGroupId(r.Context(), app.contextGetUser(r).ID, groupID, input.Category, input.Filters)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -1022,7 +1022,7 @@ func (app *application) getDetailedGroupByIdHandler(w http.ResponseWriter, r *ht
 		return
 	}
 	// get the group by the details
-	group, err := app.models.FinancialGroupManager.GetDetailedGroupById(app.contextGetUser(r).ID, groupID)
+	group, err := app.models.FinancialGroupManager.GetDetailedGroupById(r.Context(), app.contextGetUser(r).ID, groupID)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -1069,7 +1069,7 @@ func (app *application) adminDeleteGroupMemberHandler(w http.ResponseWriter, r *
 		return
 	}
 	// perform the Delete Request
-	_, err = app.models.FinancialGroupManager.AdminDeleteGroupMember(app.contextGetUser(r).ID, groupID, memberID)
+	_, err = app.models.FinancialGroupManager.AdminDeleteGroupMember(r.Context(), app.contextGetUser(r).ID, groupID, memberID)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -1103,7 +1103,7 @@ func (app *application) userLeaveGroupHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 	// delete the user from the group
-	_, err = app.models.FinancialGroupManager.UserLeaveGroup(app.contextGetUser(r).ID, groupID)
+	_, err = app.models.FinancialGroupManager.UserLeaveGroup(r.Context(), app.contextGetUser(r).ID, groupID)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):

@@ -45,7 +45,7 @@ func (app *application) updateBondAnalysis(ctx context.Context, userID int64, bo
 	bond.SortinoRatio = bondAnalysisStatistics.SortinoRatio
 
 	// save the bond analysis
-	err = app.models.InvestmentPortfolioManager.CreateBondAnalysis(userID, bond.BondSymbol, bond)
+	err = app.models.InvestmentPortfolioManager.CreateBondAnalysis(ctx, userID, bond.BondSymbol, bond)
 	if err != nil {
 		return err
 	}
@@ -74,7 +74,7 @@ func (app *application) updateStockAnalysis(ctx context.Context, userID int64, s
 	stock.SectorPerformance = sectorPerformance
 	stock.SentimentLabel = stockAnalysisStatistics.MostFrequentLabel
 	// save the stock analysis using CreateStockAnalysis passing userID, riskFreeRate, stockSymbol, stockAnalysis
-	err = app.models.InvestmentPortfolioManager.CreateStockAnalysis(userID, riskFreeRate, stock.StockSymbol, stock)
+	err = app.models.InvestmentPortfolioManager.CreateStockAnalysis(ctx, userID, riskFreeRate, stock.StockSymbol, stock)
 	if err != nil {
 		return err
 	}

@@ -292,9 +292,9 @@ func ValidateGroupExpense(v *validator.Validator, expense *GroupExpense) {
 
 // CheckIfGroupMembersAreMaxedOut() checks if the group has reached its maximum member count
 // We will take the group ID and return a boolean and an error
-func (m FinancialGroupManagerModel) CheckIfGroupMembersAreMaxedOut(groupID int64) (bool, error) {
+func (m FinancialGroupManagerModel) CheckIfGroupMembersAreMaxedOut(ctx context.Context, groupID int64) (bool, error) {
 	// get our context
-	ctx, cancel := contextGenerator(context.Background(), DefualtFinManGroupsContextTimeout)
+	ctx, cancel := contextGenerator(ctx, DefualtFinManGroupsContextTimeout)
 	defer cancel()
 	// check the group
 	memberData, err := m.DB.CheckIfGroupMembersAreMaxedOut(ctx, sql.NullInt64{Int64: groupID, Valid: true})
@@ -309,9 +309,9 @@ func (m FinancialGroupManagerModel) CheckIfGroupMembersAreMaxedOut(groupID int64
 
 // GetGroupById() retrieves a group by its ID
 // We will take the group ID as an argument and return the group and an error
-func (m FinancialGroupManagerModel) GetGroupById(groupID int64) (*Group, error) {
+func (m FinancialGroupManagerModel) GetGroupById(ctx context.Context, groupID int64) (*Group, error) {
 	// get our context
-	ctx, cancel := contextGenerator(context.Background(), DefualtFinManGroupsContextTimeout)
+	ctx, cancel := contextGenerator(ctx, DefualtFinManGroupsContextTimeout)
 	defer cancel()
 	// get the group
 	returnedGroup, err := m.DB.GetGroupById(ctx, groupID)
@@ -333,8 +333,8 @@ func (m FinancialGroupManagerModel) GetGroupById(groupID int64) (*Group, error) 
 // This endpoint supports pagination as well ass a name search for the group name
 // We take in a filter as well as a name's query
 // We return an []*Enriched, Metadata and error if any occurred
-func (m FinancialGroupManagerModel) GetAllPublicGroups(userID int64, groupName string, filters Filters) ([]*EnrichedPublicGroup, Metadata, error) {
-	ctx, cancel := contextGenerator(context.Background(), DefualtFinManGroupsContextTimeout)
+func (m FinancialGroupManagerModel) GetAllPublicGroups(ctx context.Context, userID int64, groupName string, filters Filters) ([]*EnrichedPublicGroup, Metadata, error) {
+	ctx, cancel := contextGenerator(ctx, DefualtFinManGroupsContextTimeout)
 	defer cancel()
 	// get the group info
 	publicGroups, err := m.DB.GetAllPublicGroups(ctx, database.GetAllPublicGroupsParams{
@@ -385,8 +385,8 @@ func (m FinancialGroupManagerModel) GetAllPublicGroups(userID int64, groupName s
 
 // GetAllGroupsCreatedByUser() retrieves all the groups created by a user
 // We will take the user ID as an argument and return [] EnrichedGroup and an error
-func (m FinancialGroupManagerModel) GetAllGroupsCreatedByUser(userID int64) ([]*EnrichedGroup, error) {
-	ctx, cancel := contextGenerator(context.Background(), DefualtFinManGroupsContextTimeout)
+func (m FinancialGroupManagerModel) GetAllGroupsCreatedByUser(ctx context.Context, userID int64) ([]*EnrichedGroup, error) {
+	ctx, cancel := contextGenerator(ctx, DefualtFinManGroupsContextTimeout)
 	defer cancel()
 	// get the groups
 	groups, err := m.DB.GetAllGroupsCreatedByUser(ctx, sql.NullInt64{Int64: userID, Valid: true})
@@ -428,9 +428,9 @@ func (m FinancialGroupManagerModel) GetAllGroupsCreatedByUser(userID int64) ([]*
 // Pending invitations jsnon array (which will be unmarshalled to the GroupInvitation struct)
 // The group goals json array (which will be unmarshalled to the GroupGoal struct)
 // And the totals for the total group transactions, total group expenses and the goal_with_most_transactions
-func (m FinancialGroupManagerModel) GetDetailedGroupById(userID, groupID int64) (*DetailedGroup, error) {
+func (m FinancialGroupManagerModel) GetDetailedGroupById(ctx context.Context, userID, groupID int64) (*DetailedGroup, error) {
 	// get our context
-	ctx, cancel := contextGenerator(context.Background(), DefualtFinManGroupsContextTimeout)
+	ctx, cancel := contextGenerator(ctx, DefualtFinManGroupsContextTimeout)
 	defer cancel()
 	// get the group
 	groupDetails, err := m.DB.GetDetailedGroupById(ctx, database.GetDetailedGroupByIdParams{
@@ -456,8 +456,8 @@ func (m FinancialGroupManagerModel) GetDetailedGroupById(userID, groupID int64) 
 
 // GetAllGroupsUserIsMemberOf() retrieves all the groups a user is a member of
 // We will take the user ID as an argument and return [] EnrichedGroup and an error
-func (m FinancialGroupManagerModel) GetAllGroupsUserIsMemberOf(userID int64) ([]*EnrichedGroup, error) {
-	ctx, cancel := contextGenerator(context.Background(), DefualtFinManGroupsContextTimeout)
+func (m FinancialGroupManagerModel) GetAllGroupsUserIsMemberOf(ctx context.Context, userID int64) ([]*EnrichedGroup, error) {
+	ctx, cancel := contextGenerator(ctx, DefualtFinManGroupsContextTimeout)
 	defer cancel()
 	// get the groups
 	groups, err := m.DB.GetAllGroupsUserIsMemberOf(ctx, sql.NullInt64{Int64: userID, Valid: true})
@@ -496,9 +496,9 @@ func (m FinancialGroupManagerModel) GetAllGroupsUserIsMemberOf(userID int64) ([]
 
 // GetGroupTransactionsByGroupId() retrieves all the group transactions by the group ID, user ID and the FILTERs
 // We will take the group ID, user ID, and the filters as arguments and return [] EnrichedGroupTransaction, metadata and an error
-func (m FinancialGroupManagerModel) GetGroupTransactionsByGroupId(userID, groupID, goalID int64, filters Filters) (*EnrichedGroupTransaction, Metadata, error) {
+func (m FinancialGroupManagerModel) GetGroupTransactionsByGroupId(ctx context.Context, userID, groupID, goalID int64, filters Filters) (*EnrichedGroupTransaction, Metadata, error) {
 	// get our context
-	ctx, cancel := contextGenerator(context.Background(), DefualtFinManGroupsContextTimeout)
+	ctx, cancel := contextGenerator(ctx, DefualtFinManGroupsContextTimeout)
 	defer cancel()
 
 	// get the group transactions
@@ -554,9 +554,9 @@ func (m FinancialGroupManagerModel) GetGroupTransactionsByGroupId(userID, groupI
 
 // GetGroupExpensesByGroupId() retrieves all the group expenses by the group ID, user ID, Optional search by expense category and the FILTERs
 // We will take the group ID, user ID, expense category and the filters as arguments and return *EnrichedExpenses, metadata and an error
-func (m FinancialGroupManagerModel) GetGroupExpensesByGroupId(userID, groupID int64, category string, filters Filters) (*EnrichedExpense, Metadata, error) {
+func (m FinancialGroupManagerModel) GetGroupExpensesByGroupId(ctx context.Context, userID, groupID int64, category string, filters Filters) (*EnrichedExpense, Metadata, error) {
 	// get our context
-	ctx, cancel := contextGenerator(context.Background(), DefualtFinManGroupsContextTimeout)
+	ctx, cancel := contextGenerator(ctx, DefualtFinManGroupsContextTimeout)
 	defer cancel()
 
 	// get the group expenses
@@ -608,9 +608,9 @@ func (m FinancialGroupManagerModel) GetGroupExpensesByGroupId(userID, groupID in
 
 // CreateNewUserGroup() creates a new user group in the database and returns the ID of the new group
 // We will take a pointer to the Group struct as an argument and return an error
-func (m FinancialGroupManagerModel) CreateNewUserGroup(userID int64, group *Group) error {
+func (m FinancialGroupManagerModel) CreateNewUserGroup(ctx context.Context, userID int64, group *Group) error {
 	// get our context
-	ctx, cancel := contextGenerator(context.Background(), DefualtFinManGroupsContextTimeout)
+	ctx, cancel := contextGenerator(ctx, DefualtFinManGroupsContextTimeout)
 	defer cancel()
 	// insert the data
 	groupInformation, err := m.DB.CreateNewUserGroup(ctx, database.CreateNewUserGroupParams{
@@ -645,9 +645,9 @@ func (m FinancialGroupManagerModel) CreateNewUserGroup(userID int64, group *Grou
 // Only Admins can perform this, even though we will have a middleware for this, we
 // the update also includes the creator's user ID.
 // We expect the group ID, the creator's user ID, and the group struct to be passed in
-func (m FinancialGroupManagerModel) UpdateUserGroup(groupID, creatorUserID int64, group *Group) error {
+func (m FinancialGroupManagerModel) UpdateUserGroup(ctx context.Context, groupID, creatorUserID int64, group *Group) error {
 	// get our context
-	ctx, cancel := contextGenerator(context.Background(), DefualtFinManGroupsContextTimeout)
+	ctx, cancel := contextGenerator(ctx, DefualtFinManGroupsContextTimeout)
 	defer cancel()
 	// update the data
 	updatedAt, err := m.DB.UpdateUserGroup(ctx, database.UpdateUserGroupParams{
@@ -682,9 +682,9 @@ func (m FinancialGroupManagerModel) UpdateUserGroup(groupID, creatorUserID int64
 // We take in the groupID, the userID, the new role as well as the user ID of the person performing the action
 // This is to ensure that only the group admin or moderator can perform this action
 // We return the updated_At time and an error if any
-func (m FinancialGroupManagerModel) UpdateGroupUserRole(groupID, userID, updaterUserID int64, newRole database.MembershipRole) (time.Time, error) {
+func (m FinancialGroupManagerModel) UpdateGroupUserRole(ctx context.Context, groupID, userID, updaterUserID int64, newRole database.MembershipRole) (time.Time, error) {
 	// get our context
-	ctx, cancel := contextGenerator(context.Background(), DefualtFinManGroupsContextTimeout)
+	ctx, cancel := contextGenerator(ctx, DefualtFinManGroupsContextTimeout)
 	defer cancel()
 	// update the data
 	updatedAt, err := m.DB.UpdateGroupUserRole(ctx, database.UpdateGroupUserRoleParams{
@@ -707,9 +707,9 @@ func (m FinancialGroupManagerModel) UpdateGroupUserRole(groupID, userID, updater
 
 // GetGroupInvitationById() retrieves a group invitation by its ID
 // We also take in the invitee user email and return the group invitation and an error
-func (m FinancialGroupManagerModel) GetGroupInvitationById(groupID int64, inviteeUserEmail string) (*GroupInvitation, error) {
+func (m FinancialGroupManagerModel) GetGroupInvitationById(ctx context.Context, groupID int64, inviteeUserEmail string) (*GroupInvitation, error) {
 	// get our context
-	ctx, cancel := contextGenerator(context.Background(), DefualtFinManGroupsContextTimeout)
+	ctx, cancel := contextGenerator(ctx, DefualtFinManGroupsContextTimeout)
 	defer cancel()
 	// get the group invitation
 	groupInvitation, err := m.DB.GetGroupInvitationById(ctx, database.GetGroupInvitationByIdParams{
@@ -732,9 +732,9 @@ func (m FinancialGroupManagerModel) GetGroupInvitationById(groupID int64, invite
 
 // UpdateGroupInvitationStatus() updates the status of a group invitation
 // We just take the new status and return an error
-func (m FinancialGroupManagerModel) UpdateGroupInvitationStatus(newstatusinvitation database.InvitationStatusType, invitation *GroupInvitation) error {
+func (m FinancialGroupManagerModel) UpdateGroupInvitationStatus(ctx context.Context, newstatusinvitation database.InvitationStatusType, invitation *GroupInvitation) error {
 	// get our context
-	ctx, cancel := contextGenerator(context.Background(), DefualtFinManGroupsContextTimeout)
+	ctx, cancel := contextGenerator(ctx, DefualtFinManGroupsContextTimeout)
 	defer cancel()
 	// update the data
 	respondedAt, err := m.DB.UpdateGroupInvitationStatus(ctx, database.UpdateGroupInvitationStatusParams{
@@ -761,9 +761,9 @@ func (m FinancialGroupManagerModel) UpdateGroupInvitationStatus(newstatusinvitat
 // This allows a group ADMIN/ Moderator to invite users to their group
 // and will only work well when a group is private not public.
 // We take in a GroupInvitation struct and return an error
-func (m FinancialGroupManagerModel) CreateNewGroupInvitation(userID int64, invitation *GroupInvitation) error {
+func (m FinancialGroupManagerModel) CreateNewGroupInvitation(ctx context.Context, userID int64, invitation *GroupInvitation) error {
 	// get our context
-	ctx, cancel := contextGenerator(context.Background(), DefualtFinManGroupsContextTimeout)
+	ctx, cancel := contextGenerator(ctx, DefualtFinManGroupsContextTimeout)
 	defer cancel()
 	// insert the data
 	inviteDetail, err := m.DB.CreateNewGroupInvitation(ctx, database.CreateNewGroupInvitationParams{
@@ -793,9 +793,9 @@ func (m FinancialGroupManagerModel) CreateNewGroupInvitation(userID int64, invit
 // CreateNewPublicMembership() creates a new public membership for a user
 // We only require the user ID and the group ID
 // This is used when a user joins a public group
-func (m FinancialGroupManagerModel) CreateNewPublicMembership(userID, groupID int64) (int64, error) {
+func (m FinancialGroupManagerModel) CreateNewPublicMembership(ctx context.Context, userID, groupID int64) (int64, error) {
 	// get our context
-	ctx, cancel := contextGenerator(context.Background(), DefualtFinManGroupsContextTimeout)
+	ctx, cancel := contextGenerator(ctx, DefualtFinManGroupsContextTimeout)
 	defer cancel()
 	// insert the data
 	createdUser, err := m.DB.CreateNewPublicMembership(ctx, database.CreateNewPublicMembershipParams{
@@ -816,9 +816,9 @@ func (m FinancialGroupManagerModel) CreateNewPublicMembership(userID, groupID in
 
 // UpdateExpiredGroupInvitations() updates the status of expired group invitations
 // It is used by a cronjob, dauily to update the status of expired group invitations
-func (m FinancialGroupManagerModel) UpdateExpiredGroupInvitations() error {
+func (m FinancialGroupManagerModel) UpdateExpiredGroupInvitations(ctx context.Context) error {
 	// get our context
-	ctx, cancel := contextGenerator(context.Background(), DefualtFinManGroupsContextTimeout)
+	ctx, cancel := contextGenerator(ctx, DefualtFinManGroupsContextTimeout)
 	defer cancel()
 	// update the data
 	err := m.DB.UpdateExpiredGroupInvitations(ctx)
@@ -831,9 +831,9 @@ func (m FinancialGroupManagerModel) UpdateExpiredGroupInvitations() error {
 
 // CreateNewGroupGoal() creates a new group goal in the database
 // We take in a GroupGoal struct and return an error
-func (m FinancialGroupManagerModel) CreateNewGroupGoal(userID int64, groupGoal *GroupGoal) error {
+func (m FinancialGroupManagerModel) CreateNewGroupGoal(ctx context.Context, userID int64, groupGoal *GroupGoal) error {
 	// get our context
-	ctx, cancel := contextGenerator(context.Background(), DefualtFinManGroupsContextTimeout)
+	ctx, cancel := contextGenerator(ctx, DefualtFinManGroupsContextTimeout)
 	defer cancel()
 	// insert the data
 	goalDetail, err := m.DB.CreateNewGroupGoal(ctx, database.CreateNewGroupGoalParams{
@@ -868,9 +868,9 @@ func (m FinancialGroupManagerModel) CreateNewGroupGoal(userID int64, groupGoal *
 // Add this to the require permission group:admin/moderator
 // Even if the goals can be updates, only the name, deadline and description can be updated
 // This is to prevent any form of fraud and increase transparency in the group
-func (m FinancialGroupManagerModel) UpdateGroupGoal(userID int64, groupGoal *GroupGoal) error {
+func (m FinancialGroupManagerModel) UpdateGroupGoal(ctx context.Context, userID int64, groupGoal *GroupGoal) error {
 	// get our context
-	ctx, cancel := contextGenerator(context.Background(), DefualtFinManGroupsContextTimeout)
+	ctx, cancel := contextGenerator(ctx, DefualtFinManGroupsContextTimeout)
 	defer cancel()
 	// update the data
 	updatedAt, err := m.DB.UpdateGroupGoal(ctx, database.UpdateGroupGoalParams{
@@ -897,9 +897,9 @@ func (m FinancialGroupManagerModel) UpdateGroupGoal(userID int64, groupGoal *Gro
 
 // GetGroupGoalById() retrieves a group goal by its ID
 // We take in the group goal ID and return the group goal and an error
-func (m FinancialGroupManagerModel) GetGroupGoalById(groupGoalID int64) (*GroupGoal, error) {
+func (m FinancialGroupManagerModel) GetGroupGoalById(ctx context.Context, groupGoalID int64) (*GroupGoal, error) {
 	// get our context
-	ctx, cancel := contextGenerator(context.Background(), DefualtFinManGroupsContextTimeout)
+	ctx, cancel := contextGenerator(ctx, DefualtFinManGroupsContextTimeout)
 	defer cancel()
 	// get the group goal
 	groupGoal, err := m.DB.GetGroupGoalById(ctx, groupGoalID)
@@ -919,9 +919,9 @@ func (m FinancialGroupManagerModel) GetGroupGoalById(groupGoalID int64) (*GroupG
 
 // CreateNewGroupTransaction() creates a new group transaction in the database
 // We take in a GroupTransaction struct and return an error
-func (m FinancialGroupManagerModel) CreateNewGroupTransaction(userID int64, transaction *GroupTransaction) error {
+func (m FinancialGroupManagerModel) CreateNewGroupTransaction(ctx context.Context, userID int64, transaction *GroupTransaction) error {
 	// get our context
-	ctx, cancel := contextGenerator(context.Background(), DefualtFinManGroupsContextTimeout)
+	ctx, cancel := contextGenerator(ctx, DefualtFinManGroupsContextTimeout)
 	defer cancel()
 	// insert the data
 	transactionDetail, err := m.DB.CreateNewGroupTransaction(ctx, database.CreateNewGroupTransactionParams{
@@ -951,9 +951,9 @@ func (m FinancialGroupManagerModel) CreateNewGroupTransaction(userID int64, tran
 // DeleteGroupTransaction() deletes a group transaction by its ID and member_id/user_id of
 // the person who created the transaction
 // We return the ID of the deleted transaction and an error especially for sql no rows
-func (m FinancialGroupManagerModel) DeleteGroupTransaction(userID, transactionID int64) (int64, error) {
+func (m FinancialGroupManagerModel) DeleteGroupTransaction(ctx context.Context, userID, transactionID int64) (int64, error) {
 	// get our context
-	ctx, cancel := contextGenerator(context.Background(), DefualtFinManGroupsContextTimeout)
+	ctx, cancel := contextGenerator(ctx, DefualtFinManGroupsContextTimeout)
 	defer cancel()
 	// delete the data
 	deletedTransactionID, err := m.DB.DeleteGroupTransaction(ctx, database.DeleteGroupTransactionParams{
@@ -975,9 +975,9 @@ func (m FinancialGroupManagerModel) DeleteGroupTransaction(userID, transactionID
 // CheckIfGroupExistsAndUserIsMember() checks whether a group exists and if the user is a member
 // of that group. We take in the user's ID number and the group ID number and return an error
 // of the record not found
-func (m FinancialGroupManagerModel) CheckIfGroupExistsAndUserIsMember(userID, groupID int64) error {
+func (m FinancialGroupManagerModel) CheckIfGroupExistsAndUserIsMember(ctx context.Context, userID, groupID int64) error {
 	// get our context
-	ctx, cancel := contextGenerator(context.Background(), DefualtFinManGroupsContextTimeout)
+	ctx, cancel := contextGenerator(ctx, DefualtFinManGroupsContextTimeout)
 	defer cancel()
 	// check the group
 	_, err := m.DB.CheckIfGroupExistsAndUserIsMember(ctx, database.CheckIfGroupExistsAndUserIsMemberParams{
@@ -998,9 +998,9 @@ func (m FinancialGroupManagerModel) CheckIfGroupExistsAndUserIsMember(userID, gr
 
 // CreateNewGroupExpense() creates a new group expense in the database
 // We take in pointers to a group expense and userID and return an error if any
-func (m FinancialGroupManagerModel) CreateNewGroupExpense(userID int64, expense *GroupExpense) error {
+func (m FinancialGroupManagerModel) CreateNewGroupExpense(ctx context.Context, userID int64, expense *GroupExpense) error {
 	// get our context
-	ctx, cancel := contextGenerator(context.Background(), DefualtFinManGroupsContextTimeout)
+	ctx, cancel := contextGenerator(ctx, DefualtFinManGroupsContextTimeout)
 	defer cancel()
 	// insert the data
 	expenseDetail, err := m.DB.CreateNewGroupExpense(ctx, database.CreateNewGroupExpenseParams{
@@ -1025,9 +1025,9 @@ func (m FinancialGroupManagerModel) CreateNewGroupExpense(userID int64, expense 
 // DeleteGroupExpense() deletes a group expense by its ID and member_id/user_id of
 // the person who created the expense
 // We return the ID of the deleted expense and an error especially for sql no rows
-func (m FinancialGroupManagerModel) DeleteGroupExpense(userID, expenseID int64) (int64, error) {
+func (m FinancialGroupManagerModel) DeleteGroupExpense(ctx context.Context, userID, expenseID int64) (int64, error) {
 	// get our context
-	ctx, cancel := contextGenerator(context.Background(), DefualtFinManGroupsContextTimeout)
+	ctx, cancel := contextGenerator(ctx, DefualtFinManGroupsContextTimeout)
 	defer cancel()
 	// delete the data
 	deletedExpenseID, err := m.DB.DeleteGroupExpense(ctx, database.DeleteGroupExpenseParams{
@@ -1049,9 +1049,9 @@ func (m FinancialGroupManagerModel) DeleteGroupExpense(userID, expenseID int64) 
 // AdminDeleteGroupMember() allows an ADMIN user to remove/delete/boot a user from the group
 // We take in a group ID, the user ID of the user to be removed and the user ID of the group admin.
 // we return the deleted user's ID and an error if any
-func (m FinancialGroupManagerModel) AdminDeleteGroupMember(adminID, groupID, memberID int64) (int64, error) {
+func (m FinancialGroupManagerModel) AdminDeleteGroupMember(ctx context.Context, adminID, groupID, memberID int64) (int64, error) {
 	// get our context
-	ctx, cancel := contextGenerator(context.Background(), DefualtFinManGroupsContextTimeout)
+	ctx, cancel := contextGenerator(ctx, DefualtFinManGroupsContextTimeout)
 	defer cancel()
 	// delete the data
 	deletedMemberID, err := m.DB.AdminDeleteGroupMember(ctx, database.AdminDeleteGroupMemberParams{
@@ -1073,9 +1073,9 @@ func (m FinancialGroupManagerModel) AdminDeleteGroupMember(adminID, groupID, mem
 
 // UserLeaveGroup() allows a user to leave a group and delete themselves from the group
 // We take in the user ID and the group ID and return an error if any as well as the deleted user ID
-func (m FinancialGroupManagerModel) UserLeaveGroup(userID, groupID int64) (int64, error) {
+func (m FinancialGroupManagerModel) UserLeaveGroup(ctx context.Context, userID, groupID int64) (int64, error) {
 	// get our context
-	ctx, cancel := contextGenerator(context.Background(), DefualtFinManGroupsContextTimeout)
+	ctx, cancel := contextGenerator(ctx, DefualtFinManGroupsContextTimeout)
 	defer cancel()
 	// delete the data
 	deletedMemberID, err := m.DB.UserLeaveGroup(ctx, database.UserLeaveGroupParams{
@@ -1097,9 +1097,9 @@ func (m FinancialGroupManagerModel) UserLeaveGroup(userID, groupID int64) (int64
 // DeleteNonPendingGroupInvitationsForUser() deletes all non pending group invitations for a user for
 // as specific group. This prevents duplicate invitations which may cause constraint violations down the line
 // We take in the invitee email and the group id. We return an error if any
-func (m FinancialGroupManagerModel) DeleteNonPendingGroupInvitationsForUser(groupID int64, inviteeEmail string) error {
+func (m FinancialGroupManagerModel) DeleteNonPendingGroupInvitationsForUser(ctx context.Context, groupID int64, inviteeEmail string) error {
 	// get our context
-	ctx, cancel := contextGenerator(context.Background(), DefualtFinManGroupsContextTimeout)
+	ctx, cancel := contextGenerator(ctx, DefualtFinManGroupsContextTimeout)
 	defer cancel()
 	// delete the data
 	err := m.DB.DeleteNonPendingGroupInvitationsForUser(ctx, database.DeleteNonPendingGroupInvitationsForUserParams{

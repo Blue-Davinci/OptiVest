@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -39,9 +40,11 @@ type Delta struct {
 	Content string `json:"content"`
 }
 
-// buildLLMRequest sends a request to the LLM API with the user's profile and investment analysis data
-// and returns the analyzed portfolio data.
-func (app *application) buildInvestmentPortfolioLLMRequest(user *data.User, goals *data.InvestmentGoal, investmentAnalysis *data.InvestmentAnalysis) (*data.LLMAnalyzedPortfolio, error) {
+// buildLLMRequest sends a request to the LLM API with the user's profile and
+// investment analysis data and returns the analyzed portfolio data. ctx flows
+// from the originating HTTP request so the downstream INSERT into
+// CreateLLMAnalysisResponse aborts when the client disconnects.
+func (app *application) buildInvestmentPortfolioLLMRequest(ctx context.Context, user *data.User, goals *data.InvestmentGoal, investmentAnalysis *data.InvestmentAnalysis) (*data.LLMAnalyzedPortfolio, error) {
 	// Create a profile
 	profile := UserPortfolioProfile{
 		UserTimeHorizon:    user.TimeHorizon,
@@ -80,7 +83,7 @@ func (app *application) buildInvestmentPortfolioLLMRequest(user *data.User, goal
 	}
 	app.logger.Info("Done building LLM request for investment portfolio")
 	// save the analyzed portfolio to the database using CreateLLMAnalysisResponse
-	err = app.models.InvestmentPortfolioManager.CreateLLMAnalysisResponse(user.ID, analyzedPortfolio)
+	err = app.models.InvestmentPortfolioManager.CreateLLMAnalysisResponse(ctx, user.ID, analyzedPortfolio)
 	if err != nil {
 		return nil, err
 	}
