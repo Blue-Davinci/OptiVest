@@ -200,23 +200,27 @@ func (app *application) getBondInvestmentDataHandler(ctx context.Context, symbol
 		app.logger.Info("Bond Data found in cache", zap.String("symbol", symbol))
 		return cachedResponse, nil
 	}
-	// if no cache was found, get the data
-	bondTimeSeriesResponse, err := GETRequest[data.BondResponse](app.http_client, timeSeriesUrl, nil)
+	// Cache miss: fetch upstream behind a per-symbol singleflight so two
+	// concurrent bond workers (e.g. user holds two positions in the same
+	// bond series) collapse to one FRED call. The leader populates Redis
+	// inside the closure for downstream cache reads.
+	bondTimeSeriesResponse, err := singleflightDoTyped(&app.sf, "fred:bond:"+symbol, func() (data.BondResponse, error) {
+		resp, fetchErr := GETRequest[data.BondResponse](app.http_client, timeSeriesUrl, nil)
+		if fetchErr != nil {
+			return data.BondResponse{}, fetchErr
+		}
+		if len(resp.Observations) == 0 {
+			return data.BondResponse{}, fmt.Errorf("no time series data found for symbol: %s", symbol)
+		}
+		if cacheErr := setToCache(ctx, app.RedisDB, redisKey, &resp, ttl); cacheErr != nil {
+			app.logger.Error("Failed to cache time series data in Redis", zap.Error(cacheErr))
+		}
+		return resp, nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	// check if we got data
-	if len(bondTimeSeriesResponse.Observations) == 0 {
-		return nil, fmt.Errorf("no time series data found for symbol: %s", symbol)
-	}
-	// Cache the data using the updated setToCache method
-	err = setToCache(ctx, app.RedisDB, redisKey, &bondTimeSeriesResponse, ttl)
-	if err != nil {
-		app.logger.Error("Failed to cache time series data in Redis", zap.Error(err))
-	}
-	// print out the filetype
 	app.logger.Info("Bond File Type", zap.String("filetype", bondTimeSeriesResponse.FileType))
-	// just return
 	return &bondTimeSeriesResponse, nil
 }
 
@@ -336,9 +340,13 @@ func (app *application) getStockInvestmentDataHandler(ctx context.Context, symbo
 		return &newStockAnalysisStatistics, nil
 	}
 
-	// If no cached data is found, make the API call.
-	// Build the URL using the configured Alpha Vantage key from app.config; never embed
-	// API keys in source. See SECURITY.md for the rotation runbook.
+	// Cache miss: fetch upstream behind a singleflight gate keyed per-symbol
+	// so a user holding two lots of the same stock (or two concurrent
+	// portfolio analyses for users that share a symbol) collapse into one
+	// Alpha Vantage call. The leader populates Redis from inside the closure
+	// so subsequent misses elsewhere read from cache.
+	// Build the URL using the configured Alpha Vantage key from app.config;
+	// never embed API keys in source. See SECURITY.md for the rotation runbook.
 	timeSeriesURL := fmt.Sprintf("%s%s%s%s",
 		data.ALPHA_VANTAGE_TIME_SERIES_URL,
 		symbol,
@@ -347,18 +355,21 @@ func (app *application) getStockInvestmentDataHandler(ctx context.Context, symbo
 	)
 	app.logger.Info("Time Series URL", zap.String("symbol", symbol))
 
-	timeSeriesResponse, err := GETRequest[data.TimeSeriesDailyResponse](app.http_client, timeSeriesURL, nil)
+	timeSeriesResponse, err := singleflightDoTyped(&app.sf, "av:timeseries:"+symbol, func() (data.TimeSeriesDailyResponse, error) {
+		resp, fetchErr := GETRequest[data.TimeSeriesDailyResponse](app.http_client, timeSeriesURL, nil)
+		if fetchErr != nil {
+			return data.TimeSeriesDailyResponse{}, fetchErr
+		}
+		if len(resp.DailyTimeSeries) == 0 {
+			return data.TimeSeriesDailyResponse{}, fmt.Errorf("no time series data found for symbol: %s", symbol)
+		}
+		if cacheErr := setToCache(ctx, app.RedisDB, redisKey, &resp, ttl); cacheErr != nil {
+			app.logger.Error("Failed to cache time series data in Redis", zap.Error(cacheErr))
+		}
+		return resp, nil
+	})
 	if err != nil {
 		return nil, err
-	}
-	// Check if the response is not empty
-	if len(timeSeriesResponse.DailyTimeSeries) == 0 {
-		return nil, fmt.Errorf("no time series data found for symbol: %s", symbol)
-	}
-	// Cache the data using the updated setToCache method
-	err = setToCache(ctx, app.RedisDB, redisKey, &timeSeriesResponse, ttl)
-	if err != nil {
-		app.logger.Error("Failed to cache time series data in Redis", zap.Error(err))
 	}
 	app.logger.Info("Current risk free rate: ", zap.String("risk_free_rate", riskFreeRate.String()))
 
@@ -761,19 +772,27 @@ func (app *application) getSectorPerformance(ctx context.Context, sector string)
 		//app.getSectorPerformanceFactor(cachedResponse, sector)
 		return sectorScore, nil
 	}
-	// if no cache was found, get the data
-	sectorPerformanceResponse, err := GETRequest[data.SectorAnalysisData](app.http_client, sectorPerformanceURL, nil)
+	// Cache miss: fetch upstream behind a singleflight gate so concurrent
+	// callers (e.g. 6 in-flight portfolio workers all looking at different
+	// sectors of the same global FMP snapshot) collapse into one HTTP call.
+	// Followers wait for the leader's response and reuse it. We also write
+	// to Redis from inside the leader closure so the next miss elsewhere
+	// reads from cache instead of re-firing the upstream call.
+	sectorPerformanceResponse, err := singleflightDoTyped(&app.sf, "fmp:sector-performance", func() (data.SectorAnalysisData, error) {
+		resp, fetchErr := GETRequest[data.SectorAnalysisData](app.http_client, sectorPerformanceURL, nil)
+		if fetchErr != nil {
+			return nil, fetchErr
+		}
+		if len(resp) == 0 {
+			return nil, fmt.Errorf("no sector performance data found")
+		}
+		if cacheErr := setToCache(ctx, app.RedisDB, redisKey, &resp, ttl); cacheErr != nil {
+			app.logger.Error("Failed to cache sector performance data in Redis", zap.Error(cacheErr))
+		}
+		return resp, nil
+	})
 	if err != nil {
 		return decimal.NewFromInt(0), err
-	}
-	// check if we got data
-	if len(sectorPerformanceResponse) == 0 {
-		return decimal.NewFromInt(0), fmt.Errorf("no sector performance data found")
-	}
-	// Cache the data using the updated setToCache method
-	err = setToCache(ctx, app.RedisDB, redisKey, &sectorPerformanceResponse, ttl)
-	if err != nil {
-		app.logger.Error("Failed to cache sector performance data in Redis", zap.Error(err))
 	}
 
 	sectorScore, err := sectorPerformanceResponse.GetSectorChange(sector)

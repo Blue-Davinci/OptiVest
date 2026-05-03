@@ -29,6 +29,7 @@ import (
 	"github.com/microcosm-cc/bluemonday"
 	"github.com/robfig/cron/v3"
 	"go.uber.org/zap"
+	"golang.org/x/sync/singleflight"
 )
 
 // a quick variable to hold our version. ToDo: Change this.
@@ -136,6 +137,17 @@ type config struct {
 		overdueDebtTrackerBurstLimit         int
 		expiredNotificationTrackerBurstLimit int
 	}
+	// portfolio holds runtime knobs for the investment-portfolio analysis
+	// pipeline. Concurrency is bounded so we never burst more parallel
+	// upstream API calls (Alpha Vantage / FRED / FMP) than the configured
+	// vendor plan allows.
+	portfolio struct {
+		// workerLimit caps the number of in-flight per-asset analyses
+		// (stocks + bonds) inside performInvestmentPortfolioAnalysis.
+		// Each in-flight worker may issue 2-3 upstream HTTP calls plus
+		// one DB INSERT. Set to 1 to reproduce the legacy serial behaviour.
+		workerLimit int
+	}
 }
 
 type application struct {
@@ -159,6 +171,15 @@ type application struct {
 	Clients           map[int64]chan string
 	ListeningUsers    map[int64]bool // Track active listeners for each user
 	ClientCancelFuncs map[int64]context.CancelFunc
+	// sf is a process-wide singleflight registry that collapses concurrent
+	// duplicate upstream API calls into a single in-flight fetch. When the
+	// portfolio analysis fans out N goroutines that all miss the Redis cache
+	// for the same key (e.g. the FMP global sector snapshot, or two stock
+	// lots of the same symbol), only one upstream HTTP request is issued and
+	// every other waiter receives the leader's result. This keeps us under
+	// vendor rate limits even when worker concurrency rises. Counters
+	// `portfolio_singleflight_*` track how often dedup actually fires.
+	sf singleflight.Group
 }
 
 func main() {
@@ -256,6 +277,14 @@ func main() {
 	flag.IntVar(&cfg.limit.recurringExpenseTrackerBurstLimit, "recurring-expense-burst-limit", 100, "Batch Limit for Recurring Expense Tracker")
 	flag.IntVar(&cfg.limit.overdueDebtTrackerBurstLimit, "overdue-debt-burst-limit", 100, "Batch Limit for Overdue Debt Tracker")
 	flag.IntVar(&cfg.limit.expiredNotificationTrackerBurstLimit, "expired-notification-burst-limit", 100, "Batch Limit for Expired Notification Tracker")
+	// Investment portfolio analysis concurrency.
+	// Default 6 chosen to balance per-user latency (sub-5s for typical
+	// 10-15 asset portfolios) against upstream Alpha Vantage rate limits
+	// (Premium tier = 75 req/min; each worker issues ~2 AV calls). On
+	// Free tier (5 req/min) consider lowering to 1; on Premium Plus
+	// (600 req/min) it can safely go to 16+. Set to 1 to disable
+	// concurrency entirely and reproduce pre-P3 serial behaviour.
+	flag.IntVar(&cfg.portfolio.workerLimit, "portfolio-worker-limit", 6, "Max concurrent per-asset workers in portfolio analysis (1 = serial; tune to upstream API rate limits)")
 	// Parse the flags
 	flag.Parse()
 
@@ -510,6 +539,17 @@ func validateConfig(cfg config) []string {
 		case len(decoded) != 16 && len(decoded) != 24 && len(decoded) != 32:
 			errs = append(errs, fmt.Sprintf("OPTIVEST_DATA_ENCRYPTION_KEY must decode to 16/24/32 bytes, got %d", len(decoded)))
 		}
+	}
+	// portfolio worker limit guardrails. Reject 0/negative outright (would
+	// deadlock errgroup.SetLimit with 0). 64 is a soft ceiling: above that
+	// you are almost certainly going to get rate-limited by upstream APIs
+	// faster than you gain throughput, so force operators to make the
+	// trade-off consciously.
+	if cfg.portfolio.workerLimit < 1 {
+		errs = append(errs, fmt.Sprintf("-portfolio-worker-limit must be >= 1, got %d", cfg.portfolio.workerLimit))
+	}
+	if cfg.portfolio.workerLimit > 64 {
+		errs = append(errs, fmt.Sprintf("-portfolio-worker-limit must be <= 64, got %d (set explicitly via -portfolio-worker-limit if you really mean this)", cfg.portfolio.workerLimit))
 	}
 	return errs
 }

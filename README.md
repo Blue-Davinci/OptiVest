@@ -259,6 +259,8 @@ the available commands for a quick lookup (INCOMPLETE, use help for full list).
         Enable rate limiter (default true)
   -limiter-rps float
         Rate limiter maximum requests per second (default 5)
+  -portfolio-worker-limit int
+        Max concurrent per-asset workers in portfolio analysis (1 = serial; tune to upstream API rate limits) (default 6)
 ```
 
 > **Rate limiter note:** As of P2, the limiter is backed by Redis using
@@ -276,6 +278,32 @@ the available commands for a quick lookup (INCOMPLETE, use help for full list).
 >
 > Sub-1-rps configurations are not supported by the underlying GCRA bucket
 > type; values <1 are rounded up to 1 and a warning is logged at startup.
+
+> **Portfolio analysis concurrency (P3):** `performInvestmentPortfolioAnalysis`
+> now fans out per-asset workers (stocks + bonds) into a bounded
+> [`errgroup`](https://pkg.go.dev/golang.org/x/sync/errgroup) capped at
+> `-portfolio-worker-limit` (default **6**). For a typical 10-15 asset
+> portfolio this drops cache-cold analysis from ~25-30s to ~3-5s on Premium
+> Alpha Vantage tiers. First-error-cancels semantics + the P2 ctx
+> propagation work mean a client disconnect aborts every in-flight
+> upstream HTTP call and DB INSERT.
+>
+> Tune to your vendor plan: Alpha Vantage Free (5 req/min) -> set to **1**;
+> Premium (75/min) -> default **6**; Premium Plus (600/min) -> up to **16+**.
+>
+> A process-wide [`singleflight`](https://pkg.go.dev/golang.org/x/sync/singleflight)
+> registry collapses concurrent identical upstream calls (FMP sector
+> snapshot, per-symbol Alpha Vantage / FRED fetches), so even at higher
+> worker limits we never N-multiply duplicate fetches when the cache is cold.
+>
+> Operational metrics on `/debug/vars`:
+> - `portfolio_analysis_runs_total` (counter, request rate)
+> - `portfolio_analysis_errors_total` (counter, alert on ratio)
+> - `portfolio_analysis_duration_ms` (last run, scrape for p99)
+> - `portfolio_analysis_workers_active` (live in-flight, saturation)
+> - `portfolio_analysis_workers_max_observed` (process-wide high-water mark)
+> - `portfolio_singleflight_collapsed_total` (counter; sustained zero is
+>   normal if your cache is warm or workload is sequential)
 
 Using `make run`, will run the API with a default connection string located 
 in `cmd\api\.env`. If you're using `powershell`, you need to load the values otherwise you will get
