@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"expvar"
 	"flag"
@@ -136,14 +137,17 @@ type config struct {
 }
 
 type application struct {
-	config            config
-	logger            *zap.Logger
-	models            data.Models
-	http_client       *Optivet_Client
-	mailer            mailer.Mailer
-	wg                sync.WaitGroup
-	RedisDB           *redis.Client
-	Mutex             sync.Mutex
+	config      config
+	logger      *zap.Logger
+	models      data.Models
+	http_client *Optivet_Client
+	mailer      mailer.Mailer
+	wg          sync.WaitGroup
+	RedisDB     *redis.Client
+	// Mutex protects Clients, ListeningUsers, and ClientCancelFuncs. It is an
+	// RWMutex so reads (e.g. snapshotting per-user channels for fan-out) do not
+	// serialize with one another.
+	Mutex             sync.RWMutex
 	WebSocketUpgrader websocket.Upgrader
 	Clients           map[int64]chan string
 	ListeningUsers    map[int64]bool // Track active listeners for each user
@@ -172,27 +176,23 @@ func main() {
 	flag.StringVar(&cfg.api.name, "api-name", "OptiVest", "API name")
 	flag.StringVar(&cfg.api.author, "api-author", "Blue_Davinci", "API author")
 	flag.StringVar(&cfg.api.defaultcurrency, "api-default-currency", "USD", "Default currency")
-	// API keys
-	// alpha vantage
-	flag.StringVar(&cfg.api.apikeys.alphavantage.key, "api-key-alphavantage", os.Getenv("OPTIVEST_ALPHAVANTAGE_API_KEY"), "Alpha Vantage API key")
+	// API keys.
+	// All keys default to the corresponding OPTIVEST_* env var; never embed real
+	// keys here. URLs default to the upstream public endpoints. Missing keys are
+	// validated by validateConfig() below for non-development environments.
+	flag.StringVar(&cfg.api.apikeys.alphavantage.key, "api-key-alphavantage", os.Getenv("OPTIVEST_ALPHAVANTAGE_API_KEY"), "Alpha Vantage API key (env OPTIVEST_ALPHAVANTAGE_API_KEY)")
 	flag.StringVar(&cfg.api.apikeys.alphavantage.url, "api-url-alphavantage", "https://www.alphavantage.co/query?", "Alpha Vantage API URL")
-	// exchange rates
-	flag.StringVar(&cfg.api.apikeys.exchangerates.key, "api-key-exchangerates", os.Getenv("OPTIVEST_EXCHANGERATE_API_KEY"), "Exchange-Rate API Key")
+	flag.StringVar(&cfg.api.apikeys.exchangerates.key, "api-key-exchangerates", os.Getenv("OPTIVEST_EXCHANGERATE_API_KEY"), "Exchange-Rate API key (env OPTIVEST_EXCHANGERATE_API_KEY)")
 	flag.StringVar(&cfg.api.apikeys.exchangerates.url, "api-url-exchangerates", "https://v6.exchangerate-api.com/v6", "Exchange-Rate API URL")
-	// fred
-	flag.StringVar(&cfg.api.apikeys.fred.key, "api-key-fred", os.Getenv("OPTIVEST_FRED_API_KEY"), "FRED API Key")
+	flag.StringVar(&cfg.api.apikeys.fred.key, "api-key-fred", os.Getenv("OPTIVEST_FRED_API_KEY"), "FRED API key (env OPTIVEST_FRED_API_KEY)")
 	flag.StringVar(&cfg.api.apikeys.fred.url, "api-url-fred", "https://api.stlouisfed.org/fred/series/observations?", "FRED API URL")
-	// fmp
-	flag.StringVar(&cfg.api.apikeys.fmp.key, "api-key-fmp", os.Getenv("OPTIVEST_FINANCIALMODELINGPREP_API_KEY"), "FMP API Key")
+	flag.StringVar(&cfg.api.apikeys.fmp.key, "api-key-fmp", os.Getenv("OPTIVEST_FINANCIALMODELINGPREP_API_KEY"), "FMP API key (env OPTIVEST_FINANCIALMODELINGPREP_API_KEY)")
 	flag.StringVar(&cfg.api.apikeys.fmp.url, "api-url-fmp", "https://financialmodelingprep.com/api/v3", "FMP API URL")
-	// sambanova
-	flag.StringVar(&cfg.api.apikeys.sambanova.key, "api-key-sambanova", os.Getenv("OPTIVEST_SAMBA_NOVA_LLM_API_KEY"), "Sambanova API Key")
-	flag.StringVar(&cfg.api.apikeys.sambanova.url, "api-url-sambanova", "https://fast-api.snova.ai/v1/chat/completions", "Sambanova API URL")
-	// optivest microservice
-	flag.StringVar(&cfg.api.apikeys.optivestmicroservice.key, "api-key-optivestmicroservice", os.Getenv("OPTIVEST_PREDICTOR_API_KEY"), "OptiVest Microservice API Key")
-	flag.StringVar(&cfg.api.apikeys.optivestmicroservice.url, "api-url-optivestmicroservice", "http://127.0.0.1:8000/v1/predict", "OptiVest Microservice API URL")
-	// ocrspace
-	flag.StringVar(&cfg.api.apikeys.ocrspace.key, "api-key-ocrspace", os.Getenv("OPTIVEST_OCRSPACE_API_KEY"), "OCR.Space API Key")
+	flag.StringVar(&cfg.api.apikeys.sambanova.key, "api-key-sambanova", os.Getenv("OPTIVEST_SAMBA_NOVA_LLM_API_KEY"), "SambaNova API key (env OPTIVEST_SAMBA_NOVA_LLM_API_KEY)")
+	flag.StringVar(&cfg.api.apikeys.sambanova.url, "api-url-sambanova", "https://fast-api.snova.ai/v1/chat/completions", "SambaNova API URL")
+	flag.StringVar(&cfg.api.apikeys.optivestmicroservice.key, "api-key-optivestmicroservice", os.Getenv("OPTIVEST_PREDICTOR_API_KEY"), "OptiVest predictor microservice API key (env OPTIVEST_PREDICTOR_API_KEY)")
+	flag.StringVar(&cfg.api.apikeys.optivestmicroservice.url, "api-url-optivestmicroservice", "http://127.0.0.1:8000/v1/predict", "OptiVest predictor microservice URL")
+	flag.StringVar(&cfg.api.apikeys.ocrspace.key, "api-key-ocrspace", os.Getenv("OPTIVEST_OCRSPACE_API_KEY"), "OCR.Space API key (env OPTIVEST_OCRSPACE_API_KEY)")
 	flag.StringVar(&cfg.api.apikeys.ocrspace.url, "api-url-ocrspace", "https://api.ocr.space/parse/image", "OCR.Space API URL")
 	// Rate limiter flags
 	flag.Float64Var(&cfg.limiter.rps, "limiter-rps", 5, "Rate limiter maximum requests per second")
@@ -251,6 +251,23 @@ func main() {
 	flag.IntVar(&cfg.limit.expiredNotificationTrackerBurstLimit, "expired-notification-burst-limit", 100, "Batch Limit for Expired Notification Tracker")
 	// Parse the flags
 	flag.Parse()
+
+	// Fail fast if required secrets are missing in non-development environments.
+	// In development we tolerate empty secrets so the server can boot for partial
+	// integration work, but warn loudly so misconfiguration is visible.
+	if errs := validateConfig(cfg); len(errs) > 0 {
+		if cfg.env == "development" {
+			for _, e := range errs {
+				logger.Warn("missing configuration (allowed in development)", zap.String("error", e))
+			}
+		} else {
+			for _, e := range errs {
+				logger.Error("missing required configuration", zap.String("error", e))
+			}
+			logger.Fatal("refusing to start: required configuration missing", zap.String("env", cfg.env))
+		}
+	}
+
 	// Initialize our cronJobs
 	cfg.scheduler.trackMonthlyGoalsCron = cron.New()
 	cfg.scheduler.trackGoalProgressStatus = cron.New()
@@ -301,7 +318,6 @@ func main() {
 		http_client: httpClient,
 		mailer:      mailer.New(cfg.smtp.host, cfg.smtp.port, cfg.smtp.username, cfg.smtp.password, cfg.smtp.sender),
 		RedisDB:     rdb,
-		Mutex:       sync.Mutex{},
 		WebSocketUpgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
@@ -433,6 +449,54 @@ func openDB(cfg config) (*database.Queries, error) {
 	}
 	queries := database.New(db)
 	return queries, nil
+}
+
+// validateConfig returns a list of human-readable errors describing required
+// configuration that is missing. It is intentionally cheap to call: it does not
+// perform any I/O. Callers decide whether missing values are fatal based on the
+// runtime environment (see main()).
+//
+// The list of required secrets reflects the surface that the API actively uses
+// in production paths. Add to it whenever a new upstream integration becomes a
+// hard dependency.
+func validateConfig(cfg config) []string {
+	required := []struct {
+		name  string
+		value string
+	}{
+		{"OPTIVEST_DB_DSN (-db-dsn)", cfg.db.dsn},
+		{"OPTIVEST_DATA_ENCRYPTION_KEY (-encryption-key)", cfg.encryption.key},
+		{"OPTIVEST_ALPHAVANTAGE_API_KEY (-api-key-alphavantage)", cfg.api.apikeys.alphavantage.key},
+		{"OPTIVEST_EXCHANGERATE_API_KEY (-api-key-exchangerates)", cfg.api.apikeys.exchangerates.key},
+		{"OPTIVEST_FRED_API_KEY (-api-key-fred)", cfg.api.apikeys.fred.key},
+		{"OPTIVEST_FINANCIALMODELINGPREP_API_KEY (-api-key-fmp)", cfg.api.apikeys.fmp.key},
+		{"OPTIVEST_SAMBA_NOVA_LLM_API_KEY (-api-key-sambanova)", cfg.api.apikeys.sambanova.key},
+		{"OPTIVEST_PREDICTOR_API_KEY (-api-key-optivestmicroservice)", cfg.api.apikeys.optivestmicroservice.key},
+		{"OPTIVEST_OCRSPACE_API_KEY (-api-key-ocrspace)", cfg.api.apikeys.ocrspace.key},
+		{"OPTIVEST_SMTP_HOST (-smtp-host)", cfg.smtp.host},
+		{"OPTIVEST_SMTP_USERNAME (-smtp-username)", cfg.smtp.username},
+		{"OPTIVEST_SMTP_PASSWORD (-smtp-password)", cfg.smtp.password},
+		{"OPTIVEST_SMTP_SENDER (-smtp-sender)", cfg.smtp.sender},
+	}
+	var errs []string
+	for _, r := range required {
+		if strings.TrimSpace(r.value) == "" {
+			errs = append(errs, r.name+" is empty")
+		}
+	}
+	// AES-GCM key must be hex-decoded to 16/24/32 bytes; reject bad lengths early
+	// so the first request that needs to encrypt/decrypt does not get a runtime
+	// panic in internal/data.
+	if cfg.encryption.key != "" {
+		decoded, err := hex.DecodeString(cfg.encryption.key)
+		switch {
+		case err != nil:
+			errs = append(errs, "OPTIVEST_DATA_ENCRYPTION_KEY must be hex-encoded: "+err.Error())
+		case len(decoded) != 16 && len(decoded) != 24 && len(decoded) != 32:
+			errs = append(errs, fmt.Sprintf("OPTIVEST_DATA_ENCRYPTION_KEY must decode to 16/24/32 bytes, got %d", len(decoded)))
+		}
+	}
+	return errs
 }
 
 // openRedis() opens a new Redis connection using the provided configuration.

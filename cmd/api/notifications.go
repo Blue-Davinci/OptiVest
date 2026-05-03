@@ -15,44 +15,62 @@ import (
 	"go.uber.org/zap"
 )
 
-// ServeSSE streams data to a single client
+// sseClientChanBuffer bounds how many pending notifications a single SSE client
+// can buffer before the producer drops messages. With a slow consumer the
+// in-memory queue is bounded; persistence is handled by the Redis pending key.
+const sseClientChanBuffer = 32
+
+// ServeSSE streams notifications to a single connected client.
+//
+// The handler reads from a per-user channel returned by AddClient (snapshotted
+// once on entry, no map lookups per iteration) and exits cleanly when either
+// (a) the client disconnects, (b) the channel is closed by AddClient because a
+// newer connection took over, or (c) the request context is cancelled by
+// graceful shutdown.
 func (app *application) ServeSSE(w http.ResponseWriter, r *http.Request) {
-	// Get user ID from request context
 	userID := app.contextGetUser(r).ID
 
-	// Set SSE headers
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 
-	// Register client
-	app.AddClient(userID, w)
+	// Register the client and capture the channel reference up front so the hot
+	// loop never indexes the Clients map (which previously raced with AddClient
+	// and RemoveClient mutating it concurrently).
+	ch := app.AddClient(userID)
 	defer app.RemoveClient(userID)
 
-	// Load and send pending notifications, This is safe as it is a one-time operation
-	// no matter how many times the client reconnects, the pending notifications will only be sent once
+	// Pending notifications can be loaded asynchronously; this is a one-time
+	// operation per connection, idempotent across reconnects.
 	go app.loadAndSendPendingNotifications(userID)
 
-	// Set up a ticker for heartbeat messages
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
 	app.logger.Info("SSE client connected", zap.Int64("userID", userID))
 
-	// Stream messages to client
 	for {
 		select {
-		case msg, ok := <-app.Clients[userID]:
-			if !ok {
-				return // Exit if the channel is closed
+		case msg, open := <-ch:
+			if !open {
+				return // channel closed (newer connection or shutdown)
 			}
-			fmt.Fprintf(w, "data: %s\n\n", msg)
-			w.(http.Flusher).Flush() // Flush the buffer, send message to client
+			if _, err := fmt.Fprintf(w, "data: %s\n\n", msg); err != nil {
+				return
+			}
+			flusher.Flush()
 		case <-ticker.C:
-			// Send heartbeat message
-			fmt.Fprintf(w, "event: heartbeat\ndata: {}\n\n")
-			w.(http.Flusher).Flush()
-		case <-r.Context().Done(): // Stop if client disconnects
+			if _, err := fmt.Fprintf(w, "event: heartbeat\ndata: {}\n\n"); err != nil {
+				return
+			}
+			flusher.Flush()
+		case <-r.Context().Done():
 			return
 		}
 	}
@@ -158,91 +176,120 @@ func (app *application) loadAndProcessDBData(userID int64, processed *map[int64]
 	return nil
 }
 
-// AddClient adds a new client to the Clients map with userID
-func (app *application) AddClient(userID int64, w http.ResponseWriter) {
+// AddClient registers a new SSE connection for userID and returns the
+// receive-only channel the caller should read from. If the user already had
+// an active connection, the previous channel is closed (so the previous
+// goroutine exits cleanly) and a new one takes its place.
+//
+// The previous implementation held app.Mutex while calling RemoveClient,
+// which deadlocked because RemoveClient also takes the mutex. Lock-protected
+// state mutation is now consolidated into a single critical section that
+// performs both removal and re-registration in place.
+func (app *application) AddClient(userID int64) <-chan string {
+	ch := make(chan string, sseClientChanBuffer)
+
 	app.Mutex.Lock()
-	defer app.Mutex.Unlock()
-
-	// Check if the user already has an active connection
-	if _, exists := app.Clients[userID]; exists {
-		app.RemoveClient(userID) // Close existing connection to avoid duplicates
+	// If a previous connection exists, close its channel and cancel its
+	// pubsub context so the old SSE goroutine and the old Redis listener
+	// terminate before we install the new ones.
+	if prev, exists := app.Clients[userID]; exists {
+		close(prev)
+		app.logger.Info("SSE client replacing previous connection", zap.Int64("userID", userID))
 	}
-	// Create a new context with cancellation for the user
-	ctx, cancelFunc := context.WithCancel(context.Background())
-
-	// Initialize user-specific listeners if they do not already exist
-	// this is to prevent multiple goroutines listening to the same user or channel
-	// this will also prevent duplicate notifications from being sent to the user
-	if _, listening := app.ListeningUsers[userID]; !listening {
-		go app.ListenForRedisPubSubUserMessages(ctx, userID)
-		// Simulate data with Redis pub/sub
-		//go app.SimulateDataWithRedisPubSub(userID)
-		app.ListeningUsers[userID] = true
-	}
-
-	// Create a new channel for the user
-	app.Clients[userID] = make(chan string)
-	// Associate the cancel function with the user for cleanup
-	app.ClientCancelFuncs[userID] = cancelFunc
-}
-
-// RemoveClient removes the client from Clients map and closes their channel
-func (app *application) RemoveClient(userID int64) {
-	app.Mutex.Lock()
-	defer app.Mutex.Unlock()
-	if ch, exists := app.Clients[userID]; exists {
-		app.logger.Info("SSE client disconnected, closing and deleting", zap.Int64("userID", userID))
-		close(ch)
-		delete(app.Clients, userID)
-	}
-	// Stop the Redis listener if it exists
-	if cancelFunc, exists := app.ClientCancelFuncs[userID]; exists {
-		cancelFunc() // Cancel the context, stopping the goroutine
+	if cancel, exists := app.ClientCancelFuncs[userID]; exists {
+		cancel()
 		delete(app.ClientCancelFuncs, userID)
 	}
-
-	// Mark the user as no longer listening
 	delete(app.ListeningUsers, userID)
+
+	// Install the new channel and start a fresh per-user pubsub listener.
+	ctx, cancelFunc := context.WithCancel(context.Background())
+	app.Clients[userID] = ch
+	app.ClientCancelFuncs[userID] = cancelFunc
+	app.ListeningUsers[userID] = true
+	app.Mutex.Unlock()
+
+	go app.ListenForRedisPubSubUserMessages(ctx, userID)
+	return ch
 }
 
-// PublishNotification publishes a message to a specific user's SSE channel if they are online.
-// If the user is offline, it stores the notification in Redis for future delivery.
-func (app *application) PublishNotification(userID int64, notification data.NotificationContent) {
+// RemoveClient closes the channel associated with userID (if any) and stops
+// the per-user Redis listener. It is safe to call multiple times.
+func (app *application) RemoveClient(userID int64) {
 	app.Mutex.Lock()
-	defer app.Mutex.Unlock()
+	ch, hadChannel := app.Clients[userID]
+	cancel, hadCancel := app.ClientCancelFuncs[userID]
+	delete(app.Clients, userID)
+	delete(app.ClientCancelFuncs, userID)
+	delete(app.ListeningUsers, userID)
+	app.Mutex.Unlock()
 
-	// Check if the user has an active connection
-	if ch, exists := app.Clients[userID]; exists {
-		// set the time to now with seconds precision
-		notification.SentAt = time.Now()
-		// Marshal the notification to JSON
-		notificationJSON, err := json.Marshal(notification)
-		if err != nil {
-			app.logger.Error("Failed to marshal notification content", zap.Error(err))
-			return
-		}
+	if hadChannel {
+		// Close outside the lock so any in-flight producer that is currently
+		// blocked on `select { case ch <- msg: ... case <-time.After(...) }`
+		// is not held back by us holding the registry mutex.
+		close(ch)
+		app.logger.Info("SSE client disconnected", zap.Int64("userID", userID))
+	}
+	if hadCancel {
+		cancel()
+	}
+}
 
-		// Send notification directly to the user's SSE channel
-		ch <- string(notificationJSON)
-		// update database notification status
-		err = app.updateDatabaseNotificationStatus(notification.NotificationID, data.NotificationStatusTypeDelivered)
-		if err != nil {
-			app.logger.Error("Error updating notification status in database", zap.Error(err))
-			return
+// sseSendTimeout bounds how long a producer waits for a slow SSE consumer
+// before dropping the live message and persisting it to Redis instead.
+const sseSendTimeout = 100 * time.Millisecond
+
+// PublishNotification publishes a message to a specific user's SSE channel if
+// they are online. If the user is offline, or the connection is too slow to
+// keep up, the notification is persisted to Redis for future delivery on the
+// user's next reconnect.
+//
+// Concurrency model:
+//   - Producers acquire RLock and hold it for the duration of the bounded send.
+//   - RemoveClient/AddClient acquire Lock to close+replace channels.
+//
+// Because Go's RWMutex prevents readers and writers from overlapping, the
+// producer can never send into a closed channel: any close must wait for our
+// RUnlock. The bounded timeout prevents a slow client from blocking writers
+// indefinitely.
+func (app *application) PublishNotification(userID int64, notification data.NotificationContent) {
+	notification.SentAt = time.Now()
+	notificationJSON, err := json.Marshal(notification)
+	if err != nil {
+		app.logger.Error("Failed to marshal notification content", zap.Error(err))
+		return
+	}
+	msg := string(notificationJSON)
+
+	delivered := false
+	app.Mutex.RLock()
+	ch, online := app.Clients[userID]
+	if online {
+		select {
+		case ch <- msg:
+			delivered = true
+		case <-time.After(sseSendTimeout):
+			app.logger.Warn("SSE buffer full; dropping live message and persisting to Redis",
+				zap.Int64("userID", userID))
 		}
+	}
+	app.Mutex.RUnlock()
+
+	var statusErr error
+	if delivered {
+		statusErr = app.updateDatabaseNotificationStatus(notification.NotificationID, data.NotificationStatusTypeDelivered)
 	} else {
-		// If the user is offline, save the notification to Redis for future delivery
-		err := app.storeNotificationInRedis(userID, notification)
-		if err != nil {
-			app.logger.Error("Error storing notification in Redis", zap.Error(err))
-			// do not return here, proceed and try to update the database notification status
+		if storeErr := app.storeNotificationInRedis(userID, notification); storeErr != nil {
+			app.logger.Error("Error storing notification in Redis", zap.Error(storeErr))
 		}
-		err = app.updateDatabaseNotificationStatus(notification.NotificationID, data.NotificationStatusTypePending)
-		if err != nil {
-			app.logger.Error("Error updating notification status in database", zap.Error(err))
-			return
+		statusErr = app.updateDatabaseNotificationStatus(notification.NotificationID, data.NotificationStatusTypePending)
+		if !online {
+			app.logger.Info("User is offline; notification stored in Redis", zap.Int64("userID", userID))
 		}
-		app.logger.Info("User is offline; notification stored in Redis", zap.Int64("userID", userID))
+	}
+	if statusErr != nil {
+		app.logger.Error("Error updating notification status in database", zap.Error(statusErr))
 	}
 }
 
@@ -416,19 +463,27 @@ func (app *application) listenToAwardNotifications() {
 	}()
 }
 
-// BroadcastMessage sends a message to all connected clients
+// BroadcastNotification sends a notification to every currently-connected SSE
+// client. Slow consumers are dropped after sseSendTimeout so a single stuck
+// client cannot block the broadcast for the rest of the fleet.
 func (app *application) BroadcastNotification(notification data.NotificationContent) {
-	app.Mutex.Lock()
-	defer app.Mutex.Unlock()
-
 	notificationJSON, err := json.Marshal(notification)
 	if err != nil {
 		app.logger.Error("Failed to marshal notification content", zap.Error(err))
 		return
 	}
+	msg := string(notificationJSON)
 
-	for _, ch := range app.Clients {
-		ch <- string(notificationJSON)
+	app.Mutex.RLock()
+	defer app.Mutex.RUnlock()
+
+	for userID, ch := range app.Clients {
+		select {
+		case ch <- msg:
+		case <-time.After(sseSendTimeout):
+			app.logger.Warn("dropping broadcast to slow SSE consumer",
+				zap.Int64("userID", userID))
+		}
 	}
 }
 
