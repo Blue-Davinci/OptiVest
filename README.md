@@ -181,25 +181,32 @@ The application accepts command-line flags for configuration, establishes a conn
 You can view the **parameters** by utilizing the `-help` command. Here is a rundown of 
 the available commands for a quick lookup (INCOMPLETE, use help for full list).
 
+> **Security note:** All `-api-key-*` and `-encryption-key` flags default to
+> the corresponding environment variable. Never commit real keys here, and
+> never paste them into the example output below. See
+> [`SECURITY.md`](./SECURITY.md) for the rotation runbook and the list of
+> required env vars (`OPTIVEST_*`). In non-development environments the API
+> refuses to start if any required secret is missing.
+
 ```bash
 - api-author string
         API author (default "Blue_Davinci")
   -api-default-currency string
         Default currency (default "USD")
   -api-key-alphavantage string
-        Alpha Vantage API key (default "NYRXRLGLWY29115K")
+        Alpha Vantage API key (env OPTIVEST_ALPHAVANTAGE_API_KEY)
   -api-key-exchangerates string
-        Exchange-Rate API Key (default "2bd6d65a467e533704e0a7fb")
+        Exchange-Rate API key (env OPTIVEST_EXCHANGERATE_API_KEY)
   -api-key-fmp string
-        FMP API Key (default "LtEBinivcBs2uzHNg1PHXJIRj5KsLmxJ")
+        FMP API key (env OPTIVEST_FINANCIALMODELINGPREP_API_KEY)
   -api-key-fred string
-        FRED API Key (default "1c78299c9778f33eeacf2f85261f9183")
+        FRED API key (env OPTIVEST_FRED_API_KEY)
   -api-key-ocrspace string
-        OCR.Space API Key (default "K82853087188957")
+        OCR.Space API key (env OPTIVEST_OCRSPACE_API_KEY)
   -api-key-optivestmicroservice string
-        OptiVest Microservice API Key (default "xJ8u4Kz7wA9vT3gPzB2dF1mLq8N5cY6s")
+        OptiVest predictor microservice API key (env OPTIVEST_PREDICTOR_API_KEY)
   -api-key-sambanova string
-        Sambanova API Key (default "4044b951-1161-4165-b025-8a7bc6f46155")
+        SambaNova API key (env OPTIVEST_SAMBA_NOVA_LLM_API_KEY)
   -api-name string
         API name (default "OptiVest")
   -api-url-alphavantage string
@@ -213,13 +220,13 @@ the available commands for a quick lookup (INCOMPLETE, use help for full list).
   -api-url-ocrspace string
         OCR.Space API URL (default "https://api.ocr.space/parse/image")
   -api-url-optivestmicroservice string
-        OptiVest Microservice API URL (default "http://127.0.0.1:8000/v1/predict")
+        OptiVest predictor microservice URL (default "http://127.0.0.1:8000/v1/predict")
   -api-url-sambanova string
-        Sambanova API URL (default "https://fast-api.snova.ai/v1/chat/completions")
+        SambaNova API URL (default "https://fast-api.snova.ai/v1/chat/completions")
   -cors-trusted-origins value
         Trusted CORS origins (space separated)
   -db-dsn string
-        PostgreSQL DSN (default "postgres://optivest:pa55word@localhost/optivest?sslmode=disable")
+        PostgreSQL DSN (env OPTIVEST_DB_DSN)
   -db-max-idle-conns int
         PostgreSQL max idle connections (default 25)
   -db-max-idle-time string
@@ -227,7 +234,7 @@ the available commands for a quick lookup (INCOMPLETE, use help for full list).
   -db-max-open-conns int
         PostgreSQL max open connections (default 25)
   -encryption-key string
-        Encryption key (default "330d12d2eacd444bd87126221c91150a09cbaee8529a387282e1e910c8be3868")
+        AES-GCM encryption key, hex-encoded, 16/24/32 bytes (env OPTIVEST_DATA_ENCRYPTION_KEY)
   -env string
         Environment (development|staging|production) (default "development")
   -expired-notification-burst-limit int
