@@ -51,7 +51,11 @@ func (app *application) convertAndGetExchangeRate(source_currency, target_curren
 	if err != nil {
 		return nil, err
 	}
-	app.logger.Info("Got exchange rate", zap.Any("exchange", exchange))
+	app.logger.Info("Fetched exchange rate",
+		zap.String("from", source_currency),
+		zap.String("to", target_currency),
+		zap.String("rate", exchange.ConversionRate.String()),
+	)
 	// Cache only the conversion rate in Redis with TTL
 	err = app.RedisDB.Set(context.Background(), redisKey, exchange.ConversionRate.String(), data.APIExchangeCacheTTL).Err() // Set TTL to 1 hour
 	if err != nil {

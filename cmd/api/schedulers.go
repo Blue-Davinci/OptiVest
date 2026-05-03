@@ -95,14 +95,17 @@ func (app *application) trackExpiredNotificationsHandler() {
 	app.logger.Info("Starting the expired notifications tracking cron job..", zap.String("time", time.Now().String()))
 	updateInterval := "0 0 * * *"
 
-	_, err := app.config.scheduler.trackRecurringExpenses.AddFunc(updateInterval, app.trackExpiredNotifications)
+	// Previously this method registered onto trackRecurringExpenses by mistake,
+	// which caused the expired-notification job to either never fire or to fire
+	// on the wrong schedule (and started trackRecurringExpenses a second time).
+	_, err := app.config.scheduler.trackExpiredNotifications.AddFunc(updateInterval, app.trackExpiredNotifications)
 	if err != nil {
-		app.logger.Error("Error adding [trackRecurringExpenses] to scheduler", zap.Error(err))
+		app.logger.Error("Error adding [trackExpiredNotifications] to scheduler", zap.Error(err))
 	}
 	// Run the tracking first before starting the cron
 	app.trackExpiredNotifications()
 	// start the cron scheduler
-	app.config.scheduler.trackRecurringExpenses.Start()
+	app.config.scheduler.trackExpiredNotifications.Start()
 }
 
 func (app *application) startRssFeedScraperHandler() {

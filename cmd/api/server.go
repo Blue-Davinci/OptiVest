@@ -38,16 +38,19 @@ func (app *application) server() error {
 		// make a 20sec context
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
-		err := srv.Shutdown(ctx)
-		if err != nil {
-			shutdownChan <- err
-		}
-		// Log a message to say that we're waiting for any background goroutines to
-		// complete their tasks.
+
+		// Call srv.Shutdown exactly once. The previous version invoked it twice
+		// and only forwarded the second result to shutdownChan, which silently
+		// swallowed any error from the first attempt and double-counted the
+		// drain budget.
+		shutdownErr := srv.Shutdown(ctx)
+
+		// Log a message to say that we're waiting for any background goroutines
+		// to complete their tasks.
 		app.logger.Info("completing background tasks...", zap.String("addr", srv.Addr))
 		// wait for any background tasks to complete
 		app.wg.Wait()
-		//stop the cron job schedulers
+		// stop the cron job schedulers
 		app.stopCronJobs(
 			app.config.scheduler.trackMonthlyGoalsCron,
 			app.config.scheduler.trackGoalProgressStatus,
@@ -57,8 +60,7 @@ func (app *application) server() error {
 			app.config.scheduler.trackExpiredNotifications,
 			app.config.scheduler.rssFeedScraper,
 		)
-		// Call Shutdown() on our server, passing in the context we just made.
-		shutdownChan <- srv.Shutdown(ctx)
+		shutdownChan <- shutdownErr
 	}()
 	// start our WS server via a go routine
 	go app.serveSSE()

@@ -184,7 +184,7 @@ func (app *application) getBondInvestmentDataHandler(symbol, startDatestring str
 		app.config.api.apikeys.fred.key,
 		data.FRED_FILE_TYPE_JSON)
 
-	app.logger.Info("Fred Compiled URL", zap.String("url", timeSeriesUrl))
+	app.logger.Info("Fetching FRED bond time series", zap.String("symbol", symbol))
 	// check if it was cached
 	cachedResponse, err := getFromCache[data.BondResponse](ctx, app.RedisDB, redisKey)
 	if err != nil {
@@ -335,9 +335,16 @@ func (app *application) getStockInvestmentDataHandler(symbol string, riskFreeRat
 		return &newStockAnalysisStatistics, nil
 	}
 
-	// If no cached data is found, make the API call
-	timeSeriesURL := fmt.Sprintf("%s%s&apikey=4X2SW379QZJPKZZC", data.ALPHA_VANTAGE_TIME_SERIES_URL, symbol)
-	app.logger.Info("Time Series URL", zap.String("url", timeSeriesURL))
+	// If no cached data is found, make the API call.
+	// Build the URL using the configured Alpha Vantage key from app.config; never embed
+	// API keys in source. See SECURITY.md for the rotation runbook.
+	timeSeriesURL := fmt.Sprintf("%s%s%s%s",
+		data.ALPHA_VANTAGE_TIME_SERIES_URL,
+		symbol,
+		data.ALPHA_VANTAGE_API_KEY,
+		app.config.api.apikeys.alphavantage.key,
+	)
+	app.logger.Info("Time Series URL", zap.String("symbol", symbol))
 
 	timeSeriesResponse, err := GETRequest[data.TimeSeriesDailyResponse](app.http_client, timeSeriesURL, nil)
 	if err != nil {
@@ -559,9 +566,7 @@ func (app *application) getSentimentAnalysis(symbol string) (*data.SentimentData
 		data.ALPHA_VANTAGE_API_KEY,
 		app.config.api.apikeys.alphavantage.key,
 	)
-	//app.logger.Info("=============================================================================================")
-	app.logger.Info("Sentiment URL", zap.String("url", sentimentURL))
-	app.logger.Info("Sentiment Symbol", zap.String("symbol", symbol))
+	app.logger.Info("Fetching Alpha Vantage sentiment", zap.String("symbol", symbol))
 
 	// check if it was cached
 	cachedResponse, err := getFromCache[data.SentimentData](ctx, app.RedisDB, redisKey)
@@ -620,7 +625,7 @@ func (app *application) getRiskMetrics(timeHorizon string) (decimal.Decimal, err
 		data.ALPHA_VANTAGE_API_KEY,
 		app.config.api.apikeys.alphavantage.key,
 	)
-	app.logger.Info("Treasury Yield URL", zap.String("url", treasuryYieldURL))
+	app.logger.Info("Fetching Alpha Vantage treasury yield", zap.String("time_horizon", timeHorizon))
 	// check if cached
 	cachedResponse, err := getFromCache[data.TreasuryYieldData](ctx, app.RedisDB, redisKey)
 	if err != nil {
@@ -699,7 +704,7 @@ func (app *application) getSectorPerformance(sector string) (decimal.Decimal, er
 		data.FMP_API_KEY,
 		app.config.api.apikeys.fmp.key,
 	)
-	app.logger.Info("Sector Performance URL", zap.String("url", sectorPerformanceURL))
+	app.logger.Info("Fetching FMP sector performance", zap.String("sector", sector))
 	// check if cached
 	cachedResponse, err := getFromCache[data.SectorAnalysisData](ctx, app.RedisDB, redisKey)
 	if err != nil {

@@ -130,8 +130,9 @@ func (m AlgoManager) CalculateAccountRating(stats AccountStats, awards []*Award)
 	// Account age factor
 	accountAgeFactor := m.CalculateAccountAgeFactor(stats.AccountCreatedAt)
 
-	// Randomization factor for slight variation
-	rand.Seed(time.Now().UnixNano())
+	// Randomization factor for slight variation. As of Go 1.20 the global
+	// math/rand source is auto-seeded; explicit Seed calls are deprecated and
+	// can race when called repeatedly across goroutines.
 	randomFactor := stats.RandomizationFactor.Mul(decimal.NewFromFloat(rand.Float64()))
 
 	// Compute weighted score
