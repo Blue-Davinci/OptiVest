@@ -70,6 +70,14 @@ func (app *application) authenticate(next http.Handler) http.Handler {
 		// Call the contextSetUser() helper to add the user information to the request
 		// context.
 		r = app.contextSetUser(r, user)
+		// Stash the user ID on the per-request log holder so logRequests
+		// (which sits OUTSIDE this middleware) can include user_id in its
+		// final per-request line. The holder is a shared pointer placed in
+		// context by logRequests; if it is nil I am running without the
+		// logging middleware (e.g. in a test) and there is nothing to do.
+		if holder := contextRequestLog(r.Context()); holder != nil {
+			holder.userID = user.ID
+		}
 		// Call the next handler in the chain.
 		next.ServeHTTP(w, r)
 	})
@@ -143,8 +151,8 @@ var (
 //     authenticate in the global middleware chain — see routes.go.
 //   - On allow, sets standard rate-limit response headers so well-behaved
 //     clients can self-throttle:
-//       X-RateLimit-Limit       <burst>
-//       X-RateLimit-Remaining   <tokens left in window>
+//     X-RateLimit-Limit       <burst>
+//     X-RateLimit-Remaining   <tokens left in window>
 //   - On deny, also sets Retry-After (seconds, integer per RFC 7231) and
 //     X-RateLimit-Reset (seconds until the bucket refills) so clients have
 //     two equivalent ways to read the back-off.

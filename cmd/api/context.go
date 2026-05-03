@@ -14,8 +14,10 @@ type contextKey string
 // constant. We'll use this constant as the key for getting and setting user information
 // in the request context.
 const (
-	userContextKey   = contextKey("user")
-	connIDContextKey = contextKey("conn_id")
+	userContextKey       = contextKey("user")
+	connIDContextKey     = contextKey("conn_id")
+	requestIDContextKey  = contextKey("req_id")
+	requestLogContextKey = contextKey("req_log")
 )
 
 // contextConnID returns the per-connection ID stamped by ConnContext on
@@ -24,6 +26,38 @@ const (
 func contextConnID(ctx context.Context) int64 {
 	id, _ := ctx.Value(connIDContextKey).(int64)
 	return id
+}
+
+// contextRequestID returns the per-request ID set by the requestID
+// middleware. Returns "" if the context did not flow through that middleware
+// (e.g. a synthetic request constructed in tests).
+func contextRequestID(ctx context.Context) string {
+	s, _ := ctx.Value(requestIDContextKey).(string)
+	return s
+}
+
+// requestLog is a mutable, request-scoped record that the logRequests
+// middleware uses to assemble its single per-request log line. Middlewares
+// deeper in the chain (notably authenticate) can write fields into this
+// struct via contextRequestLog; the logger reads them after next.ServeHTTP
+// returns.
+//
+// I picked a shared mutable holder over the more idiomatic "wrap r with a
+// new context per write" approach because the context update would not
+// propagate back up to the outer logging middleware (each WithValue produces
+// a new request struct visible only to inner handlers). A single pointer in
+// the original context lets every layer collaborate without restructuring
+// the request.
+type requestLog struct {
+	userID int64 // 0 means unauthenticated / anonymous
+}
+
+// contextRequestLog returns the per-request log holder set by the
+// logRequests middleware, or nil if the context did not flow through it
+// (e.g. a synthetic request in tests). Callers must always nil-check.
+func contextRequestLog(ctx context.Context) *requestLog {
+	rl, _ := ctx.Value(requestLogContextKey).(*requestLog)
+	return rl
 }
 
 // The contextSetUser() method returns a new copy of the request with the provided

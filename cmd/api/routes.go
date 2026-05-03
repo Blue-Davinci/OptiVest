@@ -18,8 +18,12 @@ func (app *application) sseRoutes() http.Handler {
 		AllowCredentials: false,
 		MaxAge:           300, // Maximum value not ignored bycls any of major browsers
 	}))
-	//Use alice to make a global middleware chain.
-	sseMiddleware := alice.New(app.recoverPanic, app.authenticate, app.requireAuthenticatedUser, app.requireActivatedUser).Then
+	// SSE middleware chain. Deliberately omits logRequests: SSE
+	// connections are long-lived (minutes to hours) and a single
+	// "request completed" line at disconnect time is more misleading than
+	// useful. requestID still runs so that anything the SSE handler
+	// itself logs is correlatable with the original HTTP request.
+	sseMiddleware := alice.New(app.requestID, app.recoverPanic, app.authenticate, app.requireAuthenticatedUser, app.requireActivatedUser).Then
 	// Make our categorized routes
 	v1Router := chi.NewRouter()
 	v1Router.With(sseMiddleware).Get("/sse", app.ServeSSE)
@@ -39,8 +43,29 @@ func (app *application) routes() http.Handler {
 		AllowCredentials: false,
 		MaxAge:           300, // Maximum value not ignored by any of major browsers
 	}))
-	//Use alice to make a global middleware chain.
-	globalMiddleware := alice.New(app.metrics, app.recoverPanic, app.rateLimit, app.authenticate).Then
+	// Global middleware chain, outer to inner:
+	//   metrics      - expvar counters and httpsnoop wrapper for the whole
+	//                  pipeline. Kept outermost so every request is at
+	//                  least counted.
+	//   requestID    - stamps X-Request-ID (passthrough or generated).
+	//                  Must run before logRequests so the log line carries
+	//                  the ID, and before authenticate so any authentication
+	//                  log lines also carry it. Trivially side-effect-free,
+	//                  safe to sit outside recoverPanic.
+	//   logRequests  - one structured zap line per request. Critically must
+	//                  sit OUTSIDE recoverPanic: httpsnoop.CaptureMetrics
+	//                  re-propagates inner panics, so if recoverPanic were
+	//                  outside, a panicking handler would never produce a
+	//                  log line. With this ordering recoverPanic catches
+	//                  the panic, writes a 500, and CaptureMetrics returns
+	//                  cleanly with Code=500 so logRequests still emits
+	//                  the (Error-level) line ops are paged on.
+	//   recoverPanic - catches panics, returns 500.
+	//   rateLimit    - per-IP GCRA via Redis. 429s still get one log line
+	//                  because logRequests is outside.
+	//   authenticate - reads bearer token, populates user context and the
+	//                  requestLog holder for logRequests.
+	globalMiddleware := alice.New(app.metrics, app.requestID, app.logRequests, app.recoverPanic, app.rateLimit, app.authenticate).Then
 
 	// dynamic protected middleware
 	dynamicMiddleware := alice.New(app.requireAuthenticatedUser, app.requireActivatedUser)

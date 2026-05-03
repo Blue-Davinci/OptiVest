@@ -305,6 +305,49 @@ the available commands for a quick lookup (INCOMPLETE, use help for full list).
 > - `portfolio_singleflight_collapsed_total` (counter; sustained zero is
 >   normal if your cache is warm or workload is sequential)
 
+> **Structured request logging (P3.B):** Every HTTP request emits exactly
+> one structured log line through `zap`, after the response is fully
+> written. The middleware sits OUTSIDE `recoverPanic` so a panic still
+> produces a 500-status log line (the one ops should be paged on); 401s
+> from `authenticate` and 429s from the rate limiter also each get a
+> single line. Long-lived SSE connections deliberately skip per-request
+> logging to avoid misleading "completed" lines on disconnect.
+>
+> Every request is also stamped with a correlation ID. Inbound
+> `X-Request-ID` headers are accepted (cap 128 chars, allowlisted to
+> `[A-Za-z0-9._-]` to block log injection); anything else is regenerated
+> server-side as 16 hex chars from `crypto/rand`. The chosen ID is echoed
+> back in the response header so clients can include it in bug reports.
+>
+> Per-request log fields (`msg="http request"`):
+> - `method`, `path` (no query string; tokens often live there)
+> - `status`, `bytes`, `latency_ms`
+> - `req_id` - request correlation ID
+> - `conn_id` - per-connection ID stamped by `ConnContext` (P1)
+> - `user_id` - `0` for unauthenticated, else `user.ID` populated by
+>   `authenticate` via the `requestLog` holder
+> - `remote_ip` (via `tomasen/realip`, same source the limiter uses)
+> - `user_agent` (truncated at 256 bytes)
+>
+> Example line:
+> ```json
+> {"level":"info","msg":"http request","method":"GET","path":"/v1/investments/analysis","status":200,"bytes":4821,"latency_ms":1843,"remote_ip":"203.0.113.7","req_id":"a1b2c3d4e5f60718","conn_id":42,"user_id":7,"user_agent":"OptiVest-Web/2.1"}
+> ```
+>
+> Handlers that want their own log lines to participate in the same
+> correlation should call `app.loggerFromRequest(r)` instead of using
+> `app.logger` directly: the returned logger is pre-enriched with
+> `req_id`, `conn_id`, and `user_id`.
+>
+> Operational metrics on `/debug/vars`:
+> - `request_log_total` - total requests observed
+> - `request_log_4xx_total` - subset that returned a client error
+> - `request_log_5xx_total` - subset that returned a server error (alert)
+> - `request_id_generated_total` - inbound requests without an ID header
+> - `request_id_rejected_total` - inbound IDs replaced for failing the
+>   sanitization policy (sustained non-zero suggests a misbehaving caller
+>   or active log-injection attempt)
+
 Using `make run`, will run the API with a default connection string located 
 in `cmd\api\.env`. If you're using `powershell`, you need to load the values otherwise you will get
 a `cannot load env file` error. Use the PS code below to load it or change the env variable:
