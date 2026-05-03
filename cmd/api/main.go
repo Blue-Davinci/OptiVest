@@ -9,10 +9,12 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/Blue-Davinci/OptiVest/internal/data"
@@ -20,7 +22,7 @@ import (
 	"github.com/Blue-Davinci/OptiVest/internal/logger"
 	"github.com/Blue-Davinci/OptiVest/internal/mailer"
 	"github.com/Blue-Davinci/OptiVest/internal/vcs"
-	"github.com/go-redis/redis/v8"
+	"github.com/redis/go-redis/v9"
 	"github.com/gorilla/websocket"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
@@ -144,6 +146,11 @@ type application struct {
 	mailer      mailer.Mailer
 	wg          sync.WaitGroup
 	RedisDB     *redis.Client
+	// ctx is the application's lifecycle context. It is cancelled when the
+	// process receives SIGINT/SIGTERM (see main()). HTTP servers wire it into
+	// BaseContext so in-flight requests get cancellation propagation, and
+	// background goroutines should select on app.ctx.Done() to exit cleanly.
+	ctx context.Context
 	// Mutex protects Clients, ListeningUsers, and ClientCancelFuncs. It is an
 	// RWMutex so reads (e.g. snapshotting per-user channels for fan-out) do not
 	// serialize with one another.
@@ -311,6 +318,13 @@ func main() {
 	// Init our exp metrics variables for server metrics.
 	publishMetrics()
 
+	// Application lifecycle context. signal.NotifyContext cancels the context
+	// when the process receives SIGINT or SIGTERM, replacing the per-server
+	// signal.Notify dance the previous version did. Both HTTP servers and
+	// (in P1+) background goroutines watch this context to exit cleanly.
+	appCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
 	app := &application{
 		config:      cfg,
 		logger:      logger,
@@ -318,6 +332,7 @@ func main() {
 		http_client: httpClient,
 		mailer:      mailer.New(cfg.smtp.host, cfg.smtp.port, cfg.smtp.username, cfg.smtp.password, cfg.smtp.sender),
 		RedisDB:     rdb,
+		ctx:         appCtx,
 		WebSocketUpgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
@@ -509,9 +524,12 @@ func openRedis(cfg config) (*redis.Client, error) {
 		DB: cfg.redis.db, // Use default DB if not set
 	})
 
-	// Ping the Redis server to check if the connection is successful
-	err := rdb.Ping(context.Background()).Err()
-	if err != nil {
+	// Ping the Redis server with a short bounded deadline so a misconfigured
+	// Redis address fails fast at startup instead of hanging the process on
+	// the default dial timeout.
+	pingCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := rdb.Ping(pingCtx).Err(); err != nil {
 		return nil, err
 	}
 

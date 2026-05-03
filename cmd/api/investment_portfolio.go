@@ -860,7 +860,7 @@ func (app *application) investmentPrtfolioAnalysisHandler(w http.ResponseWriter,
 			return
 		}
 	}
-	err = app.performInvestmentPortfolioAnalysis(investmentAnalysis, user)
+	err = app.performInvestmentPortfolioAnalysis(r.Context(), investmentAnalysis, user)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrFailedToGetBondData):
@@ -964,40 +964,33 @@ func (app *application) getAllInvestmentInfoByUserIDHandler(w http.ResponseWrite
 	}
 }
 
-// performInvestmentPortfolioAnalysis() is a helper function that will perform the analysis of the investment portfolio
-// we will recieve a user ID. We will proceed to get the following data:
-// 1. Stock Bond Analysis - all the investments the user has made which include stocks, bonds & alternatives
-// 2. Bond Analysis - all the investments the user has made which include stocks, bonds & alternatives
-func (app *application) performInvestmentPortfolioAnalysis(investmentAnalysis *data.InvestmentAnalysis, user *data.User) error {
-	// Check if the user's time horizon is set; if not, default to short term
+// performInvestmentPortfolioAnalysis runs the full per-user portfolio
+// analysis: pulls the risk-free rate, then walks every stock and bond in the
+// user's portfolio updating its analysis. ctx flows from the originating
+// HTTP request through every upstream API call (Alpha Vantage, FMP, FRED)
+// and Redis cache hit, so handler-side cancellation propagates downstream.
+func (app *application) performInvestmentPortfolioAnalysis(ctx context.Context, investmentAnalysis *data.InvestmentAnalysis, user *data.User) error {
 	if string(user.TimeHorizon.TimeHorizonType) == "" {
 		user.TimeHorizon = app.models.Users.MapTimeHorizonTypeToConstant("short")
 	}
 
-	// Get Risk-Free Rate by using the user's time horizon
-	riskFreeRate, err := app.getRiskMetrics(string(user.TimeHorizon.TimeHorizonType))
+	riskFreeRate, err := app.getRiskMetrics(ctx, string(user.TimeHorizon.TimeHorizonType))
 	if err != nil {
 		return err
 	}
 
 	if len(investmentAnalysis.StockAnalysis) != 0 {
-		// Loop through each stock in the investment analysis
 		for i := range investmentAnalysis.StockAnalysis {
-			stock := &investmentAnalysis.StockAnalysis[i] // Get a pointer to the stock analysis
-
-			// Update the stock analysis
-			if err := app.updateStockAnalysis(user.ID, stock, riskFreeRate); err != nil {
+			stock := &investmentAnalysis.StockAnalysis[i]
+			if err := app.updateStockAnalysis(ctx, user.ID, stock, riskFreeRate); err != nil {
 				return err
 			}
 		}
 	}
-	// Loop through each bond in the investment analysis using performAndLogBondCalculations
 	if len(investmentAnalysis.BondAnalysis) != 0 {
 		for i := range investmentAnalysis.BondAnalysis {
-			bond := &investmentAnalysis.BondAnalysis[i] // Get a pointer to the bond analysis
-
-			// Update the bond analysis
-			if err := app.updateBondAnalysis(user.ID, bond, riskFreeRate); err != nil {
+			bond := &investmentAnalysis.BondAnalysis[i]
+			if err := app.updateBondAnalysis(ctx, user.ID, bond, riskFreeRate); err != nil {
 				// if error includes "failed to get" then return data.ErrFailedToGetBondData
 				if strings.Contains(err.Error(), "failed to get") {
 					return data.ErrFailedToGetBondData

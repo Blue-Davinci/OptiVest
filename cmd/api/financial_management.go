@@ -67,7 +67,7 @@ func (app *application) createNewBudgetdHandler(w http.ResponseWriter, r *http.R
 	// and save.
 	if newBudget.CurrencyCode != user.CurrencyCode {
 		// Convert the amount to the user's currency code
-		convertedAmount, err := app.convertAndGetExchangeRate(newBudget.CurrencyCode, user.CurrencyCode)
+		convertedAmount, err := app.convertAndGetExchangeRate(r.Context(), newBudget.CurrencyCode, user.CurrencyCode)
 		if err != nil {
 			v.AddError("currency_code", "could not convert currency")
 			app.failedValidationResponse(w, r, v.Errors)

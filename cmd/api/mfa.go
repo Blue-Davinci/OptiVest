@@ -27,7 +27,7 @@ func (app *application) setupMFAHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	// check if there is an existing pending session in REDIS, we do this by checking if the key exists
-	mfaSession, err := getFromCache[*data.MFASession](context.Background(), app.RedisDB, redisKey)
+	mfaSession, err := getFromCache[*data.MFASession](r.Context(), app.RedisDB, redisKey)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrNoDataFoundInRedis):
@@ -44,7 +44,7 @@ func (app *application) setupMFAHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	// Generate a new MFA secret
-	secret, err := app.totpTokenGenerator(user.Email, redisKey, data.MFAStatusPending)
+	secret, err := app.totpTokenGenerator(r.Context(), user.Email, redisKey, data.MFAStatusPending)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
@@ -66,9 +66,11 @@ func (app *application) setupMFAHandler(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
-// totpTokenGenerator() generates a new TOTP token for a user. We generate a new
-// secret key for the user, and save the user's email and the status of the 2FA setup session to redis
-func (app *application) totpTokenGenerator(userEmail, redisKey, value string) (*otp.Key, error) {
+// totpTokenGenerator generates a new TOTP token for a user. We generate a
+// new secret key, and save the user's email and the status of the 2FA setup
+// session to redis. The caller's ctx flows into the Redis write so request
+// cancellation propagates downstream.
+func (app *application) totpTokenGenerator(ctx context.Context, userEmail, redisKey, value string) (*otp.Key, error) {
 	secret, err := totp.Generate(totp.GenerateOpts{
 		Issuer:      app.config.api.name,
 		AccountName: userEmail,
@@ -77,8 +79,7 @@ func (app *application) totpTokenGenerator(userEmail, redisKey, value string) (*
 	if err != nil {
 		return nil, err
 	}
-	// save a 2fa status to redis including their user id
-	err = setToCache(context.Background(), app.RedisDB, redisKey, &data.MFASession{
+	err = setToCache(ctx, app.RedisDB, redisKey, &data.MFASession{
 		Email: userEmail,
 		Value: value,
 	}, data.DefaulRedistUserMFATTLS)
@@ -109,7 +110,7 @@ func (app *application) verifiy2FASetupHandler(w http.ResponseWriter, r *http.Re
 	// Check if the user has a pending 2FA setup
 	// If they do NOT have a pending 2FA setup, we return an error
 	redisKey := fmt.Sprintf("%s:%d", data.RedisMFASetupPendingPrefix, user.ID)
-	mfaSession, err := getFromCache[*data.MFASession](context.Background(), app.RedisDB, redisKey)
+	mfaSession, err := getFromCache[*data.MFASession](r.Context(), app.RedisDB, redisKey)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrNoDataFoundInRedis):
@@ -143,7 +144,7 @@ func (app *application) verifiy2FASetupHandler(w http.ResponseWriter, r *http.Re
 	// log the value
 	app.logger.Info("MFA setup pending status fetched from redis", zap.String("key", redisKey))
 	// Verify the code and delete the secret, if there is an error, we abort
-	err = app.validateAndDeleteTOTP(mfaToken.TOTPCode, user.MFASecret, redisKey)
+	err = app.validateAndDeleteTOTP(r.Context(), mfaToken.TOTPCode, user.MFASecret, redisKey)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrInvalidTOTPCode):
@@ -206,27 +207,28 @@ func (app *application) verifiy2FASetupHandler(w http.ResponseWriter, r *http.Re
 	}
 }
 
-// validateAndDeleteTOTP() validates the TOTP code that the user sends. If the code is
-// valid, we delete the secret from the DB
-func (app *application) validateAndDeleteTOTP(TOTPCode, MFASecret, redisKey string) error {
+// validateAndDeleteTOTP validates the TOTP code that the user sends. If the
+// code is valid, we delete the secret from REDIS using the caller's ctx so
+// request cancellation propagates downstream.
+func (app *application) validateAndDeleteTOTP(ctx context.Context, TOTPCode, MFASecret, redisKey string) error {
 	opts := totp.ValidateOpts{
-		Period:    30,                // Time step in seconds (default is 30)
-		Skew:      1,                 // Allowable time skew in steps (default is 1)
-		Digits:    otp.DigitsSix,     // Number of digits in the TOTP code (default is 6)
-		Algorithm: otp.AlgorithmSHA1, // Hashing algorithm (default is SHA1)
+		Period:    30,
+		Skew:      1,
+		Digits:    otp.DigitsSix,
+		Algorithm: otp.AlgorithmSHA1,
 	}
-	// Validate the TOTP code with custom options
 	valid, err := totp.ValidateCustom(TOTPCode, MFASecret, time.Now(), opts)
 	if err != nil {
 		return err
 	}
-	app.logger.Info("TOTP code validation", zap.String("code", TOTPCode), zap.String("secret", MFASecret), zap.Bool("valid", valid))
+	// Don't log raw TOTP codes or MFA secrets at any level — they round-trip
+	// to wherever the logs ship and would be a credential exposure. Just log
+	// the verdict.
+	app.logger.Info("TOTP code validation", zap.Bool("valid", valid))
 	if !valid {
 		return data.ErrInvalidTOTPCode
 	}
-	// if the code is valid, we delete the secret from REDIS
-	delCmd := app.RedisDB.Del(context.Background(), redisKey)
-	if err := delCmd.Err(); err != nil {
+	if err := app.RedisDB.Del(ctx, redisKey).Err(); err != nil {
 		return err
 	}
 

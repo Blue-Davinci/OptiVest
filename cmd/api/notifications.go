@@ -76,10 +76,14 @@ func (app *application) ServeSSE(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// loadAndSendPendingNotifications loads and sends pending notifications from Redis and the database
+// loadAndSendPendingNotifications loads and sends pending notifications from
+// Redis and the database. It is invoked from a goroutine kicked off by
+// AddClient, so it is not request-scoped — we bind to the application
+// lifecycle context (app.ctx) so that on graceful shutdown the in-flight
+// Redis read is cancelled cleanly.
 func (app *application) loadAndSendPendingNotifications(userID int64) {
 	app.logger.Info("Loading and sending pending notifications for user:", zap.Int64("userID", userID))
-	ctx := context.Background()
+	ctx := app.ctx
 
 	// Track processed notifications using a map for deduplication
 	processedNotifications := make(map[int64]bool)
@@ -203,7 +207,11 @@ func (app *application) AddClient(userID int64) <-chan string {
 	delete(app.ListeningUsers, userID)
 
 	// Install the new channel and start a fresh per-user pubsub listener.
-	ctx, cancelFunc := context.WithCancel(context.Background())
+	// The pubsub ctx derives from app.ctx, not context.Background(), so on
+	// graceful shutdown every per-user Redis subscription is cancelled in
+	// addition to the explicit RemoveClient calls — no goroutine leak even
+	// if a client never disconnects cleanly.
+	ctx, cancelFunc := context.WithCancel(app.ctx)
 	app.Clients[userID] = ch
 	app.ClientCancelFuncs[userID] = cancelFunc
 	app.ListeningUsers[userID] = true
@@ -293,9 +301,14 @@ func (app *application) PublishNotification(userID int64, notification data.Noti
 	}
 }
 
-// storeNotificationInRedis saves the notification to Redis for delivery when the user reconnects.
+// storeNotificationInRedis saves the notification to Redis for delivery when
+// the user reconnects. It runs as part of fan-out from PublishNotification,
+// which itself is called both from request flows and background schedulers.
+// We bind to app.ctx so the write completes regardless of whether the
+// triggering request has gone away — the user expects the notification to
+// arrive, not to be cancelled when their browser tab closes.
 func (app *application) storeNotificationInRedis(userID int64, notification data.NotificationContent) error {
-	ctx := context.Background()
+	ctx := app.ctx
 	pendingKey := fmt.Sprintf("%s:%d", data.RedisNotManPendingNotificationKey, userID)
 
 	// Marshal the notification for storage in Redis
@@ -365,9 +378,11 @@ func (app *application) PublishNotificationToRedis(userID int64, notificationTyp
 	if err != nil {
 		return err
 	}
-	// publish the notification to the user's Redis channel
-	err = app.RedisDB.Publish(context.Background(), channel, string(notificationJSON)).Err()
-	if err != nil {
+	// publish the notification to the user's Redis channel. Bound to app.ctx
+	// rather than the originating request so notifications still get delivered
+	// even if the user disconnects mid-request (the recipient — who may be a
+	// different user entirely — should not pay for the originator's tab close).
+	if err := app.RedisDB.Publish(app.ctx, channel, string(notificationJSON)).Err(); err != nil {
 		return err
 	}
 	return nil

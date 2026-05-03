@@ -595,7 +595,7 @@ func (app *application) createNewIncomeHandler(w http.ResponseWriter, r *http.Re
 			return
 		}
 		// convert the amount to the user's default currency
-		convertedAmount, err := app.convertAndGetExchangeRate(income.OriginalCurrencyCode, user.CurrencyCode)
+		convertedAmount, err := app.convertAndGetExchangeRate(r.Context(), income.OriginalCurrencyCode, user.CurrencyCode)
 		if err != nil {
 			v.AddError("currency_code", "could not convert currency")
 			app.failedValidationResponse(w, r, v.Errors)
@@ -733,7 +733,7 @@ func (app *application) updateIncomeHandler(w http.ResponseWriter, r *http.Reque
 		}
 
 		// Convert the provided amount in the new currency to the user's default currency.
-		convertedAmount, err := app.convertAndGetExchangeRate(newCurrencyCode, user.CurrencyCode)
+		convertedAmount, err := app.convertAndGetExchangeRate(r.Context(), newCurrencyCode, user.CurrencyCode)
 		if err != nil {
 			v.AddError("currency_code", "could not convert currency")
 			app.failedValidationResponse(w, r, v.Errors)

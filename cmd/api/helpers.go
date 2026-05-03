@@ -18,7 +18,7 @@ import (
 	"github.com/Blue-Davinci/OptiVest/internal/data"
 	"github.com/Blue-Davinci/OptiVest/internal/validator"
 	"github.com/go-chi/chi/v5"
-	"github.com/go-redis/redis/v8"
+	"github.com/redis/go-redis/v9"
 	"github.com/shopspring/decimal"
 	"go.uber.org/zap"
 )
@@ -558,13 +558,15 @@ func (app *application) updateInvestmentTransactionHelper(userID int64, transact
 	return nil
 }
 
-// Generic method to get data from Redis and unmarshal into the desired type
+// Generic method to get data from Redis and unmarshal into the desired type.
+// Uses errors.Is for the redis.Nil check so behaviour is preserved if future
+// go-redis releases (or our own wrapping middleware) wrap the sentinel.
 func getFromCache[T any](ctx context.Context, rdb *redis.Client, key string) (*T, error) {
 	cachedData, err := rdb.Get(ctx, key).Result()
-	if err == redis.Nil {
-		return nil, ErrNoDataFoundInRedis // Data not found
+	if errors.Is(err, redis.Nil) {
+		return nil, ErrNoDataFoundInRedis
 	} else if err != nil {
-		return nil, err // Some other error
+		return nil, err
 	}
 
 	var result T

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 	"time"
 
@@ -14,12 +15,13 @@ import (
 )
 
 // updateBondAnalysis updates the BondAnalysis data with performance metrics.
-func (app *application) updateBondAnalysis(userID int64, bond *data.BondAnalysis, riskFreeRate decimal.Decimal) error {
+// ctx flows from the originating HTTP request through performAndLogBondCalculations
+// into the FRED API call and Redis cache reads.
+func (app *application) updateBondAnalysis(ctx context.Context, userID int64, bond *data.BondAnalysis, riskFreeRate decimal.Decimal) error {
 	defaultFaceValue := decimal.NewFromFloat(1000.0)
-	// calculate years to maturity by subtracting the current date from the maturity date to int
 	yearsToMaturity := app.calculateYearsToMaturity(bond.MaturityDate)
-	// Get bond investment data
 	bondAnalysisStatistics, err := app.performAndLogBondCalculations(
+		ctx,
 		bond.BondSymbol,
 		data.BondDefaultStartDate,
 		defaultFaceValue,
@@ -52,15 +54,15 @@ func (app *application) updateBondAnalysis(userID int64, bond *data.BondAnalysis
 }
 
 // updateStockAnalysis updates the StockAnalysis data with performance metrics.
-func (app *application) updateStockAnalysis(userID int64, stock *data.StockAnalysis, riskFreeRate decimal.Decimal) error {
-	// Get sector performance
-	sectorPerformance, err := app.getSectorPerformance(stock.Sector)
+// ctx flows from the originating HTTP request through getSectorPerformance,
+// getStockInvestmentDataHandler, and downstream Alpha Vantage / Redis ops.
+func (app *application) updateStockAnalysis(ctx context.Context, userID int64, stock *data.StockAnalysis, riskFreeRate decimal.Decimal) error {
+	sectorPerformance, err := app.getSectorPerformance(ctx, stock.Sector)
 	if err != nil {
 		return err
 	}
 
-	// Get stock investment data
-	stockAnalysisStatistics, err := app.getStockInvestmentDataHandler(stock.StockSymbol, riskFreeRate)
+	stockAnalysisStatistics, err := app.getStockInvestmentDataHandler(ctx, stock.StockSymbol, riskFreeRate)
 	if err != nil {
 		return err
 	}
@@ -85,9 +87,8 @@ func (app *application) updateStockAnalysis(userID int64, stock *data.StockAnaly
 // ==========================================================================================================
 // Bond Investment Calculations
 // ==========================================================================================================
-func (app *application) performAndLogBondCalculations(symbol, startDatestring string, faceValue, couponRate decimal.Decimal, yearsToMaturity int, riskFreeRate decimal.Decimal) (*data.BondAnalysisStatistics, error) {
-	// Fetch bond data using the getBondInvestmentDataHandler
-	bondData, err := app.getBondInvestmentDataHandler(symbol, startDatestring)
+func (app *application) performAndLogBondCalculations(ctx context.Context, symbol, startDatestring string, faceValue, couponRate decimal.Decimal, yearsToMaturity int, riskFreeRate decimal.Decimal) (*data.BondAnalysisStatistics, error) {
+	bondData, err := app.getBondInvestmentDataHandler(ctx, symbol, startDatestring)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get bond data: %v", err)
 	}
@@ -166,13 +167,12 @@ func (app *application) performAndLogBondCalculations(symbol, startDatestring st
 	return newBondAnalysisStatistics, nil
 }
 
-// getBondInvestmentDataHandler() is a helper function that fetches historical data for a given bond symbol
-// We will get a symbol and use the client to fetch the historical data for that symbol via ALPHA VANTAGE API
-// We use app.http_client as our main client that expects an *Optivet_Client, url, headers if any
-// We expect back a TimeSeriesMonthlyResponse struct and an error
-func (app *application) getBondInvestmentDataHandler(symbol, startDatestring string) (*data.BondResponse, error) {
+// getBondInvestmentDataHandler fetches historical data for a given bond
+// symbol via the FRED API, caching the result in Redis for 24h. The caller's
+// ctx flows into both the Redis read/write and the upstream HTTP call so a
+// disconnected request stops blocking server resources promptly.
+func (app *application) getBondInvestmentDataHandler(ctx context.Context, symbol, startDatestring string) (*data.BondResponse, error) {
 	redisKey := fmt.Sprintf("%s:%s", data.RedisBondTimeSeriesPrefix, symbol)
-	ctx := context.Background()
 	ttl := 24 * time.Hour
 	timeSeriesUrl := fmt.Sprintf("%s%s%s%s%s%s%s%s",
 		data.FRED_BASE_URL,
@@ -292,13 +292,12 @@ func calculateBondVolatility(bondReturns []decimal.Decimal) decimal.Decimal {
 //
 // ==========================================================================================================
 
-// getStockInvestmentDataHandler() is a helper function that fetches historical data for a given stock symbol
-// We will get a symbol and use the client to fetch the historical data for that symbol via ALPHA VANTAGE API
-// We use app.http_client as our main client that expects an *Optivet_Client, url, headers if any
-// We expect back a TimeSeriesMonthlyResponse struct and an error
-func (app *application) getStockInvestmentDataHandler(symbol string, riskFreeRate decimal.Decimal) (*data.StockAnalysisStatistics, error) {
+// getStockInvestmentDataHandler fetches historical data for a given stock
+// symbol via the Alpha Vantage API, caching the result in Redis for 24h.
+// The caller's ctx flows into the Redis ops, the upstream Alpha Vantage call,
+// and the sentiment-analysis sub-fetch.
+func (app *application) getStockInvestmentDataHandler(ctx context.Context, symbol string, riskFreeRate decimal.Decimal) (*data.StockAnalysisStatistics, error) {
 	redisKey := fmt.Sprintf("%s:%s", data.RedisStockTimeSeriesPrefix, symbol)
-	ctx := context.Background()
 	ttl := 24 * time.Hour
 
 	// Try to get the cached data from Redis
@@ -313,8 +312,10 @@ func (app *application) getStockInvestmentDataHandler(symbol string, riskFreeRat
 	}
 
 	if cachedResponse != nil {
-		// Data found in cache, perform and log the calculations
-		app.performAndLogCalculations(cachedResponse, riskFreeRate)
+		// Data found in cache, perform the calculations once. The previous
+		// version called performAndLogCalculations twice on this branch and
+		// discarded the first return value, doubling the CPU cost on every
+		// cache hit and producing duplicate "Average Daily Return" log lines.
 		returns, sharpe_ratio, sortino_ratio := app.performAndLogCalculations(cachedResponse, riskFreeRate)
 		newStockAnalysisStatistics := data.StockAnalysisStatistics{
 			Returns:      returns,
@@ -322,7 +323,7 @@ func (app *application) getStockInvestmentDataHandler(symbol string, riskFreeRat
 			SortinoRatio: sortino_ratio,
 		}
 		// call fillSentimentDataHelper to fill in the sentiment data
-		err = app.fillSentimentDataHelper(&newStockAnalysisStatistics, symbol)
+		err = app.fillSentimentDataHelper(ctx, &newStockAnalysisStatistics, symbol)
 		if err != nil {
 			// just print the error
 			app.logger.Error("Error filling sentiment data", zap.String("symbol", symbol))
@@ -368,7 +369,7 @@ func (app *application) getStockInvestmentDataHandler(symbol string, riskFreeRat
 		SharpeRatio:  sharpe_ratio,
 		SortinoRatio: sortino_ratio,
 	}
-	err = app.fillSentimentDataHelper(&newStockAnalysisStatistics, symbol)
+	err = app.fillSentimentDataHelper(ctx, &newStockAnalysisStatistics, symbol)
 	if err != nil {
 		// just print the error
 		app.logger.Error("Error filling sentiment data", zap.Error(err))
@@ -377,12 +378,12 @@ func (app *application) getStockInvestmentDataHandler(symbol string, riskFreeRat
 	return &newStockAnalysisStatistics, nil
 }
 
-// fillSentimentDataHelper() is a helper function that will fill a StockAnalysisStatistics struct with sentiment data
-// sentiment data include average sentiment, most frequent label, weighted relevance, ticker sentiment score, and most relevant topic
-// we return an error if the call to getSentimentAnalysis fails
-func (app *application) fillSentimentDataHelper(stockAnalysisStatistics *data.StockAnalysisStatistics, symbol string) error {
-	// get sentiment data
-	sentimentData, err := app.getSentimentAnalysis(symbol)
+// fillSentimentDataHelper fills a StockAnalysisStatistics struct with
+// sentiment data (average sentiment, most frequent label, weighted relevance,
+// ticker sentiment score, most relevant topic). ctx flows into the upstream
+// Alpha Vantage sentiment fetch and Redis cache.
+func (app *application) fillSentimentDataHelper(ctx context.Context, stockAnalysisStatistics *data.StockAnalysisStatistics, symbol string) error {
+	sentimentData, err := app.getSentimentAnalysis(ctx, symbol)
 	if err != nil {
 		// fill in the items with empty
 		stockAnalysisStatistics.AverageSentiment = decimal.NewFromInt(0)
@@ -431,17 +432,40 @@ func (app *application) getAverageDailyReturn(timeseriesData *data.TimeSeriesDai
 	return dailyReturns
 }
 
+// filterTimeSeriesBetweenYears returns the daily entries from response whose
+// date falls in the inclusive [lastYear, currentYear] window, sorted by date
+// in ascending order.
+//
+// Sorting is essential: calculateDailyReturns walks the slice computing
+// (price[i] - price[i-1]) / price[i-1], which only produces meaningful
+// returns when consecutive entries are chronological neighbours. Iterating
+// response.DailyTimeSeries directly would inherit Go's randomized map order
+// and produce different Sharpe / Sortino ratios on every call — a real
+// financial-accuracy bug, not just a determinism nuisance.
 func filterTimeSeriesBetweenYears(response *data.TimeSeriesDailyResponse, lastYear int) []data.TimeSeriesDailyData {
-	var filteredData []data.TimeSeriesDailyData
+	type dated struct {
+		date  time.Time
+		entry data.TimeSeriesDailyData
+	}
+
 	currentYear := time.Now().Year()
+	pairs := make([]dated, 0, len(response.DailyTimeSeries))
 
 	for dateStr, tsData := range response.DailyTimeSeries {
 		date, err := time.Parse("2006-01-02", dateStr)
 		if err == nil && date.Year() <= currentYear && date.Year() >= lastYear {
-			filteredData = append(filteredData, tsData)
+			pairs = append(pairs, dated{date: date, entry: tsData})
 		}
 	}
 
+	sort.Slice(pairs, func(i, j int) bool {
+		return pairs[i].date.Before(pairs[j].date)
+	})
+
+	filteredData := make([]data.TimeSeriesDailyData, len(pairs))
+	for i, p := range pairs {
+		filteredData[i] = p.entry
+	}
 	return filteredData
 }
 
@@ -531,20 +555,32 @@ func downsideDeviation(returns []decimal.Decimal) decimal.Decimal {
 }
 
 // sharpeRatio() calculates the Sharpe ratio from a slice of decimal.Decimal values and a risk-free rate
+// sharpeRatio computes the Sharpe ratio for a series of returns. When the
+// returns have zero volatility (e.g. a brand-new symbol whose history is
+// effectively flat in the analysis window) the divisor is zero and the
+// shopspring/decimal Div panics; we return decimal.Zero in that case rather
+// than crashing the entire stock-analysis pipeline. Callers that need to
+// distinguish "undefined" from "exactly zero" can re-derive the volatility
+// themselves; we deliberately avoid surfacing an error here because the
+// surrounding code path is best-effort.
 func sharpeRatio(returns []decimal.Decimal, riskFreeRate decimal.Decimal) decimal.Decimal {
 	avgReturn := calculateAverage(returns)
-	volatility := calculateStandardDeviation(returns) // Assuming you have this function
-
-	// (avgReturn - riskFreeRate) / volatility
+	volatility := calculateStandardDeviation(returns)
+	if volatility.IsZero() {
+		return decimal.Zero
+	}
 	return avgReturn.Sub(riskFreeRate).Div(volatility)
 }
 
-// sortinoRatio() calculates the Sortino ratio from a slice of decimal.Decimal values and a risk-free rate
+// sortinoRatio computes the Sortino ratio. Same divide-by-zero treatment as
+// sharpeRatio: a stock with no negative returns in the window has zero
+// downside deviation, which would otherwise panic.
 func sortinoRatio(returns []decimal.Decimal, riskFreeRate decimal.Decimal) decimal.Decimal {
 	avgReturn := calculateAverage(returns)
-	downsideVolatility := downsideDeviation(returns) // Call downside deviation function
-
-	// (avgReturn - riskFreeRate) / downsideVolatility
+	downsideVolatility := downsideDeviation(returns)
+	if downsideVolatility.IsZero() {
+		return decimal.Zero
+	}
 	return avgReturn.Sub(riskFreeRate).Div(downsideVolatility)
 }
 
@@ -552,10 +588,11 @@ func sortinoRatio(returns []decimal.Decimal, riskFreeRate decimal.Decimal) decim
 // Sentiment Analysis Calculations
 // ==========================================================================================================
 
-// getSentimentAnalysis() is a helper function that fetches sentiment analysis data for a given stock symbol
-func (app *application) getSentimentAnalysis(symbol string) (*data.SentimentData, error) {
+// getSentimentAnalysis fetches sentiment analysis data for a given stock
+// symbol via the Alpha Vantage NEWS_SENTIMENT API, caching for 24h. ctx
+// flows from the originating HTTP request.
+func (app *application) getSentimentAnalysis(ctx context.Context, symbol string) (*data.SentimentData, error) {
 	redisKey := fmt.Sprintf("%s:%s", data.RedisSentimentPrefix, symbol)
-	ctx := context.Background()
 	ttl := 24 * time.Hour
 
 	sentimentURL := fmt.Sprintf("%s%s%s%s%s%s",
@@ -610,11 +647,11 @@ func (app *application) getSentimentAnalysis(symbol string) (*data.SentimentData
 // ==========================================================================================================
 // RISK
 // ==========================================================================================================
-// calculateRiskMetrics() is a helper function that calculates risk metrics for a given stock symbol
-func (app *application) getRiskMetrics(timeHorizon string) (decimal.Decimal, error) {
-	//
+// getRiskMetrics computes the risk-free rate for the given time horizon by
+// pulling treasury yield data from Alpha Vantage (cached in Redis for 24h).
+// ctx flows from the originating HTTP request.
+func (app *application) getRiskMetrics(ctx context.Context, timeHorizon string) (decimal.Decimal, error) {
 	redisKey := data.RedisTreasuryYieldRiskRatePrefix
-	ctx := context.Background()
 	ttl := 24 * time.Hour
 	//https://www.alphavantage.co/query?function=TREASURY_YIELD&interval=daily&maturity=10year&apikey=NYRXRLGLWY29115K
 	treasuryYieldURL := fmt.Sprintf("%s%s%s%s%s%s",
@@ -691,12 +728,10 @@ func (app *application) getRiskFactor(data *data.TreasuryYieldData, timeHorizone
 // Sector Analysis
 // ==========================================================================================================
 
-// getSectorPerformance() is a helper function that fetches sector performance data
-// We only require the sector as the input and return a decimal.Decimal and an error
-// of the sector performance
-func (app *application) getSectorPerformance(sector string) (decimal.Decimal, error) {
+// getSectorPerformance fetches sector performance data via the FMP API,
+// cached in Redis for 5 minutes. ctx flows from the originating HTTP request.
+func (app *application) getSectorPerformance(ctx context.Context, sector string) (decimal.Decimal, error) {
 	redisKey := data.RedisSectorPerformancePrefix
-	ctx := context.Background()
 	ttl := 5 * time.Minute
 
 	sectorPerformanceURL := fmt.Sprintf("%s%s%s",

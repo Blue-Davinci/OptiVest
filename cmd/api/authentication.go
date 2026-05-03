@@ -129,13 +129,15 @@ func (app *application) performMFAOnLogin(w http.ResponseWriter, r *http.Request
 	}
 	// generate our TOTP token using the encrypted Token as the value
 	// for the key we will use the RedisMFALoginPendingPrefix
-	_, err = app.totpTokenGenerator(user.Email, redisKey, mfaToken.Plaintext)
+	_, err = app.totpTokenGenerator(r.Context(), user.Email, redisKey, mfaToken.Plaintext)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
 	}
-	app.logger.Info("MFA login totp generated with this key", zap.String("plain text saved", mfaToken.Plaintext), zap.String("user email", user.Email))
-	app.logger.Info(("MFA Login, we use the following user secret"), zap.String("secret", user.MFASecret), zap.String("redis key", redisKey))
+	// Never log the MFA plaintext token or the user's MFA secret. Both are
+	// credentials and would round-trip to log aggregators. The redis key is
+	// safe to log because it is only an opaque cache identifier.
+	app.logger.Info("MFA login TOTP generated", zap.String("user_email", user.Email), zap.String("redis_key", redisKey))
 	// we will now send the user the encrypted token and the email
 	// returning a 403 Forbidden status code
 	err = app.writeJSON(w, http.StatusForbidden, envelope{
@@ -261,10 +263,9 @@ func (app *application) validateMFALoginAttemptHandler(w http.ResponseWriter, r 
 		app.invalidCredentialsResponse(w, r)
 		return
 	}
-	// validate the TOTP code
-	// Verify the code and delete the secret, if there is an error, we abort
-	app.logger.Info(("MFA Login Verification, we use the following user secret"), zap.String("secret", user.MFASecret))
-	err = app.validateAndDeleteTOTP(mfaToken.TOTPCode, user.MFASecret, redisKey)
+	// Verify the code and delete the secret, if there is an error, we abort.
+	// Never log MFA secrets — they're credentials.
+	err = app.validateAndDeleteTOTP(r.Context(), mfaToken.TOTPCode, user.MFASecret, redisKey)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrInvalidTOTPCode):
@@ -333,7 +334,7 @@ func (app *application) createPasswordResetTokenHandler(w http.ResponseWriter, r
 	// ToDO: Add MFA Check Here Branching to MFATOTP Checker Handler To Verify MFA
 	// Return 401 Unauthorized if the user has MFA enabled and TOTP code is not provided
 	if user.MFAEnabled {
-		err := app.validateTOTPResetPasswordHandler(input.TOTPCode, user)
+		err := app.validateTOTPResetPasswordHandler(r.Context(), input.TOTPCode, user)
 		if err != nil {
 			// if user has mfaenable and did not actually provide a TOTP code, we return an unauthorized error
 			switch {
@@ -385,13 +386,10 @@ func (app *application) createPasswordResetTokenHandler(w http.ResponseWriter, r
 // We perform a validation on the TOTP code using data.ValidateTOTPCode, and continue to do a secret
 // validation via validateAndDeleteTOTP passing the token, secret and redis key
 // If everything is okay, we return nil otherwise we return an error
-func (app *application) validateTOTPResetPasswordHandler(totpCode string, user *data.User) error {
-	// create our redis key with RedisMFAResetPasswordPendingPrefix
+func (app *application) validateTOTPResetPasswordHandler(ctx context.Context, totpCode string, user *data.User) error {
 	redisKey := fmt.Sprintf("%s:%d", data.RedisMFAResetPasswordPendingPrefix, user.ID)
-	// check if the user has provided a TOTP code, if not, REDIS cache the session and return an error
 	if totpCode == "" {
-		// cache the session
-		err := setToCache(context.Background(), app.RedisDB, redisKey, &data.MFASession{
+		err := setToCache(ctx, app.RedisDB, redisKey, &data.MFASession{
 			Email: user.Email,
 			Value: data.MFAStatusPending,
 		}, data.DefaulRedistUserMFATTLS)
@@ -400,29 +398,23 @@ func (app *application) validateTOTPResetPasswordHandler(totpCode string, user *
 		}
 		return data.ErrInvalidTOTPCode
 	}
-	// check if there is a pending MFA session, if not we return an error
-	_, err := getFromCache[*data.MFASession](context.Background(), app.RedisDB, redisKey)
+	_, err := getFromCache[*data.MFASession](ctx, app.RedisDB, redisKey)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrNoDataFoundInRedis):
-			// return an error
 			return data.ErrRedisMFAKeyNotFound
 		default:
-			// return a 500 internal server error
 			return err
 		}
 	}
-	// validate the TOTP code
 	mfaToken := &data.MFAToken{
 		TOTPCode: totpCode,
 	}
 	v := validator.New()
-	// validate the input
 	if data.ValidateTOTPCode(v, mfaToken); !v.Valid() {
 		return data.ErrInvalidTOTPCode
 	}
-	// verify the code and delete the secret, if there is an error, we abort
-	err = app.validateAndDeleteTOTP(mfaToken.TOTPCode, user.MFASecret, redisKey)
+	err = app.validateAndDeleteTOTP(ctx, mfaToken.TOTPCode, user.MFASecret, redisKey)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrInvalidTOTPCode):
