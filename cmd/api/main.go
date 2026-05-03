@@ -9,10 +9,12 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/Blue-Davinci/OptiVest/internal/data"
@@ -144,6 +146,11 @@ type application struct {
 	mailer      mailer.Mailer
 	wg          sync.WaitGroup
 	RedisDB     *redis.Client
+	// ctx is the application's lifecycle context. It is cancelled when the
+	// process receives SIGINT/SIGTERM (see main()). HTTP servers wire it into
+	// BaseContext so in-flight requests get cancellation propagation, and
+	// background goroutines should select on app.ctx.Done() to exit cleanly.
+	ctx context.Context
 	// Mutex protects Clients, ListeningUsers, and ClientCancelFuncs. It is an
 	// RWMutex so reads (e.g. snapshotting per-user channels for fan-out) do not
 	// serialize with one another.
@@ -311,6 +318,13 @@ func main() {
 	// Init our exp metrics variables for server metrics.
 	publishMetrics()
 
+	// Application lifecycle context. signal.NotifyContext cancels the context
+	// when the process receives SIGINT or SIGTERM, replacing the per-server
+	// signal.Notify dance the previous version did. Both HTTP servers and
+	// (in P1+) background goroutines watch this context to exit cleanly.
+	appCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
 	app := &application{
 		config:      cfg,
 		logger:      logger,
@@ -318,6 +332,7 @@ func main() {
 		http_client: httpClient,
 		mailer:      mailer.New(cfg.smtp.host, cfg.smtp.port, cfg.smtp.username, cfg.smtp.password, cfg.smtp.sender),
 		RedisDB:     rdb,
+		ctx:         appCtx,
 		WebSocketUpgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,

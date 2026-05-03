@@ -4,53 +4,139 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
-	"os"
-	"os/signal"
-	"syscall"
+	"sync/atomic"
 	"time"
 
 	"github.com/robfig/cron/v3"
 	"go.uber.org/zap"
 )
 
-func (app *application) server() error {
-	// declare our http server
-	srv := &http.Server{
-		Addr:         fmt.Sprintf(":%d", app.config.port),
-		Handler:      app.routes(),
-		IdleTimeout:  time.Minute,
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 60 * time.Second,
+// Server timing constants. ReadHeaderTimeout is the most important addition
+// here: without it a single slow client can occupy a goroutine indefinitely
+// (Slowloris). It applies only to the request header phase, so it is safe to
+// set tightly even on the SSE server which streams responses for hours.
+const (
+	apiReadHeaderTimeout = 5 * time.Second
+	apiIdleTimeout       = time.Minute
+	apiReadTimeout       = 10 * time.Second
+	apiWriteTimeout      = 60 * time.Second
+
+	sseReadHeaderTimeout = 5 * time.Second
+	sseReadTimeout       = 10 * time.Second
+	// SSE responses are open-ended streams. WriteTimeout=0 disables the
+	// per-connection write deadline; correctness is enforced by the per-
+	// notification timeout in PublishNotification (see notifications.go).
+	sseWriteTimeout = 0
+	sseIdleTimeout  = 0
+
+	gracefulShutdownTimeout = 20 * time.Second
+)
+
+// connIDCounter is the source for per-connection IDs injected via ConnContext.
+// An atomic int64 is sufficient: monotonic, contention-free, and the absolute
+// value carries no security meaning (it is only used to group log lines).
+var connIDCounter atomic.Int64
+
+// connContext is the per-connection context provider for both http.Servers.
+// It stamps a monotonically-increasing connection ID into the request's
+// context so log entries from the same TCP connection can be correlated.
+func connContext(ctx context.Context, _ net.Conn) context.Context {
+	return context.WithValue(ctx, connIDContextKey, connIDCounter.Add(1))
+}
+
+// apiServerConfig returns an http.Server pre-configured with the production
+// hardening for the main API: tight ReadHeaderTimeout for Slowloris
+// protection, ErrorLog routed through zap, BaseContext tied to the
+// application's lifecycle so shutdown cancels in-flight handlers, and
+// ConnContext stamping a per-connection ID for log correlation.
+//
+// The handler is injected so tests can substitute a no-op mux without having
+// to materialise the full routes() tree (which depends on the expvar metric
+// publishers and the entire middleware chain).
+func (app *application) apiServerConfig(handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              fmt.Sprintf(":%d", app.config.port),
+		Handler:           handler,
+		ErrorLog:          zap.NewStdLog(app.logger),
+		ReadHeaderTimeout: apiReadHeaderTimeout,
+		ReadTimeout:       apiReadTimeout,
+		WriteTimeout:      apiWriteTimeout,
+		IdleTimeout:       apiIdleTimeout,
+		BaseContext:       func(_ net.Listener) context.Context { return app.ctx },
+		ConnContext:       connContext,
 	}
-	// make a channel to listen for shutdown signals
-	shutdownChan := make(chan error)
-	// start a background routine, this will listen to any shutdown signals
+}
+
+// sseServerConfig returns the SSE HTTP server, pre-configured with the same
+// hardening as apiServerConfig but with WriteTimeout disabled because SSE
+// responses are long-lived streams. Per-message correctness is enforced
+// instead by the timeout in PublishNotification (see notifications.go).
+func (app *application) sseServerConfig(handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              fmt.Sprintf(":%d", app.config.ws.port),
+		Handler:           handler,
+		ErrorLog:          zap.NewStdLog(app.logger),
+		ReadHeaderTimeout: sseReadHeaderTimeout,
+		ReadTimeout:       sseReadTimeout,
+		WriteTimeout:      sseWriteTimeout,
+		IdleTimeout:       sseIdleTimeout,
+		BaseContext:       func(_ net.Listener) context.Context { return app.ctx },
+		ConnContext:       connContext,
+	}
+}
+
+// buildAPIServer wires the production routes into apiServerConfig. Kept as a
+// thin wrapper so tests can call apiServerConfig directly with a stub handler.
+func (app *application) buildAPIServer() *http.Server {
+	return app.apiServerConfig(app.routes())
+}
+
+// buildSSEServer wires the production SSE routes into sseServerConfig.
+func (app *application) buildSSEServer() *http.Server {
+	return app.sseServerConfig(app.sseRoutes())
+}
+
+// server starts both the API and SSE HTTP servers and orchestrates a single
+// graceful-shutdown path triggered by app.ctx (which itself fans out from
+// signal.NotifyContext in main()).
+//
+// Previously the SSE server was launched as `go app.serveSSE()` with errors
+// only logged internally — a bind failure on the SSE port would silently keep
+// the process running. Both servers now feed errors back into a single channel
+// so any startup failure is fatal.
+func (app *application) server() error {
+	srv := app.buildAPIServer()
+	sseSrv := app.buildSSEServer()
+
+	// shutdownChan carries the result of the graceful-shutdown attempt.
+	shutdownChan := make(chan error, 1)
+
+	// serveErrChan carries unexpected errors from either ListenAndServe call.
+	// Buffered to two so neither goroutine ever blocks on send if shutdown
+	// fires first.
+	serveErrChan := make(chan error, 2)
+
+	// Graceful shutdown coordinator: waits for app.ctx to cancel, then drains
+	// both servers within gracefulShutdownTimeout, waits for app.wg-tracked
+	// background goroutines, and finally stops every cron scheduler.
 	go func() {
-		// make a quit channel
-		quit := make(chan os.Signal, 1)
-		// listen for the SIGINT and SIGTERM signals
-		signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-		// read signal from the quit channel and will wait till there is an actual signal
-		s := <-quit
-		// printout the signal details
-		app.logger.Info("shutting down server", zap.String("signal", s.String()))
-		// make a 20sec context
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		<-app.ctx.Done()
+		app.logger.Info("shutting down servers",
+			zap.String("api_addr", srv.Addr),
+			zap.String("sse_addr", sseSrv.Addr),
+		)
+
+		ctx, cancel := context.WithTimeout(context.Background(), gracefulShutdownTimeout)
 		defer cancel()
 
-		// Call srv.Shutdown exactly once. The previous version invoked it twice
-		// and only forwarded the second result to shutdownChan, which silently
-		// swallowed any error from the first attempt and double-counted the
-		// drain budget.
-		shutdownErr := srv.Shutdown(ctx)
+		apiErr := srv.Shutdown(ctx)
+		sseErr := sseSrv.Shutdown(ctx)
 
-		// Log a message to say that we're waiting for any background goroutines
-		// to complete their tasks.
-		app.logger.Info("completing background tasks...", zap.String("addr", srv.Addr))
-		// wait for any background tasks to complete
+		app.logger.Info("completing background tasks...")
 		app.wg.Wait()
-		// stop the cron job schedulers
+
 		app.stopCronJobs(
 			app.config.scheduler.trackMonthlyGoalsCron,
 			app.config.scheduler.trackGoalProgressStatus,
@@ -60,54 +146,51 @@ func (app *application) server() error {
 			app.config.scheduler.trackExpiredNotifications,
 			app.config.scheduler.rssFeedScraper,
 		)
-		shutdownChan <- shutdownErr
+
+		shutdownChan <- errors.Join(apiErr, sseErr)
 	}()
-	// start our WS server via a go routine
-	go app.serveSSE()
-	// start the server printing out our main settings
-	app.logger.Info("starting server", zap.String("addr", srv.Addr), zap.String("env", app.config.env))
-	if err := srv.ListenAndServe(); err != nil {
-		if !errors.Is(err, http.ErrServerClosed) {
+
+	go func() {
+		app.logger.Info("starting SSE server",
+			zap.Int("port", app.config.ws.port),
+		)
+		if err := sseSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serveErrChan <- fmt.Errorf("sse server: %w", err)
+		}
+	}()
+
+	app.logger.Info("starting API server",
+		zap.String("addr", srv.Addr),
+		zap.String("env", app.config.env),
+	)
+	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return fmt.Errorf("api server: %w", err)
+	}
+
+	// At this point ListenAndServe has returned either http.ErrServerClosed
+	// (graceful shutdown is in progress) or never returned because the SSE
+	// server fell over first. Wait for one of: the SSE serve loop reporting
+	// an error, or the shutdown coordinator finishing.
+	select {
+	case err := <-serveErrChan:
+		return err
+	case err := <-shutdownChan:
+		if err != nil {
 			return err
 		}
 	}
-	// Otherwise, we wait to receive the return value from Shutdown() on the
-	// shutdownError channel. If return value is an error, we know that there was a
-	// problem with the graceful shutdown and we return the error.
-	err := <-shutdownChan
-	if err != nil {
-		return err
-	}
-	// Exiting....
-	app.logger.Info("stopped server", zap.String("addr", srv.Addr))
+
+	app.logger.Info("stopped servers", zap.String("addr", srv.Addr))
 	return nil
 }
 
-// stopCronJobs() essentially stopns all the cron jobs that are running in the application
+// stopCronJobs stops every cron scheduler in turn and blocks until each one's
+// Stop()-returned context fires, guaranteeing in-flight job runs have settled
+// before the process exits.
 func (app *application) stopCronJobs(cronJobs ...*cron.Cron) {
 	app.logger.Info("stopping cron jobs..", zap.Int("count", len(cronJobs)))
 	for _, cronJob := range cronJobs {
 		ctx := cronJob.Stop()
 		<-ctx.Done()
-	}
-
-}
-
-// serveWS() is a server that launches our websocket server
-// our handler is the wsHandler
-func (app *application) serveSSE() {
-	app.logger.Info("starting websocket server", zap.Int("addr", app.config.ws.port))
-	server := &http.Server{
-		Addr:         fmt.Sprintf(":%d", app.config.ws.port),
-		Handler:      app.sseRoutes(),
-		IdleTimeout:  0,
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 0, // no timeout
-	}
-	err := server.ListenAndServe()
-	if err != nil {
-		if !errors.Is(err, http.ErrServerClosed) {
-			app.logger.Error("error starting websocket server", zap.Error(err))
-		}
 	}
 }

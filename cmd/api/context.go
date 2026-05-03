@@ -13,7 +13,18 @@ type contextKey string
 // Convert the string "user" to a contextKey type and assign it to the userContextKey
 // constant. We'll use this constant as the key for getting and setting user information
 // in the request context.
-const userContextKey = contextKey("user")
+const (
+	userContextKey   = contextKey("user")
+	connIDContextKey = contextKey("conn_id")
+)
+
+// contextConnID returns the per-connection ID stamped by ConnContext on
+// http.Server, or 0 if the context did not flow through one of our servers
+// (e.g. a synthetic request constructed in tests). Useful for log correlation.
+func contextConnID(ctx context.Context) int64 {
+	id, _ := ctx.Value(connIDContextKey).(int64)
+	return id
+}
 
 // The contextSetUser() method returns a new copy of the request with the provided
 // User struct added to the context. Note that we use our userContextKey constant as the
