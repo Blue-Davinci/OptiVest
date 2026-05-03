@@ -1,11 +1,9 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/Blue-Davinci/OptiVest/internal/data"
@@ -964,48 +962,9 @@ func (app *application) getAllInvestmentInfoByUserIDHandler(w http.ResponseWrite
 	}
 }
 
-// performInvestmentPortfolioAnalysis runs the full per-user portfolio
-// analysis: pulls the risk-free rate, then walks every stock and bond in the
-// user's portfolio updating its analysis. ctx flows from the originating
-// HTTP request through every upstream API call (Alpha Vantage, FMP, FRED)
-// and Redis cache hit, so handler-side cancellation propagates downstream.
-func (app *application) performInvestmentPortfolioAnalysis(ctx context.Context, investmentAnalysis *data.InvestmentAnalysis, user *data.User) error {
-	if string(user.TimeHorizon.TimeHorizonType) == "" {
-		user.TimeHorizon = app.models.Users.MapTimeHorizonTypeToConstant("short")
-	}
-
-	riskFreeRate, err := app.getRiskMetrics(ctx, string(user.TimeHorizon.TimeHorizonType))
-	if err != nil {
-		return err
-	}
-
-	if len(investmentAnalysis.StockAnalysis) != 0 {
-		for i := range investmentAnalysis.StockAnalysis {
-			stock := &investmentAnalysis.StockAnalysis[i]
-			if err := app.updateStockAnalysis(ctx, user.ID, stock, riskFreeRate); err != nil {
-				return err
-			}
-		}
-	}
-	if len(investmentAnalysis.BondAnalysis) != 0 {
-		for i := range investmentAnalysis.BondAnalysis {
-			bond := &investmentAnalysis.BondAnalysis[i]
-			if err := app.updateBondAnalysis(ctx, user.ID, bond, riskFreeRate); err != nil {
-				// if error includes "failed to get" then return data.ErrFailedToGetBondData
-				if strings.Contains(err.Error(), "failed to get") {
-					return data.ErrFailedToGetBondData
-				} else {
-					return err
-				}
-			}
-		}
-	}
-
-	// there is nocurrent implementation for alternative investments
-	// ToDo: Implement alternative investment analysis
-	app.logger.Info("Investment portfolio analysis completed successfully.")
-	return nil
-}
+// performInvestmentPortfolioAnalysis lives in portfolio_analysis.go where it
+// runs the per-asset workers in a bounded errgroup keyed off
+// cfg.portfolio.workerLimit.
 
 // getAllAlternativeInvestmentByUserIDHandler() is a handler responsible for getting all alternative investments by user ID
 // This route supports both pagination and searching via the Name parameter for specific symbols

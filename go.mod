@@ -26,6 +26,7 @@ require (
 	github.com/tomasen/realip v0.0.0-20180522021738-f0c99a92ddce
 	go.uber.org/zap v1.27.0
 	golang.org/x/crypto v0.50.0
+	golang.org/x/sync v0.20.0
 )
 
 require (

@@ -99,6 +99,29 @@ ceiling counts as a Redis error and triggers fail-open. The expected p99
 is well below 5ms on a same-AZ Redis; if you see higher, suspect Redis
 saturation rather than the limiter middleware.
 
+## Portfolio analysis concurrency (P3)
+
+`performInvestmentPortfolioAnalysis` fans out per-asset workers (stocks +
+bonds) into a bounded `errgroup` capped by `-portfolio-worker-limit`
+(default 6). The flag interacts with two security-adjacent concerns:
+
+1. **Upstream API rate limits.** Each in-flight worker may issue 2-3
+   Alpha Vantage / FRED / FMP calls plus one DB INSERT. Exceeding your
+   plan's quota will trigger HTTP 429s from the vendor. Tune the limit
+   to your plan: AV Free (5 req/min) -> 1; Premium (75/min) -> 6;
+   Premium Plus (600/min) -> 16+.
+2. **Resource exhaustion.** A `-portfolio-worker-limit` above ~64 lets
+   a single authenticated user open dozens of upstream HTTP sockets and
+   DB connections concurrently. `validateConfig` rejects values >64 at
+   boot to force operators to opt in to that risk. The HTTP rate limiter
+   is your first defence against authenticated abuse; the worker cap is
+   the second (limits damage per request that does get in).
+
+A process-wide singleflight registry collapses concurrent identical
+upstream fetches (e.g. two stocks of the same symbol), so even under
+fan-out we never N-multiply duplicate vendor calls. Watch
+`portfolio_singleflight_collapsed_total` to confirm dedup is firing.
+
 ## CI security scanning
 
 Every push and PR to `main` runs:
