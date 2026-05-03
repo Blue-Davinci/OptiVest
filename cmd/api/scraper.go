@@ -22,7 +22,7 @@ func (app *application) rssFeedScraper(feed *data.Feed) {
 	// using our app.background(func(){}) through a for loop to iterate over the feeds starting a routine for each feed
 	app.background(func() {
 		// get the feed data
-		err := app.models.FeedManager.MarkFeedAsFetched(feed.ID)
+		err := app.models.FeedManager.MarkFeedAsFetched(app.ctx, feed.ID)
 		if err != nil {
 			app.logger.Info("An error occurred while marking feed as fetched", zap.String("Feed Name", feed.Name), zap.Int64("Feed ID", feed.ID))
 			return
@@ -47,7 +47,7 @@ func (app *application) rssFeedScraper(feed *data.Feed) {
 			}
 		}
 		// store the fetched data into our DB
-		err = app.models.FeedManager.CreateRssFeedPost(rssFeeds, feed.ID)
+		err = app.models.FeedManager.CreateRssFeedPost(app.ctx, rssFeeds, feed.ID)
 		if err != nil {
 			app.logger.Info("An error occurred while saving feed data", zap.String("Feed Name", feed.Name), zap.Int64("Feed ID", feed.ID), zap.String("Error", err.Error()))
 			return

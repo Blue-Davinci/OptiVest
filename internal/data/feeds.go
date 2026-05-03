@@ -139,11 +139,11 @@ func (m FeedManagerModel) MapFeedTypeToConstant(feedType string) (database.FeedT
 	}
 }
 
-// CreateNewFeed() is a method that creates a new feed
-// Feeds will be used to get news information that will be displayed to the user
-// We will take in a *feed, enrich with new data and return an error.
-func (m FeedManagerModel) CreateNewFeed(userID int64, feed *Feed) error {
-	ctx, cancel := contextGenerator(context.Background(), DefaultFinManDBContextTimeout)
+// CreateNewFeed creates a new feed. Feeds are used to surface news
+// information to the user. We take a *Feed, enrich it with new data, and
+// return an error. ctx flows from the originating HTTP request.
+func (m FeedManagerModel) CreateNewFeed(ctx context.Context, userID int64, feed *Feed) error {
+	ctx, cancel := contextGenerator(ctx, DefaultFinManDBContextTimeout)
 	defer cancel()
 	// insert
 	feedInfo, err := m.DB.CreateNewFeed(ctx, database.CreateNewFeedParams{
@@ -175,10 +175,11 @@ func (m FeedManagerModel) CreateNewFeed(userID int64, feed *Feed) error {
 	return nil
 }
 
-// UpdateFeed() is a method that will Update an existing Feed
-// We recieve a userID and *feed, and use that to update the feed
-func (m FeedManagerModel) UpdateFeed(userID int64, feed *Feed) error {
-	ctx, cancel := contextGenerator(context.Background(), DefaultFinManDBContextTimeout)
+// UpdateFeed updates an existing feed. We receive a userID and *Feed
+// and use that to perform the update. ctx flows from the originating
+// HTTP request.
+func (m FeedManagerModel) UpdateFeed(ctx context.Context, userID int64, feed *Feed) error {
+	ctx, cancel := contextGenerator(ctx, DefaultFinManDBContextTimeout)
 	defer cancel()
 	// update
 	updatedInfo, err := m.DB.UpdateFeed(ctx, database.UpdateFeedParams{
@@ -209,11 +210,10 @@ func (m FeedManagerModel) UpdateFeed(userID int64, feed *Feed) error {
 	return nil
 }
 
-//	DeleteFeedByID() is a method that will delete a feed by its ID
-//
-// We will recieve a feedID and return a feedID and an error
-func (m FeedManagerModel) DeleteFeedByID(userID, feedID int64) (*int64, error) {
-	ctx, cancel := contextGenerator(context.Background(), DefaultFinManDBContextTimeout)
+// DeleteFeedByID deletes a feed by its ID. ctx flows from the
+// originating HTTP request.
+func (m FeedManagerModel) DeleteFeedByID(ctx context.Context, userID, feedID int64) (*int64, error) {
+	ctx, cancel := contextGenerator(ctx, DefaultFinManDBContextTimeout)
 	defer cancel()
 	// delete
 	feedID, err := m.DB.DeleteFeedByID(ctx, database.DeleteFeedByIDParams{
@@ -232,10 +232,10 @@ func (m FeedManagerModel) DeleteFeedByID(userID, feedID int64) (*int64, error) {
 	return &feedID, nil
 }
 
-// GetFeedByID() is a method that will return a feed by its ID
-// We will recieve a feedID and return a *feed and an error
-func (m FeedManagerModel) GetFeedByID(feedID int64) (*Feed, error) {
-	ctx, cancel := contextGenerator(context.Background(), DefaultFinManDBContextTimeout)
+// GetFeedByID returns a feed by its ID. ctx flows from the originating
+// HTTP request.
+func (m FeedManagerModel) GetFeedByID(ctx context.Context, feedID int64) (*Feed, error) {
+	ctx, cancel := contextGenerator(ctx, DefaultFinManDBContextTimeout)
 	defer cancel()
 	// get feed
 	feedRow, err := m.DB.GetFeedByID(ctx, feedID)
@@ -253,11 +253,12 @@ func (m FeedManagerModel) GetFeedByID(feedID int64) (*Feed, error) {
 	return feed, nil
 }
 
-// GetNextFeedsToFetch() is a method that will return the next feeds to fetch
-// We will recieve a limit and return a slice of *feed and an error
-func (m FeedManagerModel) GetNextFeedsToFetch(limit int32) ([]*Feed, error) {
+// GetNextFeedsToFetch returns the next feeds to fetch. We receive a limit
+// and return a slice of *Feed. ctx flows from the caller (the RSS scraper
+// goroutine, which derives from app.ctx).
+func (m FeedManagerModel) GetNextFeedsToFetch(ctx context.Context, limit int32) ([]*Feed, error) {
 	fmt.Println("Getting next feeds to fetch: ", limit)
-	ctx, cancel := contextGenerator(context.Background(), DefaultFinManDBContextTimeout)
+	ctx, cancel := contextGenerator(ctx, DefaultFinManDBContextTimeout)
 	defer cancel()
 	// get feeds
 	feedRows, err := m.DB.GetNextFeedsToFetch(ctx, limit)
@@ -276,10 +277,10 @@ func (m FeedManagerModel) GetNextFeedsToFetch(limit int32) ([]*Feed, error) {
 	return feeds, nil
 }
 
-// MarkFeedAsFetched() is a method that will mark a feed as fetched
-// We return an error if there is one
-func (m FeedManagerModel) MarkFeedAsFetched(feedID int64) error {
-	ctx, cancel := contextGenerator(context.Background(), DefaultFinManDBContextTimeout)
+// MarkFeedAsFetched marks a feed as fetched. ctx flows from the caller
+// (the RSS scraper goroutine, which derives from app.ctx).
+func (m FeedManagerModel) MarkFeedAsFetched(ctx context.Context, feedID int64) error {
+	ctx, cancel := contextGenerator(ctx, DefaultFinManDBContextTimeout)
 	defer cancel()
 	// mark feed as fetched
 	_, err := m.DB.MarkFeedAsFetched(ctx, feedID)
@@ -293,21 +294,22 @@ func (m FeedManagerModel) MarkFeedAsFetched(feedID int64) error {
 // ==============================================================================================
 // Posts
 // ==============================================================================================
-func (m FeedManagerModel) CreateRssFeedPost(rssFeed *RSSFeed, feedID int64) error {
-	// Get channel Info
+// CreateRssFeedPost inserts the parsed items from a fetched RSS feed.
+// ctx flows from the RSS scraper goroutine (derived from app.ctx) so the
+// in-flight INSERTs are cancelled cleanly on graceful shutdown.
+func (m FeedManagerModel) CreateRssFeedPost(ctx context.Context, rssFeed *RSSFeed, feedID int64) error {
 	ChannelTitle := rssFeed.Channel.Title
 	ChannelUrl := rssFeed.Channel.Link
 	ChannelDescription := rssFeed.Channel.Description
 	ChannelLanguage := rssFeed.Channel.Language
 	for _, item := range rssFeed.Channel.Item {
-		// We use dateparse to parse a variety of possible date/time data rather than using
-		// the time.Parse() function which is more strict.
-		// We use ParseAny()
+		// We use dateparse to parse a variety of possible date/time
+		// formats rather than time.Parse() which is more strict.
 		publishedAt, err := dateparse.ParseAny(item.PubDate)
 		if err != nil {
 			continue
 		}
-		_, err = m.DB.CreateRssFeedPost(context.Background(), database.CreateRssFeedPostParams{
+		_, err = m.DB.CreateRssFeedPost(ctx, database.CreateRssFeedPostParams{
 			// Channel info
 			Channeltitle:       ChannelTitle,
 			Channelurl:         sql.NullString{String: ChannelUrl, Valid: ChannelUrl != ""},
@@ -331,10 +333,10 @@ func (m FeedManagerModel) CreateRssFeedPost(rssFeed *RSSFeed, feedID int64) erro
 	return nil
 }
 
-// CreateNewFavoriteOnPost() is a method that will create a new favorite on a post
-// We acept a new post favorite and return an id, createdat and an error
-func (m FeedManagerModel) CreateNewFavoriteOnPost(userID int64, rssFavoritePost *RSSPostFavorite) error {
-	ctx, cancel := contextGenerator(context.Background(), DefaultFinManDBContextTimeout)
+// CreateNewFavoriteOnPost creates a new favorite on a post. ctx flows
+// from the originating HTTP request.
+func (m FeedManagerModel) CreateNewFavoriteOnPost(ctx context.Context, userID int64, rssFavoritePost *RSSPostFavorite) error {
+	ctx, cancel := contextGenerator(ctx, DefaultFinManDBContextTimeout)
 	defer cancel()
 	// create
 	favoriteInfo, err := m.DB.CreateNewFavoriteOnPost(ctx, database.CreateNewFavoriteOnPostParams{
@@ -357,10 +359,10 @@ func (m FeedManagerModel) CreateNewFavoriteOnPost(userID int64, rssFavoritePost 
 	return nil
 }
 
-// DeleteFavoriteOnPost() is a method that will delete a favorite on a post
-// We will recieve a userID, postID and return a postID and an error
-func (m FeedManagerModel) DeleteFavoriteOnPost(userID, postID int64) (*int64, error) {
-	ctx, cancel := contextGenerator(context.Background(), DefaultFinManDBContextTimeout)
+// DeleteFavoriteOnPost deletes a favorite on a post. ctx flows from the
+// originating HTTP request.
+func (m FeedManagerModel) DeleteFavoriteOnPost(ctx context.Context, userID, postID int64) (*int64, error) {
+	ctx, cancel := contextGenerator(ctx, DefaultFinManDBContextTimeout)
 	defer cancel()
 	// delete
 	postID, err := m.DB.DeleteFavoriteOnPost(ctx, database.DeleteFavoriteOnPostParams{
@@ -379,10 +381,10 @@ func (m FeedManagerModel) DeleteFavoriteOnPost(userID, postID int64) (*int64, er
 	return &postID, nil
 }
 
-// GetRssFeedPostByID() is a method that will return a post by its ID
-// We will recieve a postID and return a *RSSPostFavorite and an error
-func (m FeedManagerModel) GetRssFeedPostByID(postID int64) (*RSSFeed, error) {
-	ctx, cancel := contextGenerator(context.Background(), DefaultFinManDBContextTimeout)
+// GetRssFeedPostByID returns a post by its ID. ctx flows from the
+// originating HTTP request.
+func (m FeedManagerModel) GetRssFeedPostByID(ctx context.Context, postID int64) (*RSSFeed, error) {
+	ctx, cancel := contextGenerator(ctx, DefaultFinManDBContextTimeout)
 	defer cancel()
 	// get post
 	postRow, err := m.DB.GetRssFeedPostByID(ctx, postID)
@@ -400,11 +402,12 @@ func (m FeedManagerModel) GetRssFeedPostByID(postID int64) (*RSSFeed, error) {
 	return post, nil
 }
 
-// GetAllRSSPostWithFavoriteTag() is a method that will return all posts with a favorite tag
-// This will return a slice of *RSSPostWithFavoriteTag, a metadata struct and an error
-// It supports both search and pagination
-func (m FeedManagerModel) GetAllRSSPostWithFavoriteTag(userID, feedID int64, itemName, postCategory string, filters Filters) ([]*RSSPostWithFavoriteTag, Metadata, error) {
-	ctx, cancel := contextGenerator(context.Background(), DefaultFinManDBContextTimeout)
+// GetAllRSSPostWithFavoriteTag returns all posts with a favorite tag.
+// Returns a slice of *RSSPostWithFavoriteTag, a metadata struct, and an
+// error. Supports both search and pagination. ctx flows from the
+// originating HTTP request.
+func (m FeedManagerModel) GetAllRSSPostWithFavoriteTag(ctx context.Context, userID, feedID int64, itemName, postCategory string, filters Filters) ([]*RSSPostWithFavoriteTag, Metadata, error) {
+	ctx, cancel := contextGenerator(ctx, DefaultFinManDBContextTimeout)
 	defer cancel()
 	// get all posts
 	postRows, err := m.DB.GetAllRSSPostWithFavoriteTag(ctx, database.GetAllRSSPostWithFavoriteTagParams{

@@ -40,7 +40,7 @@ func (app *application) getCommentsWithReactionsByAssociatedIdHandler(w http.Res
 		return
 	}
 	// get the comments
-	comments, metadata, err := app.models.CommentManagerModel.GetCommentsWithReactionsByAssociatedId(app.contextGetUser(r).ID, commentType, int64(input.AssociatedID), input.Filters)
+	comments, metadata, err := app.models.CommentManagerModel.GetCommentsWithReactionsByAssociatedId(r.Context(), app.contextGetUser(r).ID, commentType, int64(input.AssociatedID), input.Filters)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
@@ -88,7 +88,7 @@ func (app *application) createNewCommentHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 	// create the comment
-	err = app.models.CommentManagerModel.CreateNewComment(app.contextGetUser(r).ID, comment)
+	err = app.models.CommentManagerModel.CreateNewComment(r.Context(), app.contextGetUser(r).ID, comment)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -126,7 +126,7 @@ func (app *application) updateCommentHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	// get the comment from the database
-	comment, err := app.models.CommentManagerModel.GetCommentById(app.contextGetUser(r).ID, commentID)
+	comment, err := app.models.CommentManagerModel.GetCommentById(r.Context(), app.contextGetUser(r).ID, commentID)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -146,7 +146,7 @@ func (app *application) updateCommentHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	// update the comment
-	err = app.models.CommentManagerModel.UpdateComment(app.contextGetUser(r).ID, comment)
+	err = app.models.CommentManagerModel.UpdateComment(r.Context(), app.contextGetUser(r).ID, comment)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrEditConflict):
@@ -186,7 +186,7 @@ func (app *application) createNewReactionHandler(w http.ResponseWriter, r *http.
 		return
 	}
 	// check if the comment exists
-	_, err = app.models.CommentManagerModel.GetCommentById(app.contextGetUser(r).ID, reaction.CommentID)
+	_, err = app.models.CommentManagerModel.GetCommentById(r.Context(), app.contextGetUser(r).ID, reaction.CommentID)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -197,7 +197,7 @@ func (app *application) createNewReactionHandler(w http.ResponseWriter, r *http.
 		return
 	}
 	// create the reaction
-	err = app.models.CommentManagerModel.CreateNewReaction(app.contextGetUser(r).ID, reaction)
+	err = app.models.CommentManagerModel.CreateNewReaction(r.Context(), app.contextGetUser(r).ID, reaction)
 	if err != nil {
 		switch {
 		// handle duplicate reaction errors
@@ -231,7 +231,7 @@ func (app *application) deleteCommentHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	// delete the comment
-	err = app.models.CommentManagerModel.DeleteComment(app.contextGetUser(r).ID, commentID)
+	err = app.models.CommentManagerModel.DeleteComment(r.Context(), app.contextGetUser(r).ID, commentID)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -264,7 +264,7 @@ func (app *application) deleteReactionHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 	// delete the reaction
-	err = app.models.CommentManagerModel.DeleteReaction(app.contextGetUser(r).ID, commentID)
+	err = app.models.CommentManagerModel.DeleteReaction(r.Context(), app.contextGetUser(r).ID, commentID)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):

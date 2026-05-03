@@ -51,7 +51,7 @@ func (app *application) createNewFeedHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	// insert the feed
-	err = app.models.FeedManager.CreateNewFeed(app.contextGetUser(r).ID, feed)
+	err = app.models.FeedManager.CreateNewFeed(r.Context(), app.contextGetUser(r).ID, feed)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrDuplicateFeed):
@@ -101,7 +101,7 @@ func (app *application) updateFeedHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 	// get the feed
-	feed, err := app.models.FeedManager.GetFeedByID(feedID)
+	feed, err := app.models.FeedManager.GetFeedByID(r.Context(), feedID)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -144,7 +144,7 @@ func (app *application) updateFeedHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 	// update the feed
-	err = app.models.FeedManager.UpdateFeed(app.contextGetUser(r).ID, feed)
+	err = app.models.FeedManager.UpdateFeed(r.Context(), app.contextGetUser(r).ID, feed)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrDuplicateFeed):
@@ -181,7 +181,7 @@ func (app *application) deleteFeedByIDHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 	// delete the feed
-	deletedID, err := app.models.FeedManager.DeleteFeedByID(app.contextGetUser(r).ID, feedID)
+	deletedID, err := app.models.FeedManager.DeleteFeedByID(r.Context(), app.contextGetUser(r).ID, feedID)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -231,6 +231,7 @@ func (app *application) getAllRSSPostWithFavoriteTagsHandler(w http.ResponseWrit
 	}
 	// get all the posts
 	posts, metadata, err := app.models.FeedManager.GetAllRSSPostWithFavoriteTag(
+		r.Context(),
 		app.contextGetUser(r).ID,
 		int64(input.FeedID),
 		input.Name,
@@ -275,7 +276,7 @@ func (app *application) getRssFeedPostByIDHandler(w http.ResponseWriter, r *http
 		return
 	}
 	// get the post
-	post, err := app.models.FeedManager.GetRssFeedPostByID(postID)
+	post, err := app.models.FeedManager.GetRssFeedPostByID(r.Context(), postID)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -317,7 +318,7 @@ func (app *application) createNewFavoriteOnPostHandler(w http.ResponseWriter, r 
 		return
 	}
 	// Insert the Favorite
-	err = app.models.FeedManager.CreateNewFavoriteOnPost(app.contextGetUser(r).ID, favorite)
+	err = app.models.FeedManager.CreateNewFavoriteOnPost(r.Context(), app.contextGetUser(r).ID, favorite)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrDuplicateFavorite):
@@ -352,7 +353,7 @@ func (app *application) deleteFavoriteOnPostHandler(w http.ResponseWriter, r *ht
 	}
 	//app.logger.Info("postID", zap.Int64("postID", postID))
 	// Delete the Favorite
-	deletedID, err := app.models.FeedManager.DeleteFavoriteOnPost(app.contextGetUser(r).ID, postID)
+	deletedID, err := app.models.FeedManager.DeleteFavoriteOnPost(r.Context(), app.contextGetUser(r).ID, postID)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):

@@ -95,7 +95,7 @@ func (app *application) loadAndSendPendingNotifications(userID int64) {
 	}
 
 	// Load from Database
-	err = app.loadAndProcessDBData(userID, &processedNotifications)
+	err = app.loadAndProcessDBData(ctx, userID, &processedNotifications)
 	if err != nil {
 		app.logger.Info("Error loading notifications from database:", zap.Error(err))
 	}
@@ -130,9 +130,12 @@ func (app *application) loadAndProcessRedisData(ctx context.Context, userID int6
 	return app.RedisDB.Del(ctx, pendingKey).Err()
 }
 
-// loadAndProcessDBData loads and processes pending notifications from the database
-func (app *application) loadAndProcessDBData(userID int64, processed *map[int64]bool) error {
-	pendingNotifications, err := app.models.NotificationManager.GetUnreadNotifications(userID)
+// loadAndProcessDBData loads and processes pending notifications from
+// the database. ctx is bound to the application lifecycle by the caller
+// (loadAndSendPendingNotifications) so the in-flight SELECT is cancelled
+// cleanly on graceful shutdown.
+func (app *application) loadAndProcessDBData(ctx context.Context, userID int64, processed *map[int64]bool) error {
+	pendingNotifications, err := app.models.NotificationManager.GetUnreadNotifications(ctx, userID)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -332,9 +335,14 @@ func (app *application) storeNotificationInRedis(userID int64, notification data
 	return nil
 }
 
-// updateDatabaseNotificationStatus updates the status of a notification in the database
+// updateDatabaseNotificationStatus updates the status of a notification
+// in the database. Bound to app.ctx rather than the originating request
+// because callers (BroadcastNotification, PublishNotificationToRedis) are
+// firing on behalf of the recipient — who may be a different user
+// entirely — so the originator's tab close must not abort the write.
 func (app *application) updateDatabaseNotificationStatus(notificationID int64, status database.NotificationStatus) error {
 	err := app.models.NotificationManager.UpdateNotificationReadAtAndStatus(
+		app.ctx,
 		notificationID,
 		sql.NullTime{Time: time.Time{}, Valid: false},
 		status,
@@ -363,7 +371,7 @@ func (app *application) PublishNotificationToRedis(userID int64, notificationTyp
 		Meta:             metaJSON,
 		RedisKey:         &channel,
 	}
-	err = app.models.NotificationManager.CreateNewNotification(userID, savedNotification)
+	err = app.models.NotificationManager.CreateNewNotification(app.ctx, userID, savedNotification)
 	if err != nil {
 		return err
 	}

@@ -129,7 +129,7 @@ func (app *application) startRssFeedScraper() {
 	// number of feed bunches to fetch concurrently
 	noOfFeedsToFetch := int32(app.config.scraper.nooffeedstofetch)
 	// Get the feeds to fetch
-	feeds, err := app.models.FeedManager.GetNextFeedsToFetch(int32(noOfFeedsToFetch))
+	feeds, err := app.models.FeedManager.GetNextFeedsToFetch(app.ctx, int32(noOfFeedsToFetch))
 	if err != nil {
 		app.logger.Error("Error getting feeds to fetch", zap.Error(err))
 		return
@@ -341,7 +341,7 @@ func (app *application) trackExpiredNotifications() {
 			PageSize: burst,
 		}
 		// Retrieve notifications that need to be tracked for the current page
-		expiredNotifications, metadata, err := app.models.NotificationManager.GetAllExpiredNotifications(filter)
+		expiredNotifications, metadata, err := app.models.NotificationManager.GetAllExpiredNotifications(app.ctx, filter)
 		if err != nil {
 			// Handle case where no more records are found, break out of the loop
 			if errors.Is(err, data.ErrGeneralRecordNotFound) {
@@ -356,6 +356,7 @@ func (app *application) trackExpiredNotifications() {
 		for _, expiredNotification := range expiredNotifications {
 			// Update the status of the notification to expired
 			err := app.models.NotificationManager.UpdateNotificationReadAtAndStatus(
+				app.ctx,
 				expiredNotification.ID,
 				sql.NullTime{Time: time.Time{}, Valid: false},
 				data.NotificationStatusTypeExpired,

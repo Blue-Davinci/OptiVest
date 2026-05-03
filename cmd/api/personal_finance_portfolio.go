@@ -18,7 +18,7 @@ func (app *application) getAllFinanceDetailsForAnalysisByUserIDHandler(w http.Re
 	// get the user ID
 	user := app.contextGetUser(r)
 	// get all the finance details for analysis by user ID
-	unifiedFinanceAnalysis, err := app.models.PersonalFinancePortfolio.GetAllFinanceDetailsForAnalysisByUserID(user.ID)
+	unifiedFinanceAnalysis, err := app.models.PersonalFinancePortfolio.GetAllFinanceDetailsForAnalysisByUserID(r.Context(), user.ID)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -79,7 +79,7 @@ func (app *application) getPersonalFinancePrediction(w http.ResponseWriter, r *h
 	}
 
 	// check if a user has enough data points to make a prediction
-	status, err := app.models.PersonalFinancePortfolio.CheckIfUserHasEnoughPredictionData(app.contextGetUser(r).ID, input.Timeline, input.StartDate)
+	status, err := app.models.PersonalFinancePortfolio.CheckIfUserHasEnoughPredictionData(r.Context(), app.contextGetUser(r).ID, input.Timeline, input.StartDate)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
@@ -100,13 +100,13 @@ func (app *application) getPersonalFinancePrediction(w http.ResponseWriter, r *h
 	var personalFinancePrediction []*data.PredictionPersonalFinanceData
 	if input.Timeline == "weekly" {
 		app.logger.Info("Getting personal finance data for weekly")
-		personalFinancePrediction, err = app.models.PersonalFinancePortfolio.GetPersonalFinanceDataForWeeklyByUserID(user.ID, input.StartDate)
+		personalFinancePrediction, err = app.models.PersonalFinancePortfolio.GetPersonalFinanceDataForWeeklyByUserID(r.Context(), user.ID, input.StartDate)
 		if err != nil {
 			app.serverErrorResponse(w, r, err)
 			return
 		}
 	} else {
-		personalFinancePrediction, err = app.models.PersonalFinancePortfolio.GetPersonalFinanceDataForMonthByUserID(user.ID, input.StartDate)
+		personalFinancePrediction, err = app.models.PersonalFinancePortfolio.GetPersonalFinanceDataForMonthByUserID(r.Context(), user.ID, input.StartDate)
 		if err != nil {
 			app.serverErrorResponse(w, r, err)
 			return
@@ -269,7 +269,7 @@ func (app *application) getExpenseIncomeSummaryReportHandler(w http.ResponseWrit
 	}
 
 	// If not found in cache or an error occurred, proceed to fetch from the database
-	expenseIncomeSummaryReport, err := app.models.PersonalFinancePortfolio.GetExpenseIncomeSummaryReport(user.ID)
+	expenseIncomeSummaryReport, err := app.models.PersonalFinancePortfolio.GetExpenseIncomeSummaryReport(r.Context(), user.ID)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
