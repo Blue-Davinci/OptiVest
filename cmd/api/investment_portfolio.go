@@ -833,7 +833,7 @@ func (app *application) investmentPrtfolioAnalysisHandler(w http.ResponseWriter,
 	//  retrieve user ID from context
 	user := app.contextGetUser(r)
 	// start by getting our goals
-	goals, err := app.models.FinancialManager.GetGoalsForUserInvestmentHelper(user.ID)
+	goals, err := app.models.FinancialManager.GetGoalsForUserInvestmentHelper(r.Context(), user.ID)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):

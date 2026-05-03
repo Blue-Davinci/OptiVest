@@ -113,7 +113,7 @@ func (app *application) getPersonalFinancePrediction(w http.ResponseWriter, r *h
 		}
 	}
 	// get goals analysis
-	goals, err := app.models.FinancialManager.GetGoalsForUserInvestmentHelper(user.ID)
+	goals, err := app.models.FinancialManager.GetGoalsForUserInvestmentHelper(r.Context(), user.ID)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
