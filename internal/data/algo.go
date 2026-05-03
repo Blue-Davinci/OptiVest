@@ -153,10 +153,11 @@ func (m AlgoManager) CalculateAccountRating(stats AccountStats, awards []*Award)
 	return finalScore
 }
 
-// GetAccountStatisticsByUserId() retrieves all the statistics needed for the account rating calculation
-// We take in the user ID
-func (m AlgoManager) GetAccountStatisticsByUserId(userID int64, accountCreationDate time.Time, awards []*Award) (*EnrichedAccountStats, error) {
-	ctx, cancel := contextGenerator(context.Background(), DefaultAlgoManDBContextTimeout)
+// GetAccountStatisticsByUserId retrieves all the statistics needed for
+// the account rating calculation. ctx flows from the originating HTTP
+// request.
+func (m AlgoManager) GetAccountStatisticsByUserId(ctx context.Context, userID int64, accountCreationDate time.Time, awards []*Award) (*EnrichedAccountStats, error) {
+	ctx, cancel := contextGenerator(ctx, DefaultAlgoManDBContextTimeout)
 	defer cancel()
 	// get the statistics
 	stats, err := m.DB.GetAccountStatisticsByUserId(ctx, userID)

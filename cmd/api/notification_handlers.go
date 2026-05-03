@@ -38,6 +38,7 @@ func (app *application) updatedNotificationHandler(w http.ResponseWriter, r *htt
 	}
 	// update the notification's status
 	err = app.models.NotificationManager.UpdateNotificationReadAtAndStatus(
+		r.Context(),
 		notificationID,
 		sql.NullTime{Time: time.Now(), Valid: true},
 		status)
@@ -95,7 +96,7 @@ func (app *application) getAllNotificationsByUserIdHandler(w http.ResponseWriter
 		}
 	}
 	// get all notifications for a user
-	notifications, metadata, err := app.models.NotificationManager.GetAllNotificationsByUserId(app.contextGetUser(r).ID, input.NotificationType, input.Filters)
+	notifications, metadata, err := app.models.NotificationManager.GetAllNotificationsByUserId(r.Context(), app.contextGetUser(r).ID, input.NotificationType, input.Filters)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -123,7 +124,7 @@ func (app *application) deleteNotificationByIdHandler(w http.ResponseWriter, r *
 		return
 	}
 	// delete the notification by id
-	err = app.models.NotificationManager.DeleteNotificationById(notificationID, app.contextGetUser(r).ID)
+	err = app.models.NotificationManager.DeleteNotificationById(r.Context(), notificationID, app.contextGetUser(r).ID)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -145,7 +146,7 @@ func (app *application) deleteNotificationByIdHandler(w http.ResponseWriter, r *
 // We return a 200 status code if the notifications were deleted successfully
 func (app *application) deleteAllNotificationsByUserIdHandler(w http.ResponseWriter, r *http.Request) {
 	// delete all notifications for a user
-	err := app.models.NotificationManager.DeleteAllNotificationsByUserId(app.contextGetUser(r).ID)
+	err := app.models.NotificationManager.DeleteAllNotificationsByUserId(r.Context(), app.contextGetUser(r).ID)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return

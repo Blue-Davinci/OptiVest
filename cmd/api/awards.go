@@ -8,7 +8,7 @@ func (app *application) getAllAwardsForUserByIDHandler(w http.ResponseWriter, r 
 	// retrieve the user id from the context
 	userID := app.contextGetUser(r).ID
 	// get all the awards for a user by ID
-	awards, err := app.models.AwardManager.GetAllAwardsForUserByID(userID)
+	awards, err := app.models.AwardManager.GetAllAwardsForUserByID(r.Context(), userID)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return

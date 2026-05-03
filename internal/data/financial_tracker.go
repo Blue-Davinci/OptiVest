@@ -241,9 +241,8 @@ func ValidateDebt(v *validator.Validator, debt *Debt) {
 
 // CreateNewRecurringExpense() Creates a new recurrent expens in the recurrence table
 // A trigger automatically adds it to the expenses table to be tracked
-func (m *FinancialTrackingModel) CreateNewRecurringExpense(userID int64, recurringExpense *RecurringExpense) error {
-	// set our context
-	ctx, cancel := contextGenerator(context.Background(), DefaultFinTrackDBContextTimeout)
+func (m *FinancialTrackingModel) CreateNewRecurringExpense(ctx context.Context, userID int64, recurringExpense *RecurringExpense) error {
+	ctx, cancel := contextGenerator(ctx, DefaultFinTrackDBContextTimeout)
 	defer cancel()
 	// create the expense
 	updatedDetails, err := m.DB.CreateNewRecurringExpense(ctx, database.CreateNewRecurringExpenseParams{
@@ -275,9 +274,8 @@ func (m *FinancialTrackingModel) CreateNewRecurringExpense(userID int64, recurri
 }
 
 // UpdateRecurringExpenseByID() updates a recurring expense by its ID
-func (m *FinancialTrackingModel) UpdateRecurringExpenseByID(userID int64, recurringExpense *RecurringExpense) error {
-	// set our context
-	ctx, cancel := contextGenerator(context.Background(), DefaultFinTrackDBContextTimeout)
+func (m *FinancialTrackingModel) UpdateRecurringExpenseByID(ctx context.Context, userID int64, recurringExpense *RecurringExpense) error {
+	ctx, cancel := contextGenerator(ctx, DefaultFinTrackDBContextTimeout)
 	defer cancel()
 	// create the expense
 	updatedAt, err := m.DB.UpdateRecurringExpenseByID(ctx, database.UpdateRecurringExpenseByIDParams{
@@ -310,9 +308,8 @@ func (m *FinancialTrackingModel) UpdateRecurringExpenseByID(userID int64, recurr
 // This route supports pagination and a name search parameter for the
 // expense's name.
 // We return an array of expenses, metadata struct and an error if any was found
-func (m *FinancialTrackingModel) GetAllExpensesByUserID(userID int64, expenseName string, filters Filters) ([]*Expense, Metadata, error) {
-	// set our context
-	ctx, cancel := contextGenerator(context.Background(), DefaultFinTrackDBContextTimeout)
+func (m *FinancialTrackingModel) GetAllExpensesByUserID(ctx context.Context, userID int64, expenseName string, filters Filters) ([]*Expense, Metadata, error) {
+	ctx, cancel := contextGenerator(ctx, DefaultFinTrackDBContextTimeout)
 	defer cancel()
 	// get the expenses
 	expenses, err := m.DB.GetAllExpensesByUserID(ctx, database.GetAllExpensesByUserIDParams{
@@ -349,9 +346,8 @@ func (m *FinancialTrackingModel) GetAllExpensesByUserID(userID int64, expenseNam
 // GetAllRecurringExpensesByUserID() gets all the recurring expenses by a user ID
 // This route supports pagination
 // We return an array of []* EnrichedRecurringExpense, a metadata struct and an error if any was found
-func (m *FinancialTrackingModel) GetAllRecurringExpensesByUserID(userID int64, recurringExpenseName string, filters Filters) ([]*EnrichedRecurringExpense, Metadata, error) {
-	// set our context
-	ctx, cancel := contextGenerator(context.Background(), DefaultFinTrackDBContextTimeout)
+func (m *FinancialTrackingModel) GetAllRecurringExpensesByUserID(ctx context.Context, userID int64, recurringExpenseName string, filters Filters) ([]*EnrichedRecurringExpense, Metadata, error) {
+	ctx, cancel := contextGenerator(ctx, DefaultFinTrackDBContextTimeout)
 	defer cancel()
 	// get the expenses
 	recurringExpenses, err := m.DB.GetAllRecurringExpensesByUserID(ctx, database.GetAllRecurringExpensesByUserIDParams{
@@ -395,9 +391,8 @@ func (m *FinancialTrackingModel) GetAllRecurringExpensesByUserID(userID int64, r
 }
 
 // GetRecurringExpenseByID() gets a recurring expense by its ID
-func (m *FinancialTrackingModel) GetRecurringExpenseByID(userID, recurringExpenseID int64) (*RecurringExpense, error) {
-	// set our context
-	ctx, cancel := contextGenerator(context.Background(), DefaultFinTrackDBContextTimeout)
+func (m *FinancialTrackingModel) GetRecurringExpenseByID(ctx context.Context, userID, recurringExpenseID int64) (*RecurringExpense, error) {
+	ctx, cancel := contextGenerator(ctx, DefaultFinTrackDBContextTimeout)
 	defer cancel()
 	// get the expense
 	recurringExpense, err := m.DB.GetRecurringExpenseByID(ctx, database.GetRecurringExpenseByIDParams{
@@ -422,9 +417,8 @@ func (m *FinancialTrackingModel) GetRecurringExpenseByID(userID, recurringExpens
 // That is, we get all recurring expenses that have a next occurrence that is less than or equal to the current time
 // We will need an offset and a limit so that we support batch processing.
 // This method is made to work in tandem with our cron job
-func (m *FinancialTrackingModel) GetAllRecurringExpensesDueForProcessing(filters Filters) ([]*RecurringExpense, Metadata, error) {
-	// set our context
-	ctx, cancel := contextGenerator(context.Background(), DefaultFinTrackDBContextTimeout)
+func (m *FinancialTrackingModel) GetAllRecurringExpensesDueForProcessing(ctx context.Context, filters Filters) ([]*RecurringExpense, Metadata, error) {
+	ctx, cancel := contextGenerator(ctx, DefaultFinTrackDBContextTimeout)
 	defer cancel()
 	// get the expenses
 	recurringExpenses, err := m.DB.GetAllRecurringExpensesDueForProcessing(ctx, database.GetAllRecurringExpensesDueForProcessingParams{
@@ -460,9 +454,8 @@ func (m *FinancialTrackingModel) GetAllRecurringExpensesDueForProcessing(filters
 // CreateNewExpense() creates a new expense in the expenses table
 // This expense is a one way expense in that it is not recurring
 // But the caller still needs to verify that the surplus is enough to cover the expense
-func (m *FinancialTrackingModel) CreateNewExpense(userID int64, expense *Expense) error {
-	// make context
-	ctx, cancel := contextGenerator(context.Background(), DefaultFinTrackDBContextTimeout)
+func (m *FinancialTrackingModel) CreateNewExpense(ctx context.Context, userID int64, expense *Expense) error {
+	ctx, cancel := contextGenerator(ctx, DefaultFinTrackDBContextTimeout)
 	defer cancel()
 	// create the expense
 	createdExpense, err := m.DB.CreateNewExpense(ctx, database.CreateNewExpenseParams{
@@ -489,9 +482,8 @@ func (m *FinancialTrackingModel) CreateNewExpense(userID int64, expense *Expense
 
 // UpdateExpenseByID() is a method that updates an expense by its ID and user ID
 // We enrich it back with the updated at timestamp
-func (m *FinancialTrackingModel) UpdateExpenseByID(userID int64, expense *Expense) error {
-	// set our context
-	ctx, cancel := contextGenerator(context.Background(), DefaultFinTrackDBContextTimeout)
+func (m *FinancialTrackingModel) UpdateExpenseByID(ctx context.Context, userID int64, expense *Expense) error {
+	ctx, cancel := contextGenerator(ctx, DefaultFinTrackDBContextTimeout)
 	defer cancel()
 	// create the expense
 	updatedAt, err := m.DB.UpdateExpenseByID(ctx, database.UpdateExpenseByIDParams{
@@ -520,9 +512,8 @@ func (m *FinancialTrackingModel) UpdateExpenseByID(userID int64, expense *Expens
 
 // GetExpenseByID() gets an expense by both the ID and the user ID
 // We return back an expense and an error if any was found
-func (m *FinancialTrackingModel) GetExpenseByID(userID, expenseID int64) (*Expense, error) {
-	// set our context
-	ctx, cancel := contextGenerator(context.Background(), DefaultFinTrackDBContextTimeout)
+func (m *FinancialTrackingModel) GetExpenseByID(ctx context.Context, userID, expenseID int64) (*Expense, error) {
+	ctx, cancel := contextGenerator(ctx, DefaultFinTrackDBContextTimeout)
 	defer cancel()
 	// get the expense
 	expense, err := m.DB.GetExpenseByID(ctx, database.GetExpenseByIDParams{
@@ -550,9 +541,8 @@ func (m *FinancialTrackingModel) GetExpenseByID(userID, expenseID int64) (*Expen
 // CreateNewIncome() creates a new income in the income table
 // We get a user ID and a pointer to an income struct
 // We return an error if any was found
-func (m *FinancialTrackingModel) CreateNewIncome(userID int64, income *Income) error {
-	// set our context
-	ctx, cancel := contextGenerator(context.Background(), DefaultFinTrackDBContextTimeout)
+func (m *FinancialTrackingModel) CreateNewIncome(ctx context.Context, userID int64, income *Income) error {
+	ctx, cancel := contextGenerator(ctx, DefaultFinTrackDBContextTimeout)
 	defer cancel()
 	// create the income
 	incomeDetails, err := m.DB.CreateNewIncome(ctx, database.CreateNewIncomeParams{
@@ -580,9 +570,8 @@ func (m *FinancialTrackingModel) CreateNewIncome(userID int64, income *Income) e
 // GetAllIncomesByUserID() gets all the incomes by a user ID.
 // This route supports pagination and a name search parameter for the income's source
 // We return an array of enriched incomes[] *EnrichedIncome, a metadata struct and an error if any was found
-func (m *FinancialTrackingModel) GetAllIncomesByUserID(userID int64, incomeSource string, filters Filters) ([]*EnrichedIncome, Metadata, error) {
-	// set our context
-	ctx, cancel := contextGenerator(context.Background(), DefaultFinTrackDBContextTimeout)
+func (m *FinancialTrackingModel) GetAllIncomesByUserID(ctx context.Context, userID int64, incomeSource string, filters Filters) ([]*EnrichedIncome, Metadata, error) {
+	ctx, cancel := contextGenerator(ctx, DefaultFinTrackDBContextTimeout)
 	defer cancel()
 	// get the incomes
 	incomes, err := m.DB.GetAllIncomesByUserID(ctx, database.GetAllIncomesByUserIDParams{
@@ -623,9 +612,8 @@ func (m *FinancialTrackingModel) GetAllIncomesByUserID(userID int64, incomeSourc
 
 // UpdateIncome() Updates an existing income by th eincomes userID and ID
 // We return an error if any and an updated Income
-func (m *FinancialTrackingModel) UpdateIncomeByID(userID int64, income *Income) error {
-	// set our context
-	ctx, cancel := contextGenerator(context.Background(), DefaultFinTrackDBContextTimeout)
+func (m *FinancialTrackingModel) UpdateIncomeByID(ctx context.Context, userID int64, income *Income) error {
+	ctx, cancel := contextGenerator(ctx, DefaultFinTrackDBContextTimeout)
 	defer cancel()
 	// make the update
 	updatedAT, err := m.DB.UpdateIncomeByID(ctx, database.UpdateIncomeByIDParams{
@@ -655,9 +643,8 @@ func (m *FinancialTrackingModel) UpdateIncomeByID(userID int64, income *Income) 
 
 // GetIncomeByID() gets an income by its ID and user ID
 // We return an error if any was found
-func (m *FinancialTrackingModel) GetIncomeByID(userID, incomeID int64) (*Income, error) {
-	// set our context
-	ctx, cancel := contextGenerator(context.Background(), DefaultFinTrackDBContextTimeout)
+func (m *FinancialTrackingModel) GetIncomeByID(ctx context.Context, userID, incomeID int64) (*Income, error) {
+	ctx, cancel := contextGenerator(ctx, DefaultFinTrackDBContextTimeout)
 	defer cancel()
 	// get the income
 	income, err := m.DB.GetIncomeByID(ctx, database.GetIncomeByIDParams{
@@ -685,9 +672,8 @@ func (m *FinancialTrackingModel) GetIncomeByID(userID, incomeID int64) (*Income,
 // CreateNewDebt() creates a new debt in the debts table
 // We get a user ID and a pointer to a debt struct
 // We return an error if any was found
-func (m *FinancialTrackingModel) CreateNewDebt(userID int64, debt *Debt) error {
-	// set our context
-	ctx, cancel := contextGenerator(context.Background(), DefaultFinTrackDBContextTimeout)
+func (m *FinancialTrackingModel) CreateNewDebt(ctx context.Context, userID int64, debt *Debt) error {
+	ctx, cancel := contextGenerator(ctx, DefaultFinTrackDBContextTimeout)
 	defer cancel()
 	// create the debt
 	debtDetails, err := m.DB.CreateNewDebt(ctx, database.CreateNewDebtParams{
@@ -724,9 +710,8 @@ func (m *FinancialTrackingModel) CreateNewDebt(userID int64, debt *Debt) error {
 
 // UpdateDebtByID() updates a debt WHEN given both the ID and the user ID
 // We return an error if any was found
-func (m *FinancialTrackingModel) UpdateDebtByID(userID int64, debt *Debt) error {
-	// set our context
-	ctx, cancel := contextGenerator(context.Background(), DefaultFinTrackDBContextTimeout)
+func (m *FinancialTrackingModel) UpdateDebtByID(ctx context.Context, userID int64, debt *Debt) error {
+	ctx, cancel := contextGenerator(ctx, DefaultFinTrackDBContextTimeout)
 	defer cancel()
 	// create the debt
 	updatedAt, err := m.DB.UpdateDebtByID(ctx, database.UpdateDebtByIDParams{
@@ -764,9 +749,8 @@ func (m *FinancialTrackingModel) UpdateDebtByID(userID int64, debt *Debt) error 
 
 // GetDebtByID() gets a debt by its ID and user ID
 // We return an error if any was found
-func (m *FinancialTrackingModel) GetDebtByID(userID, debtID int64) (*Debt, error) {
-	// set our context
-	ctx, cancel := contextGenerator(context.Background(), DefaultFinTrackDBContextTimeout)
+func (m *FinancialTrackingModel) GetDebtByID(ctx context.Context, userID, debtID int64) (*Debt, error) {
+	ctx, cancel := contextGenerator(ctx, DefaultFinTrackDBContextTimeout)
 	defer cancel()
 	// get the debt
 	debt, err := m.DB.GetDebtByID(ctx, debtID)
@@ -788,9 +772,8 @@ func (m *FinancialTrackingModel) GetDebtByID(userID, debtID int64) (*Debt, error
 // This will will support both pagination and a name search parameter.
 // We return an array of []*DebtWithPayments, passing each debt id to GetDebtPaymentsByDebtUserID() to get the payments
 // a metadata struct and an error if any was found
-func (m *FinancialTrackingModel) GetAllDebtsByUserID(userID int64, debtName string, filters Filters) ([]*DebtWithPayments, Metadata, error) {
-	// set our context
-	ctx, cancel := contextGenerator(context.Background(), DefaultFinTrackDBContextTimeout)
+func (m *FinancialTrackingModel) GetAllDebtsByUserID(ctx context.Context, userID int64, debtName string, filters Filters) ([]*DebtWithPayments, Metadata, error) {
+	ctx, cancel := contextGenerator(ctx, DefaultFinTrackDBContextTimeout)
 	defer cancel()
 	// get the debts
 	debts, err := m.DB.GetAllDebtsByUserID(ctx, database.GetAllDebtsByUserIDParams{
@@ -818,6 +801,7 @@ func (m *FinancialTrackingModel) GetAllDebtsByUserID(userID int64, debtName stri
 		totalRecords = int(debt.TotalDebts)
 		// get the payments
 		payments, metadata, err := m.GetDebtPaymentsByDebtUserID(
+			ctx,
 			userID,
 			debt.ID,
 			time.Time{}, // use the earliest time as the start date
@@ -844,9 +828,8 @@ func (m *FinancialTrackingModel) GetAllDebtsByUserID(userID int64, debtName stri
 // GetDebtPaymentsByDebtUserID() gets all the debt payments by a debt ID and user ID
 // This route supports both pagination as well as date search parameters (start and end date)
 // We return an []*EnrichedDebtPayment, a metadata struct and an error if any was found
-func (m *FinancialTrackingModel) GetDebtPaymentsByDebtUserID(userID, debtID int64, startDate, endDate time.Time, filters Filters) ([]*EnrichedDebtPayment, Metadata, error) {
-	// set our context
-	ctx, cancel := contextGenerator(context.Background(), DefaultFinTrackDBContextTimeout)
+func (m *FinancialTrackingModel) GetDebtPaymentsByDebtUserID(ctx context.Context, userID, debtID int64, startDate, endDate time.Time, filters Filters) ([]*EnrichedDebtPayment, Metadata, error) {
+	ctx, cancel := contextGenerator(ctx, DefaultFinTrackDBContextTimeout)
 	defer cancel()
 	// get the debt payments
 	debtPayments, err := m.DB.GetDebtPaymentsByDebtUserID(ctx, database.GetDebtPaymentsByDebtUserIDParams{
@@ -890,9 +873,8 @@ func (m *FinancialTrackingModel) GetDebtPaymentsByDebtUserID(userID, debtID int6
 
 // CreateNewDebtPayment() creates a new debt payment in the debt payments table
 // We return an error if any was found
-func (m *FinancialTrackingModel) CreateNewDebtPayment(userID int64, debtRepayment *DebtRepayment) error {
-	// set our context
-	ctx, cancel := contextGenerator(context.Background(), DefaultFinTrackDBContextTimeout)
+func (m *FinancialTrackingModel) CreateNewDebtPayment(ctx context.Context, userID int64, debtRepayment *DebtRepayment) error {
+	ctx, cancel := contextGenerator(ctx, DefaultFinTrackDBContextTimeout)
 	defer cancel()
 	// create the debt payment
 	debtPayment, err := m.DB.CreateNewDebtPayment(ctx, database.CreateNewDebtPaymentParams{
@@ -916,9 +898,8 @@ func (m *FinancialTrackingModel) CreateNewDebtPayment(userID int64, debtRepaymen
 // GetAllOverdueDebts() gets all the debts that are overdue
 // This is meant to be used in tandem with a cron job
 // We also return a Metadata struct and an error if any was found
-func (m *FinancialTrackingModel) GetAllOverdueDebts(filters Filters) ([]*Debt, Metadata, error) {
-	// set our context
-	ctx, cancel := contextGenerator(context.Background(), DefaultFinTrackDBContextTimeout)
+func (m *FinancialTrackingModel) GetAllOverdueDebts(ctx context.Context, filters Filters) ([]*Debt, Metadata, error) {
+	ctx, cancel := contextGenerator(ctx, DefaultFinTrackDBContextTimeout)
 	defer cancel()
 	// get the debts
 	debts, err := m.DB.GetAllOverdueDebts(ctx, database.GetAllOverdueDebtsParams{

@@ -129,7 +129,7 @@ func (app *application) startRssFeedScraper() {
 	// number of feed bunches to fetch concurrently
 	noOfFeedsToFetch := int32(app.config.scraper.nooffeedstofetch)
 	// Get the feeds to fetch
-	feeds, err := app.models.FeedManager.GetNextFeedsToFetch(int32(noOfFeedsToFetch))
+	feeds, err := app.models.FeedManager.GetNextFeedsToFetch(app.ctx, int32(noOfFeedsToFetch))
 	if err != nil {
 		app.logger.Error("Error getting feeds to fetch", zap.Error(err))
 		return
@@ -151,7 +151,7 @@ func (app *application) startRssFeedScraper() {
 // It will be called every day at midnight to update the progress of the expired goals.
 func (app *application) trackGoalProgressStatus() {
 	app.logger.Info("Starting the goal progress status tracking cron job...", zap.String("time", time.Now().String()))
-	err := app.models.FinancialManager.UpdateGoalProgressOnExpiredGoals()
+	err := app.models.FinancialManager.UpdateGoalProgressOnExpiredGoals(app.ctx)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrEditConflict):
@@ -171,7 +171,7 @@ func (app *application) trackMonthlyGoals() {
 	app.logger.Info("Starting the monthly goals tracking cron job...", zap.String("time", time.Now().String()))
 	now := time.Now()
 	if app.isLastDayOfMonth(now) {
-		trackedGoals, err := app.models.FinancialManager.GetAndSaveAllGoalsForTracking()
+		trackedGoals, err := app.models.FinancialManager.GetAndSaveAllGoalsForTracking(app.ctx)
 		if err != nil {
 			app.logger.Error("Error tracking monthly goals", zap.Error(err))
 		}
@@ -186,7 +186,7 @@ func (app *application) trackMonthlyGoals() {
 // It will be called every day at midnight to update the expired group invitations.
 func (app *application) trackExpiredGroupInvitations() {
 	app.logger.Info("Starting the expired group invitations tracking cron job..", zap.String("time", time.Now().String()))
-	err := app.models.FinancialGroupManager.UpdateExpiredGroupInvitations()
+	err := app.models.FinancialGroupManager.UpdateExpiredGroupInvitations(app.ctx)
 	if err != nil {
 		app.logger.Error("Error tracking expired group invitations", zap.Error(err))
 	}
@@ -213,7 +213,7 @@ func (app *application) trackRecurringExpenses() {
 		}
 
 		// Retrieve expenses that need to be tracked for the current page
-		recurringExpensesToTrack, metadata, err := app.models.FinancialTrackingManager.GetAllRecurringExpensesDueForProcessing(filter)
+		recurringExpensesToTrack, metadata, err := app.models.FinancialTrackingManager.GetAllRecurringExpensesDueForProcessing(app.ctx, filter)
 		if err != nil {
 			// Handle case where no more records are found, break out of the loop
 			if errors.Is(err, data.ErrGeneralRecordNotFound) {
@@ -239,7 +239,7 @@ func (app *application) trackRecurringExpenses() {
 			}
 
 			// Add the expense to the expenses table
-			err := app.models.FinancialTrackingManager.CreateNewExpense(recurringExpenseToTrack.UserID, expense)
+			err := app.models.FinancialTrackingManager.CreateNewExpense(app.ctx, recurringExpenseToTrack.UserID, expense)
 			if err != nil {
 				app.logger.Error("Error adding recurring expense to expenses table", zap.Error(err))
 				continue
@@ -247,7 +247,7 @@ func (app *application) trackRecurringExpenses() {
 
 			// Update the next tracking date for the current recurring expense
 			recurringExpenseToTrack.CalculateNextOccurrence()
-			err = app.models.FinancialTrackingManager.UpdateRecurringExpenseByID(recurringExpenseToTrack.UserID, recurringExpenseToTrack)
+			err = app.models.FinancialTrackingManager.UpdateRecurringExpenseByID(app.ctx, recurringExpenseToTrack.UserID, recurringExpenseToTrack)
 			if err != nil {
 				app.logger.Error("Error updating recurring expense", zap.Error(err))
 				continue
@@ -283,7 +283,7 @@ func (app *application) trackOverdueDebts() {
 			PageSize: burst,
 		}
 		// get all overdue debt
-		debts, metadata, err := app.models.FinancialTrackingManager.GetAllOverdueDebts(filter)
+		debts, metadata, err := app.models.FinancialTrackingManager.GetAllOverdueDebts(app.ctx, filter)
 		if err != nil {
 			if errors.Is(err, data.ErrGeneralRecordNotFound) {
 				app.logger.Info("No more overdue debts to track", zap.Error(err))
@@ -305,7 +305,7 @@ func (app *application) trackOverdueDebts() {
 			debt.RemainingBalance = debt.RemainingBalance.Add(accruedInterest) // Add interest to balance
 			debt.InterestLastCalculated = time.Now()                           // Update interest last calculated date
 			// Step 3: Save updated debt back to the database
-			err = app.models.FinancialTrackingManager.UpdateDebtByID(debt.UserID, debt)
+			err = app.models.FinancialTrackingManager.UpdateDebtByID(app.ctx, debt.UserID, debt)
 			if err != nil {
 				app.logger.Info("Error updating debt", zap.Error(err))
 				continue
@@ -341,7 +341,7 @@ func (app *application) trackExpiredNotifications() {
 			PageSize: burst,
 		}
 		// Retrieve notifications that need to be tracked for the current page
-		expiredNotifications, metadata, err := app.models.NotificationManager.GetAllExpiredNotifications(filter)
+		expiredNotifications, metadata, err := app.models.NotificationManager.GetAllExpiredNotifications(app.ctx, filter)
 		if err != nil {
 			// Handle case where no more records are found, break out of the loop
 			if errors.Is(err, data.ErrGeneralRecordNotFound) {
@@ -356,6 +356,7 @@ func (app *application) trackExpiredNotifications() {
 		for _, expiredNotification := range expiredNotifications {
 			// Update the status of the notification to expired
 			err := app.models.NotificationManager.UpdateNotificationReadAtAndStatus(
+				app.ctx,
 				expiredNotification.ID,
 				sql.NullTime{Time: time.Time{}, Valid: false},
 				data.NotificationStatusTypeExpired,

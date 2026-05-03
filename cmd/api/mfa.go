@@ -52,7 +52,7 @@ func (app *application) setupMFAHandler(w http.ResponseWriter, r *http.Request) 
 	// Save the secret to the user
 	user.MFASecret = secret.Secret()
 	// if succesful, update the user's key// in the DB
-	err = app.models.Users.UpdateUser(user, app.config.encryption.key)
+	err = app.models.Users.UpdateUser(r.Context(), user, app.config.encryption.key)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
@@ -157,7 +157,7 @@ func (app *application) verifiy2FASetupHandler(w http.ResponseWriter, r *http.Re
 	// before we update the user, let us attampt to save & generate the recovery codes
 	// this is to ensure that the user has recovery codes in case they lose their device
 	// and if it fails, we do not update the user
-	recoveryCodes, err := app.models.MFAManager.CreateNewRecoveryCode(user.ID)
+	recoveryCodes, err := app.models.MFAManager.CreateNewRecoveryCode(r.Context(), user.ID)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
@@ -165,7 +165,7 @@ func (app *application) verifiy2FASetupHandler(w http.ResponseWriter, r *http.Re
 	// Update the user's MFA status
 	user.MFAEnabled = true
 	// Save the user to the DB
-	err = app.models.Users.UpdateUser(user, app.config.encryption.key)
+	err = app.models.Users.UpdateUser(r.Context(), user, app.config.encryption.key)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return

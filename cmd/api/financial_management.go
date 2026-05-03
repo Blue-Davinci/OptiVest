@@ -81,7 +81,7 @@ func (app *application) createNewBudgetdHandler(w http.ResponseWriter, r *http.R
 		newBudget.ConversionRate = decimal.NewFromInt(1)
 	}
 	// Save the budget to the database
-	err = app.models.FinancialManager.CreateNewBudget(newBudget)
+	err = app.models.FinancialManager.CreateNewBudget(r.Context(), newBudget)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
@@ -122,7 +122,7 @@ func (app *application) updateBudgetHandler(w http.ResponseWriter, r *http.Reque
 	}
 
 	// Get budget details from the database
-	budget, err := app.models.FinancialManager.GetBudgetByID(budgetID)
+	budget, err := app.models.FinancialManager.GetBudgetByID(r.Context(), budgetID)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -144,7 +144,7 @@ func (app *application) updateBudgetHandler(w http.ResponseWriter, r *http.Reque
 	user := app.contextGetUser(r)
 
 	// Retrieve the budget summary and total monthly contribution
-	budgetTotal, err := app.models.FinancialManager.GetAllGoalSummaryBudgetID(budget.Id, user.ID)
+	budgetTotal, err := app.models.FinancialManager.GetAllGoalSummaryBudgetID(r.Context(), budget.Id, user.ID)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
@@ -225,7 +225,7 @@ func (app *application) updateBudgetHandler(w http.ResponseWriter, r *http.Reque
 	}
 
 	// Proceed with the budget update in the database
-	err = app.models.FinancialManager.UpdateUserBudget(user.ID, budget)
+	err = app.models.FinancialManager.UpdateUserBudget(r.Context(), user.ID, budget)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrEditConflict):
@@ -270,7 +270,7 @@ func (app *application) deleteBudgetByIDHandler(w http.ResponseWriter, r *http.R
 	user := app.contextGetUser(r)
 
 	// Delete the budget from the database
-	_, err = app.models.FinancialManager.DeleteBudgetByID(user.ID, budgetID)
+	_, err = app.models.FinancialManager.DeleteBudgetByID(r.Context(), user.ID, budgetID)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -317,7 +317,7 @@ func (app *application) getBudgetsForUserHandler(w http.ResponseWriter, r *http.
 		return
 	}
 	// Get the budgets for the user
-	enrichedBudgets, metadata, err := app.models.FinancialManager.GetBudgetsForUser(app.contextGetUser(r).ID, input.Name, input.Filters)
+	enrichedBudgets, metadata, err := app.models.FinancialManager.GetBudgetsForUser(r.Context(), app.contextGetUser(r).ID, input.Name, input.Filters)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -366,7 +366,7 @@ func (app *application) createNewGoalHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	// check if budget exists
-	budget, err := app.models.FinancialManager.GetBudgetByID(input.BudgetID)
+	budget, err := app.models.FinancialManager.GetBudgetByID(r.Context(), input.BudgetID)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -405,7 +405,7 @@ func (app *application) createNewGoalHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	// check if the goal is still within the budget
-	goalSummaryTotals, err := app.models.FinancialManager.GetAllGoalSummaryBudgetID(newGoal.BudgetID, newGoal.UserID)
+	goalSummaryTotals, err := app.models.FinancialManager.GetAllGoalSummaryBudgetID(r.Context(), newGoal.BudgetID, newGoal.UserID)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
@@ -424,7 +424,7 @@ func (app *application) createNewGoalHandler(w http.ResponseWriter, r *http.Requ
 	}
 
 	// just directly write to the database
-	err = app.models.FinancialManager.CreateNewGoal(newGoal)
+	err = app.models.FinancialManager.CreateNewGoal(r.Context(), newGoal)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrDuplicateGoal):
@@ -481,7 +481,7 @@ func (app *application) updatedGoalHandler(w http.ResponseWriter, r *http.Reques
 	// get user
 	user := app.contextGetUser(r)
 	// Get the goal details from the database
-	goal, err := app.models.FinancialManager.GetGoalByID(user.ID, goalID)
+	goal, err := app.models.FinancialManager.GetGoalByID(r.Context(), user.ID, goalID)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -492,7 +492,7 @@ func (app *application) updatedGoalHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	// check if budget exists
-	budget, err := app.models.FinancialManager.GetBudgetByID(goal.BudgetID)
+	budget, err := app.models.FinancialManager.GetBudgetByID(r.Context(), goal.BudgetID)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -509,7 +509,7 @@ func (app *application) updatedGoalHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	// Get the budget summary and total monthly contribution
-	budgetTotal, err := app.models.FinancialManager.GetAllGoalSummaryBudgetID(goal.BudgetID, user.ID)
+	budgetTotal, err := app.models.FinancialManager.GetAllGoalSummaryBudgetID(r.Context(), goal.BudgetID, user.ID)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -579,7 +579,7 @@ func (app *application) updatedGoalHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	// Proceed with the goal update in the database
-	err = app.models.FinancialManager.UpdateGoalByID(user.ID, goal)
+	err = app.models.FinancialManager.UpdateGoalByID(r.Context(), user.ID, goal)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrEditConflict):
@@ -641,7 +641,7 @@ func (app *application) getGoalTrackingHistoryHandler(w http.ResponseWriter, r *
 		return
 	}
 	// Get the goal tracking history for the user
-	goalTrackingHistory, metadata, err := app.models.FinancialManager.GetGoalTrackingHistory(user.ID, mappedTrackingType, input.Filters)
+	goalTrackingHistory, metadata, err := app.models.FinancialManager.GetGoalTrackingHistory(r.Context(), user.ID, mappedTrackingType, input.Filters)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -693,7 +693,7 @@ func (app *application) createNewGoalPlanHandler(w http.ResponseWriter, r *http.
 		return
 	}
 	// Save the goal plan to the database
-	err = app.models.FinancialManager.CreateNewGoalPlan(app.contextGetUser(r).ID, newGoalPlan)
+	err = app.models.FinancialManager.CreateNewGoalPlan(r.Context(), app.contextGetUser(r).ID, newGoalPlan)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrDuplicateGoalPlan):
@@ -728,7 +728,7 @@ func (app *application) updatedGoalPlanHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 	// Get the goal plan details from the database
-	goalPlan, err := app.models.FinancialManager.GetGoalPlanByID(app.contextGetUser(r).ID, goalPlanID)
+	goalPlan, err := app.models.FinancialManager.GetGoalPlanByID(r.Context(), app.contextGetUser(r).ID, goalPlanID)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -770,7 +770,7 @@ func (app *application) updatedGoalPlanHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 	// Proceed with the goal plan update in the database
-	err = app.models.FinancialManager.UpdateGoalPlanByID(app.contextGetUser(r).ID, goalPlan)
+	err = app.models.FinancialManager.UpdateGoalPlanByID(r.Context(), app.contextGetUser(r).ID, goalPlan)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrEditConflict):
@@ -846,7 +846,7 @@ func (app *application) getGoalPlansForUserHandler(w http.ResponseWriter, r *htt
 	}
 
 	// Get the goal plans for the user
-	goalPlans, metadata, err := app.models.FinancialManager.GetGoalPlansForUser(user.ID, input.Filters)
+	goalPlans, metadata, err := app.models.FinancialManager.GetGoalPlansForUser(r.Context(), user.ID, input.Filters)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
@@ -880,7 +880,7 @@ func (app *application) getBudgetGoalExpenseSummaryHandler(w http.ResponseWriter
 	user := app.contextGetUser(r)
 
 	// Get the goals and expenses for the user
-	enrichedBudgets, err := app.models.FinancialManager.GetBudgetGoalExpenseSummary(user.ID)
+	enrichedBudgets, err := app.models.FinancialManager.GetBudgetGoalExpenseSummary(r.Context(), user.ID)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
@@ -924,7 +924,7 @@ func (app *application) getAllGoalsWithProgressionByUserIDHandler(w http.Respons
 	user := app.contextGetUser(r)
 
 	// Get the goals with progression for the user
-	goals, metadata, err := app.models.FinancialManager.GetAllGoalsWithProgressionByUserID(user.ID, input.Name, input.Filters)
+	goals, metadata, err := app.models.FinancialManager.GetAllGoalsWithProgressionByUserID(r.Context(), user.ID, input.Name, input.Filters)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):

@@ -69,7 +69,7 @@ func (app *application) createNewStockInvestmentHandler(w http.ResponseWriter, r
 		return
 	}
 	// create a new stock
-	err = app.models.InvestmentPortfolioManager.CreateNewStockInvestment(user.ID, stock)
+	err = app.models.InvestmentPortfolioManager.CreateNewStockInvestment(r.Context(), user.ID, stock)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
@@ -100,7 +100,7 @@ func (app *application) updateStockInvestmentHandler(w http.ResponseWriter, r *h
 		return
 	}
 	// check if stock
-	stock, err := app.models.InvestmentPortfolioManager.GetStockByStockID(stockID)
+	stock, err := app.models.InvestmentPortfolioManager.GetStockByStockID(r.Context(), stockID)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -139,7 +139,7 @@ func (app *application) updateStockInvestmentHandler(w http.ResponseWriter, r *h
 		return
 	}
 	// update the stock
-	err = app.models.InvestmentPortfolioManager.UpdateStockInvestment(app.contextGetUser(r).ID, stock)
+	err = app.models.InvestmentPortfolioManager.UpdateStockInvestment(r.Context(), app.contextGetUser(r).ID, stock)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralEditConflict):
@@ -173,7 +173,7 @@ func (app *application) deleteStockInvestmentByIDHandler(w http.ResponseWriter, 
 		return
 	}
 	// delete the stock
-	deletedStockID, err := app.models.InvestmentPortfolioManager.DeleteStockInvestmentByID(app.contextGetUser(r).ID, stockID)
+	deletedStockID, err := app.models.InvestmentPortfolioManager.DeleteStockInvestmentByID(r.Context(), app.contextGetUser(r).ID, stockID)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -218,7 +218,7 @@ func (app *application) getAllStockInvestmentByUserIDHandler(w http.ResponseWrit
 	}
 	// make a redis key with data.RedisInvestmentPortfolioStockPrefix, user.ID, input.Name, input.Filters.Page and input.Filters.PageSize
 	redisKey := fmt.Sprintf("%s:%d:%s:%d:%d", data.RedisInvestmentPortfolioStockPrefix, app.contextGetUser(r).ID, input.Name, input.Filters.Page, input.Filters.PageSize)
-	ctx := context.Background()
+	ctx := r.Context()
 	// set the struct we will need which will include the stock ([]*data.EnrichedStockInvestment) and metadata (*data.Metadata)
 	type stockData struct {
 		Stock    []*data.EnrichedStockInvestment
@@ -245,7 +245,7 @@ func (app *application) getAllStockInvestmentByUserIDHandler(w http.ResponseWrit
 	}
 
 	// get our stock information
-	stock, metadata, err := app.models.InvestmentPortfolioManager.GetAllStockInvestmentByUserID(app.contextGetUser(r).ID, input.Name, input.Filters)
+	stock, metadata, err := app.models.InvestmentPortfolioManager.GetAllStockInvestmentByUserID(ctx, app.contextGetUser(r).ID, input.Name, input.Filters)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -308,7 +308,7 @@ func (app *application) createNewBondInvestmentHandler(w http.ResponseWriter, r 
 		return
 	}
 	// create a new bond
-	err = app.models.InvestmentPortfolioManager.CreateNewBondInvestment(user.ID, bond)
+	err = app.models.InvestmentPortfolioManager.CreateNewBondInvestment(r.Context(), user.ID, bond)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
@@ -339,7 +339,7 @@ func (app *application) updateBondInvestmentHandler(w http.ResponseWriter, r *ht
 		return
 	}
 	// get the bond
-	bond, err := app.models.InvestmentPortfolioManager.GetBondByBondID(bondID)
+	bond, err := app.models.InvestmentPortfolioManager.GetBondByBondID(r.Context(), bondID)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -375,7 +375,7 @@ func (app *application) updateBondInvestmentHandler(w http.ResponseWriter, r *ht
 		return
 	}
 	// update the bond
-	err = app.models.InvestmentPortfolioManager.UpdateBondInvestment(app.contextGetUser(r).ID, bond)
+	err = app.models.InvestmentPortfolioManager.UpdateBondInvestment(r.Context(), app.contextGetUser(r).ID, bond)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralEditConflict):
@@ -408,7 +408,7 @@ func (app *application) deleteBondInvestmentByIDHandler(w http.ResponseWriter, r
 		return
 	}
 	// delete the bond
-	deletedBondID, err := app.models.InvestmentPortfolioManager.DeleteBondInvestmentByID(app.contextGetUser(r).ID, bondID)
+	deletedBondID, err := app.models.InvestmentPortfolioManager.DeleteBondInvestmentByID(r.Context(), app.contextGetUser(r).ID, bondID)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -453,7 +453,7 @@ func (app *application) getAllBondInvestmentByUserIDHandler(w http.ResponseWrite
 	}
 	// make redis key with data.RedisInvestmentPortfolioBondPrefix, user.ID, input.Name, input.Filters.Page and input.Filters.PageSize
 	redisKey := fmt.Sprintf("%s:%d:%s:%d:%d", data.RedisInvestmentPortfolioBondPrefix, app.contextGetUser(r).ID, input.Name, input.Filters.Page, input.Filters.PageSize)
-	ctx := context.Background()
+	ctx := r.Context()
 	// set the struct we will need which will include the bond ([]*data.EnrichedBondInvestment) and metadata (*data.Metadata)
 	type bondData struct {
 		Bond     []*data.EnrichedBondInvestment
@@ -479,7 +479,7 @@ func (app *application) getAllBondInvestmentByUserIDHandler(w http.ResponseWrite
 		return
 	}
 	// get our bond information
-	bond, metadata, err := app.models.InvestmentPortfolioManager.GetAllBondInvestmentByUserID(app.contextGetUser(r).ID, input.Name, input.Filters)
+	bond, metadata, err := app.models.InvestmentPortfolioManager.GetAllBondInvestmentByUserID(ctx, app.contextGetUser(r).ID, input.Name, input.Filters)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -555,7 +555,7 @@ func (app *application) createNewAlternativeInvestmentHandler(w http.ResponseWri
 		}
 	}
 	// create a new alternative
-	err = app.models.InvestmentPortfolioManager.CreateNewAlternativeInvestment(user.ID, alternative)
+	err = app.models.InvestmentPortfolioManager.CreateNewAlternativeInvestment(r.Context(), user.ID, alternative)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
@@ -592,7 +592,7 @@ func (app *application) updateAlternativeInvestmentHandler(w http.ResponseWriter
 		return
 	}
 	// get the alternative
-	alternative, err := app.models.InvestmentPortfolioManager.GetAlternativeInvestmentByAlternativeID(alternativeID)
+	alternative, err := app.models.InvestmentPortfolioManager.GetAlternativeInvestmentByAlternativeID(r.Context(), alternativeID)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -651,7 +651,7 @@ func (app *application) updateAlternativeInvestmentHandler(w http.ResponseWriter
 	}
 
 	// update the alternative
-	err = app.models.InvestmentPortfolioManager.UpdateAlternativeInvestment(app.contextGetUser(r).ID, alternative)
+	err = app.models.InvestmentPortfolioManager.UpdateAlternativeInvestment(r.Context(), app.contextGetUser(r).ID, alternative)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralEditConflict):
@@ -684,7 +684,7 @@ func (app *application) deleteAlternativeInvestmentByIDHandler(w http.ResponseWr
 		return
 	}
 	// delete the alternative
-	deletedAlternativeID, err := app.models.InvestmentPortfolioManager.DeleteAlternativeInvestmentByID(app.contextGetUser(r).ID, alternativeID)
+	deletedAlternativeID, err := app.models.InvestmentPortfolioManager.DeleteAlternativeInvestmentByID(r.Context(), app.contextGetUser(r).ID, alternativeID)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -764,19 +764,19 @@ func (app *application) createNewInvestmentTransactionHandler(w http.ResponseWri
 		return
 	}
 	// validate the investment
-	resultValue := app.investmentTransactionValidatorHelper(v, transaction)
+	resultValue := app.investmentTransactionValidatorHelper(r.Context(), v, transaction)
 	if !v.Valid() {
 		app.failedValidationResponse(w, r, v.Errors)
 		return
 	}
 	// create a new transaction
-	err = app.models.InvestmentPortfolioManager.CreateNewInvestmentTransaction(user.ID, transaction)
+	err = app.models.InvestmentPortfolioManager.CreateNewInvestmentTransaction(r.Context(), user.ID, transaction)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
 	}
 	// if transaction was successful, let us update the investment
-	err = app.updateInvestmentTransactionHelper(user.ID, input.TransactionType, input.Quantity, resultValue)
+	err = app.updateInvestmentTransactionHelper(r.Context(), user.ID, input.TransactionType, input.Quantity, resultValue)
 	if err != nil {
 		app.logger.Info("error updating investment", zap.Error(err))
 	}
@@ -803,7 +803,7 @@ func (app *application) deleteInvestmentTransactionByIDHandler(w http.ResponseWr
 		return
 	}
 	// delete the transaction
-	deletedTransactionID, err := app.models.InvestmentPortfolioManager.DeleteInvestmentTransactionByID(app.contextGetUser(r).ID, transactionID)
+	deletedTransactionID, err := app.models.InvestmentPortfolioManager.DeleteInvestmentTransactionByID(r.Context(), app.contextGetUser(r).ID, transactionID)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -833,7 +833,7 @@ func (app *application) investmentPrtfolioAnalysisHandler(w http.ResponseWriter,
 	//  retrieve user ID from context
 	user := app.contextGetUser(r)
 	// start by getting our goals
-	goals, err := app.models.FinancialManager.GetGoalsForUserInvestmentHelper(user.ID)
+	goals, err := app.models.FinancialManager.GetGoalsForUserInvestmentHelper(r.Context(), user.ID)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -849,7 +849,7 @@ func (app *application) investmentPrtfolioAnalysisHandler(w http.ResponseWriter,
 		return
 	}
 	// check all investments
-	investmentAnalysis, err := app.models.InvestmentPortfolioManager.GetAllInvestmentsByUserID(user.ID)
+	investmentAnalysis, err := app.models.InvestmentPortfolioManager.GetAllInvestmentsByUserID(r.Context(), user.ID)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -877,7 +877,7 @@ func (app *application) investmentPrtfolioAnalysisHandler(w http.ResponseWriter,
 		return
 	}
 
-	analyzedLLMResponse, err := app.buildInvestmentPortfolioLLMRequest(user, goals, investmentAnalysis)
+	analyzedLLMResponse, err := app.buildInvestmentPortfolioLLMRequest(r.Context(), user, goals, investmentAnalysis)
 	if err != nil {
 		//app.serverErrorResponse(w, r, err)
 		app.logger.Info("Error building LLM request:", zap.Error(err))
@@ -898,7 +898,7 @@ func (app *application) getLatestLLMAnalysisResponseByUserIDHandler(w http.Respo
 	//  retrieve user ID from context
 	user := app.contextGetUser(r)
 	// get the latest LLM analysis response
-	latestLLMAnalysisResponse, err := app.models.InvestmentPortfolioManager.GetLatestLLMAnalysisResponseByUserID(user.ID)
+	latestLLMAnalysisResponse, err := app.models.InvestmentPortfolioManager.GetLatestLLMAnalysisResponseByUserID(r.Context(), user.ID)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -921,7 +921,7 @@ func (app *application) getAllInvestmentInfoByUserIDHandler(w http.ResponseWrite
 	//  retrieve user ID from context
 	user := app.contextGetUser(r)
 	redisKey := fmt.Sprintf("%s%d", data.RedisInvestmentPortfolioSummaryPrefix, user.ID)
-	ctx := context.Background()
+	ctx := r.Context()
 	// check if result was already cached in the cache
 	cachedResponse, err := getFromCache[[]*data.InvestmentSummary](ctx, app.RedisDB, redisKey)
 	if err != nil {
@@ -941,7 +941,7 @@ func (app *application) getAllInvestmentInfoByUserIDHandler(w http.ResponseWrite
 		return
 	}
 	// check all investments
-	investmentAnalysis, err := app.models.InvestmentPortfolioManager.GetAllInvestmentInfoByUserID(user.ID)
+	investmentAnalysis, err := app.models.InvestmentPortfolioManager.GetAllInvestmentInfoByUserID(ctx, user.ID)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -1035,7 +1035,7 @@ func (app *application) getAllAlternativeInvestmentByUserIDHandler(w http.Respon
 	// make redis key with data.RedisInvestmentPortfolioAlternativePrefix, user.ID, input.Name, input.Filters.Page and input.Filters.PageSize
 	redisKey := fmt.Sprintf("%s:%d:%s:%d:%d", data.RedisInvestmentPortfolioAlternativePrefix, app.contextGetUser(r).ID, input.Name, input.Filters.Page, input.Filters.PageSize)
 	app.logger.Info("Redis Key:", zap.String("key", redisKey))
-	ctx := context.Background()
+	ctx := r.Context()
 	// set the struct we will need which will include the alternative ([]*data.EnrichedAlternativeInvestment) and metadata (*data.Metadata)
 	type alternativeData struct {
 		Alternative []*data.EnrichedAlternativeInvestment
@@ -1061,7 +1061,7 @@ func (app *application) getAllAlternativeInvestmentByUserIDHandler(w http.Respon
 		return
 	}
 	// get our alternative information
-	alternative, metadata, err := app.models.InvestmentPortfolioManager.GetAllAlternativeInvestmentByUserID(app.contextGetUser(r).ID, input.Name, input.Filters)
+	alternative, metadata, err := app.models.InvestmentPortfolioManager.GetAllAlternativeInvestmentByUserID(ctx, app.contextGetUser(r).ID, input.Name, input.Filters)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):

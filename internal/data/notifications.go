@@ -93,11 +93,12 @@ func MapNotificationStatusTypeToConst(statusType string) (database.NotificationS
 	}
 }
 
-// CreateNewNotification() creates a new notification in the system.
-// we take in a user id, and a pointer to a notification.
-// We return an error if there was an issue creating the notification.
-func (m NotificationManagerModel) CreateNewNotification(userID int64, mynotification *Notification) error {
-	ctx, cancel := contextGenerator(context.Background(), DefualtNotManContextTimeout)
+// CreateNewNotification creates a new notification in the system. ctx
+// flows from the caller (a request handler when the notification is
+// triggered by user action, or app.ctx when it is fired from a background
+// listener).
+func (m NotificationManagerModel) CreateNewNotification(ctx context.Context, userID int64, mynotification *Notification) error {
+	ctx, cancel := contextGenerator(ctx, DefualtNotManContextTimeout)
 	defer cancel()
 	// Create a new notification in the database
 	notificationDetail, err := m.DB.CreateNewNotification(ctx, database.CreateNewNotificationParams{
@@ -121,12 +122,10 @@ func (m NotificationManagerModel) CreateNewNotification(userID int64, mynotifica
 	return nil
 }
 
-// UpdateNotificationReadAtAndStatus() updates a notification by updating
-// the read at and status of a notification.
-// We take in a notification id, a read at time, and a status.
-// We return an error if there was an issue updating the notification.
-func (m NotificationManagerModel) UpdateNotificationReadAtAndStatus(notificationID int64, readAt sql.NullTime, status database.NotificationStatus) error {
-	ctx, cancel := contextGenerator(context.Background(), DefualtNotManContextTimeout)
+// UpdateNotificationReadAtAndStatus updates a notification by updating
+// the read-at and status of a notification. ctx flows from the caller.
+func (m NotificationManagerModel) UpdateNotificationReadAtAndStatus(ctx context.Context, notificationID int64, readAt sql.NullTime, status database.NotificationStatus) error {
+	ctx, cancel := contextGenerator(ctx, DefualtNotManContextTimeout)
 	defer cancel()
 	// Update the notification in the database
 	updatedAt, err := m.DB.UpdateNotificationReadAtAndStatus(ctx, database.UpdateNotificationReadAtAndStatusParams{
@@ -147,11 +146,11 @@ func (m NotificationManagerModel) UpdateNotificationReadAtAndStatus(notification
 	return nil
 }
 
-// GetAllNotificationsByUserId() gets all the notifications for a user.
-// This method supports both pagination as a notification_type search.
-// We take in a user id, notification type and a filter and return a slice of notifications and an error if there was an issue.
-func (m NotificationManagerModel) GetAllNotificationsByUserId(userID int64, notificationType string, filters Filters) ([]*Notification, Metadata, error) {
-	ctx, cancel := contextGenerator(context.Background(), DefualtNotManContextTimeout)
+// GetAllNotificationsByUserId gets all the notifications for a user. This
+// method supports both pagination and a notification_type search. ctx
+// flows from the originating HTTP request.
+func (m NotificationManagerModel) GetAllNotificationsByUserId(ctx context.Context, userID int64, notificationType string, filters Filters) ([]*Notification, Metadata, error) {
+	ctx, cancel := contextGenerator(ctx, DefualtNotManContextTimeout)
 	defer cancel()
 	// Get all the notifications from the database
 	notificationsRows, err := m.DB.GetAllNotificationsByUserId(ctx, database.GetAllNotificationsByUserIdParams{
@@ -188,12 +187,11 @@ func (m NotificationManagerModel) GetAllNotificationsByUserId(userID int64, noti
 	return notifications, metadata, nil
 }
 
-// GetUnreadNotifications() gets all the unread notifications for a user i.e
-// all notifications that are marked as pending and also whose expired at time
-// is greater than the now.
-// We take in a user id and return a slice of notifications and an error if there was an issue.
-func (m NotificationManagerModel) GetUnreadNotifications(userID int64) ([]*Notification, error) {
-	ctx, cancel := contextGenerator(context.Background(), DefualtNotManContextTimeout)
+// GetUnreadNotifications gets all the unread notifications for a user
+// (status = pending AND expires_at > NOW). ctx flows from the caller
+// (typically the SSE-pending-notifications loader, which uses app.ctx).
+func (m NotificationManagerModel) GetUnreadNotifications(ctx context.Context, userID int64) ([]*Notification, error) {
+	ctx, cancel := contextGenerator(ctx, DefualtNotManContextTimeout)
 	defer cancel()
 	// Get all the unread notifications from the database
 	notificationsRows, err := m.DB.GetUnreadNotifications(ctx, userID)
@@ -221,12 +219,11 @@ func (m NotificationManagerModel) GetUnreadNotifications(userID int64) ([]*Notif
 	return notifications, nil
 }
 
-// GetAllExpiredNotifications() gets all the expired notifications for a user i.e
-// all notifications that are marked as pending and also whose expired at time
-// is less than the now.
-// We take in a filter and return a slice of notifications and an error if there was an issue.
-func (m NotificationManagerModel) GetAllExpiredNotifications(filters Filters) ([]*Notification, Metadata, error) {
-	ctx, cancel := contextGenerator(context.Background(), DefualtNotManContextTimeout)
+// GetAllExpiredNotifications gets all the expired notifications (status
+// = pending AND expires_at < NOW). ctx flows from the caller (the
+// scheduled cron job, which derives from app.ctx).
+func (m NotificationManagerModel) GetAllExpiredNotifications(ctx context.Context, filters Filters) ([]*Notification, Metadata, error) {
+	ctx, cancel := contextGenerator(ctx, DefualtNotManContextTimeout)
 	defer cancel()
 	// Get all the expired notifications from the database
 	notificationsRows, err := m.DB.GetAllExpiredNotifications(ctx, database.GetAllExpiredNotificationsParams{
@@ -261,10 +258,10 @@ func (m NotificationManagerModel) GetAllExpiredNotifications(filters Filters) ([
 	return notifications, metadata, nil
 }
 
-// DeleteNotificationById() deletes a notification by id.
-// We take in a notification id and a userID and return an error if there was an issue deleting the notification.
-func (m NotificationManagerModel) DeleteNotificationById(notificationID int64, userID int64) error {
-	ctx, cancel := contextGenerator(context.Background(), DefualtNotManContextTimeout)
+// DeleteNotificationById deletes a notification by id. ctx flows from
+// the originating HTTP request.
+func (m NotificationManagerModel) DeleteNotificationById(ctx context.Context, notificationID int64, userID int64) error {
+	ctx, cancel := contextGenerator(ctx, DefualtNotManContextTimeout)
 	defer cancel()
 	// Delete the notification from the database
 	_, err := m.DB.DeleteNotificationById(ctx, database.DeleteNotificationByIdParams{
@@ -283,10 +280,10 @@ func (m NotificationManagerModel) DeleteNotificationById(notificationID int64, u
 	return nil
 }
 
-// DeleteAllNotificationsByUserId() deletes all notifications for a user.
-// We take in a user id and return an error if there was an issue deleting the notifications.
-func (m NotificationManagerModel) DeleteAllNotificationsByUserId(userID int64) error {
-	ctx, cancel := contextGenerator(context.Background(), DefualtNotManContextTimeout)
+// DeleteAllNotificationsByUserId deletes all notifications for a user.
+// ctx flows from the originating HTTP request.
+func (m NotificationManagerModel) DeleteAllNotificationsByUserId(ctx context.Context, userID int64) error {
+	ctx, cancel := contextGenerator(ctx, DefualtNotManContextTimeout)
 	defer cancel()
 	// Delete all notifications from the database
 	err := m.DB.DeleteAllNotificationsByUserId(ctx, userID)

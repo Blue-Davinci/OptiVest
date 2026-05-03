@@ -228,14 +228,12 @@ func ValidatePredictionParameters(v *validator.Validator, timeline string) {
 	v.Check(timeline == "monthly" || timeline == "weekly", "timeline", "must be either 'monthly' or 'weekly'")
 }
 
-// GetAllFinanceDetailsForAnalysisByUserID() returns all the finance details for a user
-// The data is returned in JSON format and includes income, expenses, budgets, and debts.
-// We will need to unmarshal this data into the appropriate structs in the frontend based
-// on the "type" field in the JSON.
-// We return a UnifiedFinanceAnalysis struct that contains all the finance analysis data and
-// an error if the operation fails.
-func (m PersonalFinancePortfolioModel) GetAllFinanceDetailsForAnalysisByUserID(userID int64) (*UnifiedFinanceAnalysis, error) {
-	ctx, cancel := contextGenerator(context.Background(), DefaultPerFinPortDBContextTimeout)
+// GetAllFinanceDetailsForAnalysisByUserID returns all the finance details
+// for a user. The data is returned in JSON format and includes income,
+// expenses, budgets, and debts. The frontend unmarshals based on the
+// "type" field. ctx flows from the originating HTTP request.
+func (m PersonalFinancePortfolioModel) GetAllFinanceDetailsForAnalysisByUserID(ctx context.Context, userID int64) (*UnifiedFinanceAnalysis, error) {
+	ctx, cancel := contextGenerator(ctx, DefaultPerFinPortDBContextTimeout)
 	defer cancel()
 
 	// Get the personal finance rows for the user
@@ -286,12 +284,12 @@ func (m PersonalFinancePortfolioModel) GetAllFinanceDetailsForAnalysisByUserID(u
 	return unifiedFinanceAnalysis, nil
 }
 
-// CheckIfUserHasEnoughPredictionData() checks if the user has enough prediction data
-// to make a prediction. We will send a constant that will alert the caller whether to use
-// per week in the call to the micro service or per month. We will return a string constant
-// and an error if the operation fails.
-func (m PersonalFinancePortfolioModel) CheckIfUserHasEnoughPredictionData(userID int64, timeline string, dateOccurred time.Time) (string, error) {
-	ctx, cancel := contextGenerator(context.Background(), DefaultPerFinPortDBContextTimeout)
+// CheckIfUserHasEnoughPredictionData checks if the user has enough
+// prediction data to make a prediction. Returns a constant that tells
+// the caller whether to use per-week or per-month in the call to the
+// microservice. ctx flows from the originating HTTP request.
+func (m PersonalFinancePortfolioModel) CheckIfUserHasEnoughPredictionData(ctx context.Context, userID int64, timeline string, dateOccurred time.Time) (string, error) {
+	ctx, cancel := contextGenerator(ctx, DefaultPerFinPortDBContextTimeout)
 	defer cancel()
 
 	// Get the total number of finance rows for the user
@@ -316,12 +314,11 @@ func (m PersonalFinancePortfolioModel) CheckIfUserHasEnoughPredictionData(userID
 	}
 }
 
-// GetPersonalFinanceDataForMonthByUserID() returns all the finance details for a user from
-// a given start date to today. We take in the user id and the start date and return a
-// A PredictionPersonalFinanceData struct that contains all the finance analysis data and
-// an error if the operation fails.
-func (m PersonalFinancePortfolioModel) GetPersonalFinanceDataForMonthByUserID(userID int64, startDate time.Time) ([]*PredictionPersonalFinanceData, error) {
-	ctx, cancel := contextGenerator(context.Background(), DefaultPerFinPortDBContextTimeout)
+// GetPersonalFinanceDataForMonthByUserID returns all the finance details
+// for a user from a given start date to today. ctx flows from the
+// originating HTTP request.
+func (m PersonalFinancePortfolioModel) GetPersonalFinanceDataForMonthByUserID(ctx context.Context, userID int64, startDate time.Time) ([]*PredictionPersonalFinanceData, error) {
+	ctx, cancel := contextGenerator(ctx, DefaultPerFinPortDBContextTimeout)
 	defer cancel()
 
 	// Get the personal finance rows for the user
@@ -358,13 +355,11 @@ func (m PersonalFinancePortfolioModel) GetPersonalFinanceDataForMonthByUserID(us
 	return predictionPersonalFinanceData, nil
 }
 
-// GetPersonalFinanceDataForWeeklyByUserID() returns all the finance details for a user from
-// a given start date to today. We take in the user id and the start date and return a
-// A PredictionPersonalFinanceData struct that contains all the finance analysis data and
-// an error if the operation fails.
-// This is different from the monthly version because it returns data for a week instead of a month.
-func (m PersonalFinancePortfolioModel) GetPersonalFinanceDataForWeeklyByUserID(userID int64, startDate time.Time) ([]*PredictionPersonalFinanceData, error) {
-	ctx, cancel := contextGenerator(context.Background(), DefaultPerFinPortDBContextTimeout)
+// GetPersonalFinanceDataForWeeklyByUserID is the weekly variant of
+// GetPersonalFinanceDataForMonthByUserID. ctx flows from the originating
+// HTTP request.
+func (m PersonalFinancePortfolioModel) GetPersonalFinanceDataForWeeklyByUserID(ctx context.Context, userID int64, startDate time.Time) ([]*PredictionPersonalFinanceData, error) {
+	ctx, cancel := contextGenerator(ctx, DefaultPerFinPortDBContextTimeout)
 	defer cancel()
 
 	// Get the personal finance rows for the user
@@ -470,10 +465,11 @@ func (m PersonalFinancePortfolioModel) ProcessPersonalFinanceData(predictionData
 	}, nil
 }
 
-// GetExpenseIncomeSummaryReport() returns a summary report of the expenses and incomes
-// It returns all expenses and incomes per month for a specific user
-func (m PersonalFinancePortfolioModel) GetExpenseIncomeSummaryReport(userID int64) ([]*ExpensesIncomesMonthlySummary, error) {
-	ctx, cancel := contextGenerator(context.Background(), DefaultPerFinPortDBContextTimeout)
+// GetExpenseIncomeSummaryReport returns a summary report of expenses and
+// incomes per month for a specific user. ctx flows from the originating
+// HTTP request.
+func (m PersonalFinancePortfolioModel) GetExpenseIncomeSummaryReport(ctx context.Context, userID int64) ([]*ExpensesIncomesMonthlySummary, error) {
+	ctx, cancel := contextGenerator(ctx, DefaultPerFinPortDBContextTimeout)
 	defer cancel()
 
 	// Get the personal finance rows for the user

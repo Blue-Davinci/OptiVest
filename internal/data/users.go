@@ -222,11 +222,13 @@ func (m UserModel) MapTimeHorizonTypeToConstant(timeHorizon string) database.Nul
 	}
 }
 
-// CreateNewUser() creates a new user in the database. The function takes a pointer to a User struct
-// and an encryption key as input. We decrypt the key, use it to encrypt necessary items before we save
-// it back to the DB.
-func (m UserModel) CreateNewUser(user *User, encryption_key string) error {
-	ctx, cancel := contextGenerator(context.Background(), DefaultUserDBContextTimeout)
+// CreateNewUser creates a new user in the database. The function takes a
+// pointer to a User struct and an encryption key as input. We decode the
+// key, use it to encrypt necessary items before we save it back to the DB.
+// ctx flows from the originating HTTP request so client disconnects abort
+// the in-flight INSERT.
+func (m UserModel) CreateNewUser(ctx context.Context, user *User, encryption_key string) error {
+	ctx, cancel := contextGenerator(ctx, DefaultUserDBContextTimeout)
 	defer cancel()
 	// decrypt our hex
 	decodedKey, err := DecodeEncryptionKey(encryption_key)
@@ -274,16 +276,16 @@ func (m UserModel) CreateNewUser(user *User, encryption_key string) error {
 	return nil
 }
 
-// GetForToken() retrieves the details of a user based on a token, scope, and encryption key.
-func (m UserModel) GetForToken(tokenScope, tokenPlaintext, encryption_key string) (*User, error) {
-	// decrypt our hex
+// GetForToken retrieves the details of a user based on a token, scope, and
+// encryption key. ctx flows from the originating HTTP request so client
+// disconnects abort the in-flight SELECT.
+func (m UserModel) GetForToken(ctx context.Context, tokenScope, tokenPlaintext, encryption_key string) (*User, error) {
 	decodedKey, err := DecodeEncryptionKey(encryption_key)
 	if err != nil {
 		return nil, err
 	}
-	// Calculate sha256 hash of plaintext
 	tokenHash := sha256.Sum256([]byte(tokenPlaintext))
-	ctx, cancel := contextGenerator(context.Background(), DefaultUserDBContextTimeout)
+	ctx, cancel := contextGenerator(ctx, DefaultUserDBContextTimeout)
 	defer cancel()
 	// get the user
 	user, err := m.DB.GetForToken(ctx, database.GetForTokenParams{
@@ -311,17 +313,16 @@ func (m UserModel) GetForToken(tokenScope, tokenPlaintext, encryption_key string
 	return tokenuser, nil
 }
 
-// GetByEmail() retrieves the details of a user based on an email
-// An Encryption key is also passed to decrypt any data that was encrypted
-// Such as the phone number or the MFA secret.
-func (m UserModel) GetByEmail(email, encryption_key string) (*User, error) {
-	// decrypt our hex
+// GetByEmail retrieves the details of a user based on an email. An
+// encryption key is also passed to decrypt any data that was encrypted
+// (such as the phone number or the MFA secret). ctx flows from the
+// originating HTTP request.
+func (m UserModel) GetByEmail(ctx context.Context, email, encryption_key string) (*User, error) {
 	decodedKey, err := DecodeEncryptionKey(encryption_key)
 	if err != nil {
 		return nil, err
 	}
-	// Get our context
-	ctx, cancel := contextGenerator(context.Background(), DefaultUserDBContextTimeout)
+	ctx, cancel := contextGenerator(ctx, DefaultUserDBContextTimeout)
 	defer cancel()
 	// Get the user
 	user, err := m.DB.GetUserByEmail(ctx, email)
@@ -344,17 +345,16 @@ func (m UserModel) GetByEmail(email, encryption_key string) (*User, error) {
 	return emailUser, nil
 }
 
-// UpdateUser() updates the details of a user in the database.
-// The function takes a pointer to a User struct and an encryption key as input.
-// We decode the key, use it to encrypt necessary items before we save it back to the DB
-func (m UserModel) UpdateUser(user *User, encryption_key string) error {
-	// decrypt our hex
+// UpdateUser updates the details of a user in the database. The function
+// takes a pointer to a User struct and an encryption key as input. We
+// decode the key, use it to encrypt necessary items before we save it back
+// to the DB. ctx flows from the originating HTTP request.
+func (m UserModel) UpdateUser(ctx context.Context, user *User, encryption_key string) error {
 	decodedKey, err := DecodeEncryptionKey(encryption_key)
 	if err != nil {
 		return err
 	}
-	// get context
-	ctx, cancel := contextGenerator(context.Background(), DefaultUserDBContextTimeout)
+	ctx, cancel := contextGenerator(ctx, DefaultUserDBContextTimeout)
 	defer cancel()
 	// encrypt and set the phone number
 	encryptedPhoneNumber, err := EncryptData(user.PhoneNumber, decodedKey)

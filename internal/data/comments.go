@@ -91,10 +91,10 @@ func ValidateCommentReaction(v *validator.Validator, reaction *CommentReaction) 
 	ValidateURLID(v, reaction.CommentID, "comment_id")
 }
 
-// GetCommentsWithReactionsByAssociatedId gets all comments with reactions and user information
-// We take in the user ID, the associated type, and the associated ID and return an enriched comment slice and an error if there is one
-func (m CommentManagerModel) GetCommentsWithReactionsByAssociatedId(userID int64, associatedType database.CommentAssociatedType, associatedID int64, filters Filters) ([]*EnrichedComment, Metadata, error) {
-	ctx, cancel := contextGenerator(context.Background(), DefaultCommManDBContextTimeout)
+// GetCommentsWithReactionsByAssociatedId gets all comments with reactions
+// and user information. ctx flows from the originating HTTP request.
+func (m CommentManagerModel) GetCommentsWithReactionsByAssociatedId(ctx context.Context, userID int64, associatedType database.CommentAssociatedType, associatedID int64, filters Filters) ([]*EnrichedComment, Metadata, error) {
+	ctx, cancel := contextGenerator(ctx, DefaultCommManDBContextTimeout)
 	defer cancel()
 	// get the comments
 	comments, err := m.DB.GetCommentsWithReactionsByAssociatedId(ctx, database.GetCommentsWithReactionsByAssociatedIdParams{
@@ -127,10 +127,10 @@ func (m CommentManagerModel) GetCommentsWithReactionsByAssociatedId(userID int64
 	return enrichedComments, metadata, nil
 }
 
-// CreateNewComment creates a new comment in the database
-// We take in the user ID and the comment struct and return an error if there is one
-func (m CommentManagerModel) CreateNewComment(userID int64, comment *Comment) error {
-	ctx, cancel := contextGenerator(context.Background(), DefaultCommManDBContextTimeout)
+// CreateNewComment creates a new comment in the database. ctx flows from
+// the originating HTTP request.
+func (m CommentManagerModel) CreateNewComment(ctx context.Context, userID int64, comment *Comment) error {
+	ctx, cancel := contextGenerator(ctx, DefaultCommManDBContextTimeout)
 	defer cancel()
 	// insert
 	createdFeed, err := m.DB.CreateNewComment(ctx, database.CreateNewCommentParams{
@@ -157,11 +157,10 @@ func (m CommentManagerModel) CreateNewComment(userID int64, comment *Comment) er
 	return nil
 }
 
-// UpdateComment updates a comment in the database
-// We take in the user ID and the comment struct which includes the comment and version
-// We return an error if there is one
-func (m CommentManagerModel) UpdateComment(userID int64, comment *Comment) error {
-	ctx, cancel := contextGenerator(context.Background(), DefaultCommManDBContextTimeout)
+// UpdateComment updates a comment in the database. ctx flows from the
+// originating HTTP request.
+func (m CommentManagerModel) UpdateComment(ctx context.Context, userID int64, comment *Comment) error {
+	ctx, cancel := contextGenerator(ctx, DefaultCommManDBContextTimeout)
 	defer cancel()
 	// update
 	updatedFeed, err := m.DB.UpdateComment(ctx, database.UpdateCommentParams{
@@ -185,10 +184,10 @@ func (m CommentManagerModel) UpdateComment(userID int64, comment *Comment) error
 	return nil
 }
 
-// DeleteComment deletes a comment in the database
-// We take in the user ID and the comment ID and return an error if there is one
-func (m CommentManagerModel) DeleteComment(userID, commentID int64) error {
-	ctx, cancel := contextGenerator(context.Background(), DefaultCommManDBContextTimeout)
+// DeleteComment deletes a comment in the database. ctx flows from the
+// originating HTTP request.
+func (m CommentManagerModel) DeleteComment(ctx context.Context, userID, commentID int64) error {
+	ctx, cancel := contextGenerator(ctx, DefaultCommManDBContextTimeout)
 	defer cancel()
 	// delete
 	_, err := m.DB.DeleteComment(ctx, database.DeleteCommentParams{
@@ -207,10 +206,10 @@ func (m CommentManagerModel) DeleteComment(userID, commentID int64) error {
 	return nil
 }
 
-// GetCommentById gets a comment by its ID
-// We take in the comment ID and return the comment and an error if there is one
-func (m CommentManagerModel) GetCommentById(userID, commentID int64) (*Comment, error) {
-	ctx, cancel := contextGenerator(context.Background(), DefaultCommManDBContextTimeout)
+// GetCommentById gets a comment by its ID. ctx flows from the
+// originating HTTP request.
+func (m CommentManagerModel) GetCommentById(ctx context.Context, userID, commentID int64) (*Comment, error) {
+	ctx, cancel := contextGenerator(ctx, DefaultCommManDBContextTimeout)
 	defer cancel()
 	// get the comment
 	commentRow, err := m.DB.GetCommentById(ctx, database.GetCommentByIdParams{
@@ -231,10 +230,10 @@ func (m CommentManagerModel) GetCommentById(userID, commentID int64) (*Comment, 
 	return comment, nil
 }
 
-// CreateNewReaction creates a new reaction for a specific comment ID
-// We take in the user ID and a commentreaction struct and return an error if there is one
-func (m CommentManagerModel) CreateNewReaction(userID int64, reaction *CommentReaction) error {
-	ctx, cancel := contextGenerator(context.Background(), DefaultCommManDBContextTimeout)
+// CreateNewReaction creates a new reaction for a specific comment ID.
+// ctx flows from the originating HTTP request.
+func (m CommentManagerModel) CreateNewReaction(ctx context.Context, userID int64, reaction *CommentReaction) error {
+	ctx, cancel := contextGenerator(ctx, DefaultCommManDBContextTimeout)
 	defer cancel()
 	// insert
 	createdReaction, err := m.DB.CreateNewReaction(ctx, database.CreateNewReactionParams{
@@ -259,10 +258,10 @@ func (m CommentManagerModel) CreateNewReaction(userID int64, reaction *CommentRe
 	return nil
 }
 
-// DeleteReaction deletes a reaction for a specific comment ID
-// We take the userID and the Comment ID and return an error if there is one
-func (m CommentManagerModel) DeleteReaction(userID, commentID int64) error {
-	ctx, cancel := contextGenerator(context.Background(), DefaultCommManDBContextTimeout)
+// DeleteReaction deletes a reaction for a specific comment ID. ctx flows
+// from the originating HTTP request.
+func (m CommentManagerModel) DeleteReaction(ctx context.Context, userID, commentID int64) error {
+	ctx, cancel := contextGenerator(ctx, DefaultCommManDBContextTimeout)
 	defer cancel()
 	// delete
 	_, err := m.DB.DeleteReaction(ctx, database.DeleteReactionParams{

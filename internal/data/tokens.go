@@ -125,20 +125,20 @@ func generateRecoveryCodes(codeCount int) (*RecoveryCodes, error) {
 	return token, nil
 }
 
-func (m TokenModel) New(userID int64, ttl time.Duration, scope string) (*Token, error) {
+// New generates a token then inserts it. ctx flows from the originating
+// HTTP request so client disconnects abort the in-flight INSERT.
+func (m TokenModel) New(ctx context.Context, userID int64, ttl time.Duration, scope string) (*Token, error) {
 	api_key, err := generateToken(userID, ttl, scope)
 	if err != nil {
 		return nil, err
 	}
-	//fmt.Printf("API Key: %v\n || User ID: %d", api_key, userID)
-	// insert the api key into the database
-	err = m.Insert(api_key)
+	err = m.Insert(ctx, api_key)
 	return api_key, err
 }
 
-func (m TokenModel) Insert(api_key *Token) error {
-	// create our timeout context. All of them will just be 5 seconds
-	ctx, cancel := contextGenerator(context.Background(), DefaultTokenDBContextTimeout)
+// Insert persists a token row. ctx flows from the caller.
+func (m TokenModel) Insert(ctx context.Context, api_key *Token) error {
+	ctx, cancel := contextGenerator(ctx, DefaultTokenDBContextTimeout)
 	defer cancel()
 	_, err := m.DB.CreateNewToken(ctx, database.CreateNewTokenParams{
 		Hash:   api_key.Hash,
@@ -149,10 +149,10 @@ func (m TokenModel) Insert(api_key *Token) error {
 	return err
 }
 
-// DeleteAllForUser() deletes all tokens for a specific user and scope.
-func (m TokenModel) DeleteAllForUser(scope string, userID int64) error {
-	// create our timeout context. All of them will just be 5 seconds
-	ctx, cancel := contextGenerator(context.Background(), DefaultTokenDBContextTimeout)
+// DeleteAllForUser deletes all tokens for a specific user and scope. ctx
+// flows from the caller.
+func (m TokenModel) DeleteAllForUser(ctx context.Context, scope string, userID int64) error {
+	ctx, cancel := contextGenerator(ctx, DefaultTokenDBContextTimeout)
 	defer cancel()
 	err := m.DB.DeletAllTokensForUser(ctx, database.DeletAllTokensForUserParams{
 		UserID: userID,

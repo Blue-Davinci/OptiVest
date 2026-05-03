@@ -37,7 +37,7 @@ func (app *application) createNewExpenseHandler(w http.ResponseWriter, r *http.R
 	// get the user
 	user := app.contextGetUser(r)
 	// get the budget
-	budget, err := app.models.FinancialManager.GetBudgetByID(input.BudgetID)
+	budget, err := app.models.FinancialManager.GetBudgetByID(r.Context(), input.BudgetID)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -66,7 +66,7 @@ func (app *application) createNewExpenseHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 	// get the available surplus
-	goalTotals, err := app.models.FinancialManager.GetAllGoalSummaryBudgetID(expense.BudgetID, user.ID)
+	goalTotals, err := app.models.FinancialManager.GetAllGoalSummaryBudgetID(r.Context(), expense.BudgetID, user.ID)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
@@ -83,7 +83,7 @@ func (app *application) createNewExpenseHandler(w http.ResponseWriter, r *http.R
 		}
 	}
 	// save the expense
-	err = app.models.FinancialTrackingManager.CreateNewExpense(user.ID, expense)
+	err = app.models.FinancialTrackingManager.CreateNewExpense(r.Context(), user.ID, expense)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
@@ -132,7 +132,7 @@ func (app *application) updateExpenseByIDHandler(w http.ResponseWriter, r *http.
 	user := app.contextGetUser(r)
 
 	// get the expense
-	expense, err := app.models.FinancialTrackingManager.GetExpenseByID(user.ID, expenseID)
+	expense, err := app.models.FinancialTrackingManager.GetExpenseByID(r.Context(), user.ID, expenseID)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -144,7 +144,7 @@ func (app *application) updateExpenseByIDHandler(w http.ResponseWriter, r *http.
 	}
 
 	// get the budget
-	budget, err := app.models.FinancialManager.GetBudgetByID(expense.BudgetID)
+	budget, err := app.models.FinancialManager.GetBudgetByID(r.Context(), expense.BudgetID)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -156,7 +156,7 @@ func (app *application) updateExpenseByIDHandler(w http.ResponseWriter, r *http.
 	}
 
 	// get the available surplus (this includes the current expense)
-	goalTotals, err := app.models.FinancialManager.GetAllGoalSummaryBudgetID(expense.BudgetID, user.ID)
+	goalTotals, err := app.models.FinancialManager.GetAllGoalSummaryBudgetID(r.Context(), expense.BudgetID, user.ID)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
@@ -208,7 +208,7 @@ func (app *application) updateExpenseByIDHandler(w http.ResponseWriter, r *http.
 	}
 
 	// 5. Save the updated expense to the database
-	err = app.models.FinancialTrackingManager.UpdateExpenseByID(user.ID, expense)
+	err = app.models.FinancialTrackingManager.UpdateExpenseByID(r.Context(), user.ID, expense)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
@@ -258,7 +258,7 @@ func (app *application) createNewRecurringExpenseHandler(w http.ResponseWriter, 
 
 	// Next Recurrence we will need to calculate
 	// Get budget details from the database
-	budget, err := app.models.FinancialManager.GetBudgetByID(input.BudgetID)
+	budget, err := app.models.FinancialManager.GetBudgetByID(r.Context(), input.BudgetID)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -287,7 +287,7 @@ func (app *application) createNewRecurringExpenseHandler(w http.ResponseWriter, 
 	// calculate amount of the expense per month based on the recurrence interval
 	recurringExpense.ProjectedAmount = recurringExpense.CalculateTotalAmountPerMonth()
 	// Get our totals
-	goalTotals, err := app.models.FinancialManager.GetAllGoalSummaryBudgetID(recurringExpense.BudgetID, user.ID)
+	goalTotals, err := app.models.FinancialManager.GetAllGoalSummaryBudgetID(r.Context(), recurringExpense.BudgetID, user.ID)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
@@ -307,7 +307,7 @@ func (app *application) createNewRecurringExpenseHandler(w http.ResponseWriter, 
 	recurringExpense.CalculateNextOccurrence()
 	app.logger.Info("next occurrence", zap.String("next_occurrence", recurringExpense.NextOccurrence.String()))
 	// Create the recurring expense
-	err = app.models.FinancialTrackingManager.CreateNewRecurringExpense(user.ID, recurringExpense)
+	err = app.models.FinancialTrackingManager.CreateNewRecurringExpense(r.Context(), user.ID, recurringExpense)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrDuplicateRecurringExpense):
@@ -358,7 +358,7 @@ func (app *application) updateRecurringExpenseByIDHandler(w http.ResponseWriter,
 	}
 
 	user := app.contextGetUser(r)
-	recurringExpense, err := app.models.FinancialTrackingManager.GetRecurringExpenseByID(user.ID, expenseID)
+	recurringExpense, err := app.models.FinancialTrackingManager.GetRecurringExpenseByID(r.Context(), user.ID, expenseID)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -371,7 +371,7 @@ func (app *application) updateRecurringExpenseByIDHandler(w http.ResponseWriter,
 	// print created at
 	app.logger.Info("created at", zap.String("created_at", recurringExpense.CreatedAt.String()))
 
-	budget, err := app.models.FinancialManager.GetBudgetByID(recurringExpense.BudgetID)
+	budget, err := app.models.FinancialManager.GetBudgetByID(r.Context(), recurringExpense.BudgetID)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -421,7 +421,7 @@ func (app *application) updateRecurringExpenseByIDHandler(w http.ResponseWriter,
 	app.logger.Info("new projected amount", zap.String("new_projected_amount", newProjectedAmount.String()))
 
 	// Get available surplus
-	goalTotals, err := app.models.FinancialManager.GetAllGoalSummaryBudgetID(recurringExpense.BudgetID, user.ID)
+	goalTotals, err := app.models.FinancialManager.GetAllGoalSummaryBudgetID(r.Context(), recurringExpense.BudgetID, user.ID)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
@@ -452,7 +452,7 @@ func (app *application) updateRecurringExpenseByIDHandler(w http.ResponseWriter,
 		return
 	}
 	// Save the updated recurring expense
-	err = app.models.FinancialTrackingManager.UpdateRecurringExpenseByID(user.ID, recurringExpense)
+	err = app.models.FinancialTrackingManager.UpdateRecurringExpenseByID(r.Context(), user.ID, recurringExpense)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
@@ -493,7 +493,7 @@ func (app *application) getAllExpensesByUserIDHandler(w http.ResponseWriter, r *
 		return
 	}
 	// get our expenses
-	expenses, metadata, err := app.models.FinancialTrackingManager.GetAllExpensesByUserID(app.contextGetUser(r).ID, input.Name, input.Filters)
+	expenses, metadata, err := app.models.FinancialTrackingManager.GetAllExpensesByUserID(r.Context(), app.contextGetUser(r).ID, input.Name, input.Filters)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -536,7 +536,7 @@ func (app *application) getAllRecurringExpensesByUserIDHandler(w http.ResponseWr
 		return
 	}
 	// get our expenses
-	recurringExpenses, metadata, err := app.models.FinancialTrackingManager.GetAllRecurringExpensesByUserID(app.contextGetUser(r).ID, input.Name, input.Filters)
+	recurringExpenses, metadata, err := app.models.FinancialTrackingManager.GetAllRecurringExpensesByUserID(r.Context(), app.contextGetUser(r).ID, input.Name, input.Filters)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -616,7 +616,7 @@ func (app *application) createNewIncomeHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 	// save the income
-	err = app.models.FinancialTrackingManager.CreateNewIncome(user.ID, income)
+	err = app.models.FinancialTrackingManager.CreateNewIncome(r.Context(), user.ID, income)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
@@ -654,7 +654,7 @@ func (app *application) getAllIncomesByUserIDHandler(w http.ResponseWriter, r *h
 		return
 	}
 	// get our incomes
-	incomes, metadata, err := app.models.FinancialTrackingManager.GetAllIncomesByUserID(app.contextGetUser(r).ID, input.Name, input.Filters)
+	incomes, metadata, err := app.models.FinancialTrackingManager.GetAllIncomesByUserID(r.Context(), app.contextGetUser(r).ID, input.Name, input.Filters)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -707,7 +707,7 @@ func (app *application) updateIncomeHandler(w http.ResponseWriter, r *http.Reque
 	user := app.contextGetUser(r)
 
 	// Fetch the existing income entry from the database.
-	income, err := app.models.FinancialTrackingManager.GetIncomeByID(user.ID, incomeID)
+	income, err := app.models.FinancialTrackingManager.GetIncomeByID(r.Context(), user.ID, incomeID)
 	if err != nil {
 		if errors.Is(err, data.ErrGeneralRecordNotFound) {
 			app.notFoundResponse(w, r)
@@ -776,7 +776,7 @@ func (app *application) updateIncomeHandler(w http.ResponseWriter, r *http.Reque
 	}
 
 	// Save the updated income to the database.
-	err = app.models.FinancialTrackingManager.UpdateIncomeByID(user.ID, income)
+	err = app.models.FinancialTrackingManager.UpdateIncomeByID(r.Context(), user.ID, income)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
@@ -849,7 +849,7 @@ func (app *application) createNewDebtHandler(w http.ResponseWriter, r *http.Requ
 	debt.EstimatedPayoffDate = estimatedPayoffDate
 
 	// Insert the new debt into the database
-	err = app.models.FinancialTrackingManager.CreateNewDebt(app.contextGetUser(r).ID, debt)
+	err = app.models.FinancialTrackingManager.CreateNewDebt(r.Context(), app.contextGetUser(r).ID, debt)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrDuplicateDebt):
@@ -897,7 +897,7 @@ func (app *application) updateDebtHandler(w http.ResponseWriter, r *http.Request
 	}
 
 	// Fetch the existing debt from the DB
-	debt, err := app.models.FinancialTrackingManager.GetDebtByID(app.contextGetUser(r).ID, debtID)
+	debt, err := app.models.FinancialTrackingManager.GetDebtByID(r.Context(), app.contextGetUser(r).ID, debtID)
 	if err != nil {
 		if errors.Is(err, data.ErrGeneralRecordNotFound) {
 			app.notFoundResponse(w, r)
@@ -978,7 +978,7 @@ func (app *application) updateDebtHandler(w http.ResponseWriter, r *http.Request
 			PrincipalPayment: principalPayment,
 		}
 
-		err = app.models.FinancialTrackingManager.CreateNewDebtPayment(app.contextGetUser(r).ID, payment)
+		err = app.models.FinancialTrackingManager.CreateNewDebtPayment(r.Context(), app.contextGetUser(r).ID, payment)
 		if err != nil {
 			app.serverErrorResponse(w, r, err)
 			return
@@ -989,7 +989,7 @@ func (app *application) updateDebtHandler(w http.ResponseWriter, r *http.Request
 	}
 
 	// Save the updated debt back to the database
-	err = app.models.FinancialTrackingManager.UpdateDebtByID(app.contextGetUser(r).ID, debt)
+	err = app.models.FinancialTrackingManager.UpdateDebtByID(r.Context(), app.contextGetUser(r).ID, debt)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
@@ -1052,7 +1052,7 @@ func (app *application) getAllDebtsByUserIDHandler(w http.ResponseWriter, r *htt
 	}
 
 	// Get all debts for the user
-	debts, metadata, err := app.models.FinancialTrackingManager.GetAllDebtsByUserID(app.contextGetUser(r).ID, input.Name, input.Filters)
+	debts, metadata, err := app.models.FinancialTrackingManager.GetAllDebtsByUserID(r.Context(), app.contextGetUser(r).ID, input.Name, input.Filters)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -1136,7 +1136,7 @@ func (app *application) getDebtPaymentsByDebtUserIDHandler(w http.ResponseWriter
 		return
 	}
 	// Get the debt payments from the database
-	payments, metadata, err := app.models.FinancialTrackingManager.GetDebtPaymentsByDebtUserID(app.contextGetUser(r).ID, debtID, input.StartDate, input.EndDate, input.Filters)
+	payments, metadata, err := app.models.FinancialTrackingManager.GetDebtPaymentsByDebtUserID(r.Context(), app.contextGetUser(r).ID, debtID, input.StartDate, input.EndDate, input.Filters)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
@@ -1192,7 +1192,7 @@ func (app *application) makeDebtPaymentHandler(w http.ResponseWriter, r *http.Re
 	v := validator.New()
 
 	// Step 3: Retrieve the debt record for the user by debt ID
-	debt, err := app.models.FinancialTrackingManager.GetDebtByID(app.contextGetUser(r).ID, debtID)
+	debt, err := app.models.FinancialTrackingManager.GetDebtByID(r.Context(), app.contextGetUser(r).ID, debtID)
 	if err != nil {
 		app.notFoundResponse(w, r)
 		return
@@ -1241,7 +1241,7 @@ func (app *application) makeDebtPaymentHandler(w http.ResponseWriter, r *http.Re
 	}
 
 	// Step 8: Save the new debt repayment record in the database
-	err = app.models.FinancialTrackingManager.CreateNewDebtPayment(debt.UserID, payment)
+	err = app.models.FinancialTrackingManager.CreateNewDebtPayment(r.Context(), debt.UserID, payment)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
@@ -1269,7 +1269,7 @@ func (app *application) makeDebtPaymentHandler(w http.ResponseWriter, r *http.Re
 	debt.TotalInterestPaid = debt.TotalInterestPaid.Add(interestPayment)
 
 	// Step 14: Update the debt record in the database with the new balance and dates
-	err = app.models.FinancialTrackingManager.UpdateDebtByID(debt.UserID, debt)
+	err = app.models.FinancialTrackingManager.UpdateDebtByID(r.Context(), debt.UserID, debt)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrGeneralRecordNotFound):

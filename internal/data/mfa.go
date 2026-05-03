@@ -91,12 +91,12 @@ func ValidateFullMFA(v *validator.Validator, mfaToken *MFAToken) {
 	ValidateEmail(v, mfaToken.Email)
 }
 
-// CreateNewRecoveryCode() creates recovery codes for a user after a successful MFA opt-IN
-// We use generateRecoveryCodea() to create 5 recovery codes which we will receive
-// We shall proceed to save the recovery codes to the database
-// We shall return the *RecoveryCodeDetail and error
-func (m MFAManager) CreateNewRecoveryCode(userID int64) (*RecoveryCodeDetail, error) {
-	ctx, cancel := contextGenerator(context.Background(), DefaultMFAManTimeout)
+// CreateNewRecoveryCode creates recovery codes for a user after a
+// successful MFA opt-in. We use generateRecoveryCodes() to create 5
+// recovery codes which we will receive, save to the database, and return.
+// ctx flows from the originating HTTP request.
+func (m MFAManager) CreateNewRecoveryCode(ctx context.Context, userID int64) (*RecoveryCodeDetail, error) {
+	ctx, cancel := contextGenerator(ctx, DefaultMFAManTimeout)
 	defer cancel()
 	// Generate the recovery codes
 	recoveryCodes, err := generateRecoveryCodes(5)
@@ -125,10 +125,10 @@ func (m MFAManager) CreateNewRecoveryCode(userID int64) (*RecoveryCodeDetail, er
 	return recoveryCodeDetails, nil
 }
 
-// GetRecoveryCodesByUserID() fetches the recovery codes for a user by their user ID
-// We shall return the *RecoveryCodeDetail and error
-func (m MFAManager) GetRecoveryCodesByUserID(userID int64) (*RecoveryCodeDetail, error) {
-	ctx, cancel := contextGenerator(context.Background(), DefaultMFAManTimeout)
+// GetRecoveryCodesByUserID fetches the recovery codes for a user by their
+// user ID. ctx flows from the originating HTTP request.
+func (m MFAManager) GetRecoveryCodesByUserID(ctx context.Context, userID int64) (*RecoveryCodeDetail, error) {
+	ctx, cancel := contextGenerator(ctx, DefaultMFAManTimeout)
 	defer cancel()
 	// Fetch the recovery codes from the database
 	codeDetail, err := m.DB.GetRecoveryCodesByUserID(ctx, userID)
@@ -150,11 +150,11 @@ func (m MFAManager) GetRecoveryCodesByUserID(userID int64) (*RecoveryCodeDetail,
 	return recoveryCodeDetails, nil
 }
 
-// MarkRecoveryCodeAsUsed() marks a recovery code as used by its ID and user ID
-// We also return an editconflict error if the recovery code has already been used
-// We shall return the error
-func (m MFAManager) MarkRecoveryCodeAsUsed(id, userID int64) error {
-	ctx, cancel := contextGenerator(context.Background(), DefaultMFAManTimeout)
+// MarkRecoveryCodeAsUsed marks a recovery code as used by its ID and user
+// ID. We also return an edit-conflict error if the recovery code has
+// already been used. ctx flows from the originating HTTP request.
+func (m MFAManager) MarkRecoveryCodeAsUsed(ctx context.Context, id, userID int64) error {
+	ctx, cancel := contextGenerator(ctx, DefaultMFAManTimeout)
 	defer cancel()
 	// Mark the recovery code as used in the database
 	_, err := m.DB.MarkRecoveryCodeAsUsed(ctx, database.MarkRecoveryCodeAsUsedParams{
@@ -173,10 +173,10 @@ func (m MFAManager) MarkRecoveryCodeAsUsed(id, userID int64) error {
 	return nil
 }
 
-// DeleteRecoveryCodeByID() deletes a recovery code by its ID
-// We shall return the error
-func (m MFAManager) DeleteRecoveryCodeByID(id, userID int64) error {
-	ctx, cancel := contextGenerator(context.Background(), DefaultMFAManTimeout)
+// DeleteRecoveryCodeByID deletes a recovery code by its ID. ctx flows
+// from the originating HTTP request.
+func (m MFAManager) DeleteRecoveryCodeByID(ctx context.Context, id, userID int64) error {
+	ctx, cancel := contextGenerator(ctx, DefaultMFAManTimeout)
 	defer cancel()
 	// Delete the recovery code from the database
 	_, err := m.DB.DeleteRecoveryCodeByID(ctx, database.DeleteRecoveryCodeByIDParams{

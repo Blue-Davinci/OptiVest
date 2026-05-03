@@ -303,8 +303,8 @@ func ValidateBudgetUpdate(v *validator.Validator, budget *Budget) {
 // CreateNewBudget() creates a new budget record in the database
 // It takes a pointer to a Budget struct and returns an error if
 // the operation fails.
-func (m FinancialManagerModel) CreateNewBudget(newBudget *Budget) error {
-	ctx, cancel := contextGenerator(context.Background(), DefaultFinManDBContextTimeout)
+func (m FinancialManagerModel) CreateNewBudget(ctx context.Context, newBudget *Budget) error {
+	ctx, cancel := contextGenerator(ctx, DefaultFinManDBContextTimeout)
 	defer cancel()
 	budget, err := m.DB.CreateNewBudget(ctx, database.CreateNewBudgetParams{
 		UserID:         newBudget.UserID,
@@ -330,8 +330,8 @@ func (m FinancialManagerModel) CreateNewBudget(newBudget *Budget) error {
 // getBudgetGoalExpenseSummary() is a helper method that will be used to retrieve
 // a summary of a user's budget, goals and expenses
 // We will return a *EnrichedBudget struct and an error if the operation fails.
-func (m FinancialManagerModel) GetBudgetGoalExpenseSummary(userID int64) ([]*EnrichedBudgetSummary, error) {
-	ctx, cancel := contextGenerator(context.Background(), DefaultFinManDBContextTimeout)
+func (m FinancialManagerModel) GetBudgetGoalExpenseSummary(ctx context.Context, userID int64) ([]*EnrichedBudgetSummary, error) {
+	ctx, cancel := contextGenerator(ctx, DefaultFinManDBContextTimeout)
 	defer cancel()
 	// Fetch the budget from the database
 	enrichedBugetRows, err := m.DB.GetBudgetGoalExpenseSummary(ctx, userID)
@@ -358,8 +358,8 @@ func (m FinancialManagerModel) GetBudgetGoalExpenseSummary(userID int64) ([]*Enr
 
 // DeleteBudgetByID() deletes a budget record from the database by its ID
 // It takes the budget ID as a parameter and returns an error if the operation fails.
-func (m FinancialManagerModel) DeleteBudgetByID(userID, budgetID int64) (*int64, error) {
-	ctx, cancel := contextGenerator(context.Background(), DefaultFinManDBContextTimeout)
+func (m FinancialManagerModel) DeleteBudgetByID(ctx context.Context, userID, budgetID int64) (*int64, error) {
+	ctx, cancel := contextGenerator(ctx, DefaultFinManDBContextTimeout)
 	defer cancel()
 	deletedID, err := m.DB.DeleteBudgetById(ctx, database.DeleteBudgetByIdParams{
 		UserID: userID,
@@ -380,8 +380,8 @@ func (m FinancialManagerModel) DeleteBudgetByID(userID, budgetID int64) (*int64,
 // UpdateBudgetByID() updates a budget record in the database by its ID
 // It takes the user ID and a pointer to a Budget struct as parameters
 // We do not allow users the CurrencyCode but they can change the conversion rate
-func (m FinancialManagerModel) UpdateUserBudget(userID int64, updatedBudget *Budget) error {
-	ctx, cancel := contextGenerator(context.Background(), DefaultFinManDBContextTimeout)
+func (m FinancialManagerModel) UpdateUserBudget(ctx context.Context, userID int64, updatedBudget *Budget) error {
+	ctx, cancel := contextGenerator(ctx, DefaultFinManDBContextTimeout)
 	defer cancel()
 	updatedAt, err := m.DB.UpdateBudgetById(ctx, database.UpdateBudgetByIdParams{
 		ID:             updatedBudget.Id,
@@ -411,8 +411,8 @@ func (m FinancialManagerModel) UpdateUserBudget(userID int64, updatedBudget *Bud
 // GetBudgetByID() retrieves a budget record from the database by its ID
 // It takes the budget ID as a parameter and returns a pointer to a Budget struct
 // and an error if the operation fails.
-func (m FinancialManagerModel) GetBudgetByID(id int64) (*Budget, error) {
-	ctx, cancel := contextGenerator(context.Background(), DefaultFinManDBContextTimeout)
+func (m FinancialManagerModel) GetBudgetByID(ctx context.Context, id int64) (*Budget, error) {
+	ctx, cancel := contextGenerator(ctx, DefaultFinManDBContextTimeout)
 	defer cancel()
 	budget, err := m.DB.GetBudgetByID(ctx, id)
 	if err != nil {
@@ -433,8 +433,8 @@ func (m FinancialManagerModel) GetBudgetByID(id int64) (*Budget, error) {
 // This supports pagination and filtering by date created as well as a budget name search query
 // It takes the user ID, search query, and pagination parameters as parameters
 // We also return a summary of each budget by invoking our GetAllGoalSummaryBudgetID() for each budget
-func (m FinancialManagerModel) GetBudgetsForUser(userID int64, searchQuery string, filters Filters) ([]*EnrichedBudget, Metadata, error) {
-	ctx, cancel := contextGenerator(context.Background(), DefaultFinManDBContextTimeout)
+func (m FinancialManagerModel) GetBudgetsForUser(ctx context.Context, userID int64, searchQuery string, filters Filters) ([]*EnrichedBudget, Metadata, error) {
+	ctx, cancel := contextGenerator(ctx, DefaultFinManDBContextTimeout)
 	defer cancel()
 	// Fetch budgets from the database
 	budgets, err := m.DB.GetBudgetsForUser(ctx, database.GetBudgetsForUserParams{
@@ -475,7 +475,7 @@ func (m FinancialManagerModel) GetBudgetsForUser(userID int64, searchQuery strin
 			return nil, Metadata{}, err
 		}
 		// return a goal summary and totals for each budget
-		goalSummaryTotals, err := m.GetAllGoalSummaryBudgetID(budget.Id, userID)
+		goalSummaryTotals, err := m.GetAllGoalSummaryBudgetID(ctx, budget.Id, userID)
 		if err != nil {
 			return nil, Metadata{}, err
 		}
@@ -584,8 +584,8 @@ func ValidateGoal(v *validator.Validator, goal *Goals) {
 
 // CreateNewGoal() creates a new goal record in the database
 // It takes a pointer to a Goals struct and returns an error if the operation fails.
-func (m FinancialManagerModel) CreateNewGoal(newGoal *Goals) error {
-	ctx, cancel := contextGenerator(context.Background(), DefaultFinManDBContextTimeout)
+func (m FinancialManagerModel) CreateNewGoal(ctx context.Context, newGoal *Goals) error {
+	ctx, cancel := contextGenerator(ctx, DefaultFinManDBContextTimeout)
 	defer cancel()
 	goal, err := m.DB.CreateNewGoal(ctx, database.CreateNewGoalParams{
 		UserID:              newGoal.UserID,
@@ -616,8 +616,8 @@ func (m FinancialManagerModel) CreateNewGoal(newGoal *Goals) error {
 
 // UpdateGoalByID() updates a goal record in the database by its ID
 // It takes the user ID and a pointer to a Goals struct as parameters
-func (m FinancialManagerModel) UpdateGoalByID(userID int64, updatedGoal *Goals) error {
-	ctx, cancel := contextGenerator(context.Background(), DefaultFinManDBContextTimeout)
+func (m FinancialManagerModel) UpdateGoalByID(ctx context.Context, userID int64, updatedGoal *Goals) error {
+	ctx, cancel := contextGenerator(ctx, DefaultFinManDBContextTimeout)
 	defer cancel()
 	updatedAt, err := m.DB.UpdateGoalByID(ctx, database.UpdateGoalByIDParams{
 		Name:                updatedGoal.Name,
@@ -652,8 +652,8 @@ func (m FinancialManagerModel) UpdateGoalByID(userID int64, updatedGoal *Goals) 
 // GetGoalByID() retrieves a goal record from the database by its ID
 // It takes the goal ID as a parameter and returns a pointer to a Goals struct
 // and an error if the operation fails.
-func (m FinancialManagerModel) GetGoalByID(userID, goalID int64) (*Goals, error) {
-	ctx, cancel := contextGenerator(context.Background(), DefaultFinManDBContextTimeout)
+func (m FinancialManagerModel) GetGoalByID(ctx context.Context, userID, goalID int64) (*Goals, error) {
+	ctx, cancel := contextGenerator(ctx, DefaultFinManDBContextTimeout)
 	defer cancel()
 	goal, err := m.DB.GetGoalByID(ctx, database.GetGoalByIDParams{
 		ID:     goalID,
@@ -677,8 +677,8 @@ func (m FinancialManagerModel) GetGoalByID(userID, goalID int64) (*Goals, error)
 // a sample subset of a users goals for investment purposes
 // These items are: name, current amount, target amount, monthly contribution, start date and the end date
 // We will return a *InvestmentGoal struct and an error if the operation fails.
-func (m FinancialManagerModel) GetGoalsForUserInvestmentHelper(userID int64) (*InvestmentGoal, error) {
-	ctx, cancel := contextGenerator(context.Background(), DefaultFinManDBContextTimeout)
+func (m FinancialManagerModel) GetGoalsForUserInvestmentHelper(ctx context.Context, userID int64) (*InvestmentGoal, error) {
+	ctx, cancel := contextGenerator(ctx, DefaultFinManDBContextTimeout)
 	defer cancel()
 	goals, err := m.DB.GetGoalsForUserInvestmentHelper(ctx, userID)
 	if err != nil {
@@ -711,8 +711,8 @@ func (m FinancialManagerModel) GetGoalsForUserInvestmentHelper(userID int64) (*I
 }
 
 // GetAllGoalsWithProgressionByUserID() retrieves all goal records associated with a user ID
-func (m FinancialManagerModel) GetAllGoalsWithProgressionByUserID(userID int64, goalName string, filters Filters) ([]*GoalsWithProgression, Metadata, error) {
-	ctx, cancel := contextGenerator(context.Background(), DefaultFinManDBContextTimeout)
+func (m FinancialManagerModel) GetAllGoalsWithProgressionByUserID(ctx context.Context, userID int64, goalName string, filters Filters) ([]*GoalsWithProgression, Metadata, error) {
+	ctx, cancel := contextGenerator(ctx, DefaultFinManDBContextTimeout)
 	defer cancel()
 	// Fetch goals from the database
 	goals, err := m.DB.GetAllGoalsWithProgressionByUserID(ctx, database.GetAllGoalsWithProgressionByUserIDParams{
@@ -754,8 +754,8 @@ func (m FinancialManagerModel) GetAllGoalsWithProgressionByUserID(userID int64, 
 // GetGoalTrackingHistory() retrieves all goal tracking records associated with a user ID
 // This supports pagination and filtering by tracking type  (finmantracking...)
 // It takes the user ID, tracking type, and pagination parameters as parameters
-func (m FinancialManagerModel) GetGoalTrackingHistory(userID int64, trackingType database.TrackingTypeEnum, filters Filters) ([]*EnrichedTrackedGoal, Metadata, error) {
-	ctx, cancel := contextGenerator(context.Background(), DefaultFinManDBContextTimeout)
+func (m FinancialManagerModel) GetGoalTrackingHistory(ctx context.Context, userID int64, trackingType database.TrackingTypeEnum, filters Filters) ([]*EnrichedTrackedGoal, Metadata, error) {
+	ctx, cancel := contextGenerator(ctx, DefaultFinManDBContextTimeout)
 	defer cancel()
 	// Fetch goal tracking from the database
 	trackedGoals, err := m.DB.GetGoalTrackingHistory(ctx, database.GetGoalTrackingHistoryParams{
@@ -822,8 +822,8 @@ func populateTrackedGoal(trackedGoalRow interface{}) *TrackedGoal {
 // so validation need not be as strict as when creating a goal
 // It takes a pointer to a GoalPlan struct and a user ID
 // We return an error if the operation fails.
-func (m FinancialManagerModel) CreateNewGoalPlan(userID int64, newGoalPlan *GoalPlan) error {
-	ctx, cancel := contextGenerator(context.Background(), DefaultFinManDBContextTimeout)
+func (m FinancialManagerModel) CreateNewGoalPlan(ctx context.Context, userID int64, newGoalPlan *GoalPlan) error {
+	ctx, cancel := contextGenerator(ctx, DefaultFinManDBContextTimeout)
 	defer cancel()
 	goalPlan, err := m.DB.CreateNewGoalPlan(ctx, database.CreateNewGoalPlanParams{
 		UserID:              userID,
@@ -853,8 +853,8 @@ func (m FinancialManagerModel) CreateNewGoalPlan(userID int64, newGoalPlan *Goal
 
 // UpdateGoalPlanByID() updates a goal plan record in the database by its ID and User ID
 // It takes the user ID and a pointer to a GoalPlan struct as parameters
-func (m FinancialManagerModel) UpdateGoalPlanByID(userID int64, updatedGoalPlan *GoalPlan) error {
-	ctx, cancel := contextGenerator(context.Background(), DefaultFinManDBContextTimeout)
+func (m FinancialManagerModel) UpdateGoalPlanByID(ctx context.Context, userID int64, updatedGoalPlan *GoalPlan) error {
+	ctx, cancel := contextGenerator(ctx, DefaultFinManDBContextTimeout)
 	defer cancel()
 	updatedAt, err := m.DB.UpdateGoalPlanByID(ctx, database.UpdateGoalPlanByIDParams{
 		Name:                updatedGoalPlan.Name,
@@ -886,8 +886,8 @@ func (m FinancialManagerModel) UpdateGoalPlanByID(userID int64, updatedGoalPlan 
 // GetGoalPlanByID() retrieves a goal plan record from the database by its ID and User ID
 // It takes the goal plan ID and user ID as parameters and returns a pointer to a GoalPlan struct
 // and an error if the operation fails.
-func (m FinancialManagerModel) GetGoalPlanByID(userID, goalPlanID int64) (*GoalPlan, error) {
-	ctx, cancel := contextGenerator(context.Background(), DefaultFinManDBContextTimeout)
+func (m FinancialManagerModel) GetGoalPlanByID(ctx context.Context, userID, goalPlanID int64) (*GoalPlan, error) {
+	ctx, cancel := contextGenerator(ctx, DefaultFinManDBContextTimeout)
 	defer cancel()
 	goalPlan, err := m.DB.GetGoalPlanByID(ctx, database.GetGoalPlanByIDParams{
 		ID:     goalPlanID,
@@ -910,8 +910,8 @@ func (m FinancialManagerModel) GetGoalPlanByID(userID, goalPlanID int64) (*GoalP
 // GetGoalPlansForUser() retrieves all goal plan records associated with a user
 // This supports pagination and filtering by date created.
 // It takes the user ID and pagination parameters as parameters
-func (m FinancialManagerModel) GetGoalPlansForUser(userID int64, filters Filters) ([]*GoalPlan, Metadata, error) {
-	ctx, cancel := contextGenerator(context.Background(), DefaultFinManDBContextTimeout)
+func (m FinancialManagerModel) GetGoalPlansForUser(ctx context.Context, userID int64, filters Filters) ([]*GoalPlan, Metadata, error) {
+	ctx, cancel := contextGenerator(ctx, DefaultFinManDBContextTimeout)
 	defer cancel()
 	// Fetch goal plans from the database
 	goalPlans, err := m.DB.GetGoalPlansForUser(ctx, database.GetGoalPlansForUserParams{
@@ -956,8 +956,8 @@ func (m FinancialManagerModel) GetGoalPlansForUser(userID int64, filters Filters
 // check goals that are due for tracking and track them
 // We get a limit as we will be running this in batches.
 // We return a pointer to a TrackedGoal struct and an error if the operation fails.
-func (m FinancialManagerModel) GetAndSaveAllGoalsForTracking() ([]*TrackedGoal, error) {
-	ctx, cancel := contextGenerator(context.Background(), DefaultFinManDBContextTimeout)
+func (m FinancialManagerModel) GetAndSaveAllGoalsForTracking(ctx context.Context) ([]*TrackedGoal, error) {
+	ctx, cancel := contextGenerator(ctx, DefaultFinManDBContextTimeout)
 	defer cancel()
 	trackedGoals, err := m.DB.GetAndSaveAllGoalsForTracking(ctx)
 	if err != nil {
@@ -991,8 +991,8 @@ func (m FinancialManagerModel) GetAndSaveAllGoalsForTracking() ([]*TrackedGoal, 
 // UpdateGoalProgressOnExpiredGoals() is the main function that will be used to update goals that have expired
 // Will be used in tandem and work 1 way with the cron job scheduler
 // We return nothing and an error if the operation fails.
-func (m FinancialManagerModel) UpdateGoalProgressOnExpiredGoals() error {
-	ctx, cancel := contextGenerator(context.Background(), DefaultFinManDBContextTimeout)
+func (m FinancialManagerModel) UpdateGoalProgressOnExpiredGoals(ctx context.Context) error {
+	ctx, cancel := contextGenerator(ctx, DefaultFinManDBContextTimeout)
 	defer cancel()
 	err := m.DB.UpdateGoalProgressOnExpiredGoals(ctx)
 	if err != nil {
@@ -1015,8 +1015,8 @@ func (m FinancialManagerModel) UpdateGoalProgressOnExpiredGoals() error {
 // We return the goal summaries and additional totals which contains the total goals, total monthly contribution
 // total surplus, budget total amount, budget currency and budget strictness
 // This is the main function that will be used to get and manage surplus by most of the handlers
-func (m FinancialManagerModel) GetAllGoalSummaryBudgetID(budgetID, userID int64) (*Goal_Summary_Totals, error) {
-	ctx, cancel := contextGenerator(context.Background(), DefaultFinManDBContextTimeout)
+func (m FinancialManagerModel) GetAllGoalSummaryBudgetID(ctx context.Context, budgetID, userID int64) (*Goal_Summary_Totals, error) {
+	ctx, cancel := contextGenerator(ctx, DefaultFinManDBContextTimeout)
 	defer cancel()
 
 	fmt.Println("Received data: budgetID:", budgetID, "userID:", userID)
