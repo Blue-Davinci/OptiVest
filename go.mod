@@ -5,7 +5,7 @@ go 1.25.0
 require (
 	github.com/araddon/dateparse v0.0.0-20210429162001-6b43995a97de
 	github.com/felixge/httpsnoop v1.0.4
-	github.com/go-chi/chi/v5 v5.1.0
+	github.com/go-chi/chi/v5 v5.2.5
 	github.com/go-chi/cors v1.2.1
 	github.com/go-mail/mail/v2 v2.3.0
 	github.com/go-redis/redis/v8 v8.11.5
