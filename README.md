@@ -253,7 +253,29 @@ the available commands for a quick lookup (INCOMPLETE, use help for full list).
         HTTP client maximum retries (default 3)
   -http-client-timeout duration
         HTTP client timeout (default 10s)
+  -limiter-burst int
+        Rate limiter maximum burst (default 10)
+  -limiter-enabled
+        Enable rate limiter (default true)
+  -limiter-rps float
+        Rate limiter maximum requests per second (default 5)
 ```
+
+> **Rate limiter note:** As of P2, the limiter is backed by Redis using
+> [`go-redis/redis_rate/v10`](https://github.com/go-redis/redis_rate) so the
+> configured `-limiter-rps` and `-limiter-burst` apply **across the cluster**,
+> not per-instance. The previous in-memory implementation under-counted by a
+> factor of N when running N pods behind a load balancer.
+>
+> If Redis is unreachable the limiter **fails open** (allows the request
+> through, increments `rate_limiter_redis_errors_total` and
+> `rate_limiter_fail_open_total` on `/debug/vars`, and logs a WARN).
+> Operators should alert on a non-zero `rate_limiter_redis_errors_total`
+> rate. Successful and denied requests are counted separately as
+> `rate_limiter_allowed_total` and `rate_limiter_denied_total`.
+>
+> Sub-1-rps configurations are not supported by the underlying GCRA bucket
+> type; values <1 are rounded up to 1 and a warning is logged at startup.
 
 Using `make run`, will run the API with a default connection string located 
 in `cmd\api\.env`. If you're using `powershell`, you need to load the values otherwise you will get

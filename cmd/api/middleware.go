@@ -1,18 +1,20 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"expvar"
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/Blue-Davinci/OptiVest/internal/data"
 	"github.com/felixge/httpsnoop"
+	"github.com/go-redis/redis_rate/v10"
 	"github.com/tomasen/realip"
-	"golang.org/x/time/rate"
+	"go.uber.org/zap"
 )
 
 func (app *application) recoverPanic(next http.Handler) http.Handler {
@@ -105,72 +107,137 @@ func (app *application) requireActivatedUser(next http.Handler) http.Handler {
 	})
 }
 
-// The rateLimit() middleware will be used to rate limit the number of requests that a
-// client can make to certain routes within a given time window.
-func (app *application) rateLimit(next http.Handler) http.Handler {
-	// Define a client struct to hold the rate limiter and last seen time for each
-	// client.
-	type client struct {
-		limiter  *rate.Limiter
-		lastSeen time.Time
-	}
+// rateLimitRedisKeyPrefix namespaces every rate-limit key in Redis so we
+// don't collide with other Redis users (cache, MFA sessions, notifications).
+const rateLimitRedisKeyPrefix = "optivest:ratelimit:ip:"
 
-	// Declare a mutex and a map to hold the clients' IP addresses and rate limiters.
-	var (
-		mu      sync.Mutex
-		clients = make(map[string]*client)
-	)
-	// Launch a background goroutine which removes old entries from the clients map once
-	// every minute.
-	go func() {
-		for {
-			time.Sleep(time.Minute)
-			// Lock the mutex to prevent any rate limiter checks from happening while
-			// the cleanup is taking place.
-			mu.Lock()
-			// Loop through all clients. If they haven't been seen within the last three
-			// minutes, delete the corresponding entry from the map.
-			for ip, client := range clients {
-				if time.Since(client.lastSeen) > 3*time.Minute {
-					delete(clients, ip)
-				}
-			}
-			// Importantly, unlock the mutex when the cleanup is complete.
-			mu.Unlock()
-		}
-	}()
+// rateLimitRedisTimeout caps how long we'll wait on Redis for a single
+// limiter check. Keep it tight: every request blocks on this. If Redis is
+// unhealthy we want to fail-open quickly rather than degrade tail latency.
+const rateLimitRedisTimeout = 200 * time.Millisecond
+
+// Rate-limiter expvar metrics, exposed on /debug/vars. Counters use Float
+// because expvar.Int.Add takes int64 and we want fractional Δ atomically;
+// in practice we only Add(1), but Float is the standard pattern for "this
+// is a counter that ops will graph as a rate".
+var (
+	rateLimitAllows     = expvar.NewInt("rate_limiter_allowed_total")
+	rateLimitDenies     = expvar.NewInt("rate_limiter_denied_total")
+	rateLimitRedisErrs  = expvar.NewInt("rate_limiter_redis_errors_total")
+	rateLimitFailOpens  = expvar.NewInt("rate_limiter_fail_open_total")
+	rateLimitDisabled   = expvar.NewInt("rate_limiter_disabled_total")
+	rateLimitConfigured = expvar.NewString("rate_limiter_configured")
+)
+
+// rateLimit returns a middleware that enforces a per-IP request rate using a
+// Redis-backed GCRA bucket (github.com/go-redis/redis_rate/v10). Replaces the
+// previous in-memory token-bucket implementation, which under-counted by a
+// factor of N when running N application instances behind a load balancer:
+// each instance had its own clients map, so the configured limit was the
+// per-pod limit, not the per-cluster limit.
+//
+// Behaviour
+//
+//   - Keying is per real-IP (via tomasen/realip, same as before). User-keying
+//     is intentionally out of scope for this PR because rateLimit runs before
+//     authenticate in the global middleware chain — see routes.go.
+//   - On allow, sets standard rate-limit response headers so well-behaved
+//     clients can self-throttle:
+//       X-RateLimit-Limit       <burst>
+//       X-RateLimit-Remaining   <tokens left in window>
+//   - On deny, also sets Retry-After (seconds, integer per RFC 7231) and
+//     X-RateLimit-Reset (seconds until the bucket refills) so clients have
+//     two equivalent ways to read the back-off.
+//   - On Redis error, FAILS OPEN: the request is allowed through and a
+//     warning is logged + a metric incremented. Rationale: the cost of
+//     letting traffic through during a Redis outage is bounded (we still
+//     have upstream LB, downstream DB pool limits, etc.), but the cost of
+//     fail-closed is total API outage every time Redis blips. Ops should
+//     alert on rate_limiter_redis_errors_total > 0 so this never goes
+//     unnoticed.
+//   - Honours app.config.limiter.enabled: when false, every request is
+//     allowed without touching Redis (counted via rate_limiter_disabled_total).
+func (app *application) rateLimit(next http.Handler) http.Handler {
+	// Build the Limit once at middleware-construction time. redis_rate.Limit
+	// requires an integer Rate per Period; the pre-existing config flag is a
+	// float64. We round up to the nearest integer to err on the side of
+	// being slightly more permissive than the operator asked for, and warn
+	// loudly if precision was lost so the misconfiguration is visible.
+	rate := int(math.Ceil(app.config.limiter.rps))
+	if rate < 1 {
+		rate = 1
+	}
+	if float64(rate) != app.config.limiter.rps {
+		app.logger.Warn("limiter-rps was rounded up to the nearest integer; sub-1-rps configurations are not supported by the redis_rate v10 limit type",
+			zap.Float64("configured_rps", app.config.limiter.rps),
+			zap.Int("effective_rps", rate),
+		)
+	}
+	limit := redis_rate.Limit{
+		Rate:   rate,
+		Burst:  app.config.limiter.burst,
+		Period: time.Second,
+	}
+	rateLimitConfigured.Set(fmt.Sprintf("rps=%d burst=%d enabled=%t", rate, limit.Burst, app.config.limiter.enabled))
+
+	limiter := redis_rate.NewLimiter(app.RedisDB)
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Only carry out the check if rate limiting is enabled.
-		if app.config.limiter.enabled {
-			// Extract the client's IP address from the request.
-			ip := realip.FromRequest(r)
-			// Lock the mutex to prevent this code from being executed concurrently.
-			mu.Lock()
-			// Check to see if the IP address already exists in the map. If it doesn't, then
-			// initialize a new rate limiter and add the IP address and limiter to the map.
-			if _, found := clients[ip]; !found {
-				clients[ip] = &client{
-					// Use the requests-per-second and burst values from the config struct.
-					limiter: rate.NewLimiter(rate.Limit(app.config.limiter.rps), app.config.limiter.burst),
-				}
-			}
-			// Update the last seen time for the client.
-			clients[ip].lastSeen = time.Now()
-
-			// Call the Allow() method on the rate limiter for the current IP address. If
-			// the request isn't allowed, unlock the mutex and send a 429 Too Many Requests
-			// response, just like before.
-			if !clients[ip].limiter.Allow() {
-				mu.Unlock()
-				app.rateLimitExceededResponse(w, r)
-				return
-			}
-			// unlock the mutex before calling the next handler in the
-			// chain
-			mu.Unlock()
+		if !app.config.limiter.enabled {
+			rateLimitDisabled.Add(1)
+			next.ServeHTTP(w, r)
+			return
 		}
-		next.ServeHTTP(w, r)
+
+		ip := realip.FromRequest(r)
+		key := rateLimitRedisKeyPrefix + ip
+
+		// Bound the Redis call independently of the request's context so a
+		// slow Redis can't push a request's tail latency past
+		// rateLimitRedisTimeout. Still inherits cancellation from the
+		// request — if the client disconnects, we abort the limiter check
+		// too.
+		ctx, cancel := context.WithTimeout(r.Context(), rateLimitRedisTimeout)
+		defer cancel()
+
+		res, err := limiter.Allow(ctx, key, limit)
+		if err != nil {
+			// Fail-open. Log loudly so this is observable; ops should alert
+			// on rate_limiter_redis_errors_total > 0. Log at WARN, not
+			// ERROR, because a single transient Redis error shouldn't page —
+			// sustained errors should.
+			rateLimitRedisErrs.Add(1)
+			rateLimitFailOpens.Add(1)
+			app.logger.Warn("rate limiter Redis error; failing open",
+				zap.String("ip", ip),
+				zap.Error(err),
+			)
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Inform clients about their budget on every response so well-behaved
+		// callers can self-throttle without ever hitting 429.
+		w.Header().Set("X-RateLimit-Limit", strconv.Itoa(limit.Burst))
+		w.Header().Set("X-RateLimit-Remaining", strconv.Itoa(res.Remaining))
+
+		if res.Allowed > 0 {
+			rateLimitAllows.Add(1)
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		rateLimitDenies.Add(1)
+		// Retry-After per RFC 7231 §7.1.3 is "delta-seconds" (integer); round
+		// up so we never tell the client to retry sooner than the bucket
+		// actually refills.
+		retry := int(math.Ceil(res.RetryAfter.Seconds()))
+		if retry < 1 {
+			retry = 1
+		}
+		w.Header().Set("Retry-After", strconv.Itoa(retry))
+		w.Header().Set("X-RateLimit-Reset", strconv.Itoa(int(math.Ceil(res.ResetAfter.Seconds()))))
+		app.rateLimitExceededResponse(w, r)
 	})
 }
 func (app *application) metrics(next http.Handler) http.Handler {

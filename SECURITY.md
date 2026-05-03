@@ -62,6 +62,43 @@ If a key is leaked in a commit, build artifact, log file, or chat:
 5. **Tail logs for unauthorized use** of the old key for at least 24 hours
    (most upstreams record the last-used IP).
 
+## Rate limiter operations
+
+The HTTP rate limiter is backed by Redis (P2). Each request consults a
+GCRA bucket via `go-redis/redis_rate/v10` keyed on the client's real IP
+(`X-Forwarded-For`-aware via `tomasen/realip`). The configured
+`-limiter-rps` and `-limiter-burst` are now **cluster-wide**, not
+per-pod. Replicas no longer multiply the effective rate.
+
+### Behaviour during a Redis outage
+
+The middleware **fails open**: if Redis is unreachable or the limiter
+call errors, the request is allowed through. The cost of fail-open is
+bounded (upstream LB, downstream connection pools, etc. still apply).
+The cost of fail-closed during a Redis blip would be a total API
+outage — unacceptable for a non-critical-path dependency.
+
+### Required alerting
+
+Operators should configure alerts on these `/debug/vars` counters:
+
+| Metric                                  | Alert when                                         |
+| --------------------------------------- | -------------------------------------------------- |
+| `rate_limiter_redis_errors_total`       | Rate > 0 sustained for > 1m → Redis health issue   |
+| `rate_limiter_fail_open_total`          | Rate > 0 sustained for > 1m → limiter is bypassed  |
+| `rate_limiter_denied_total`             | Sudden spike → potential abuse                     |
+| `rate_limiter_disabled_total`           | Should be 0 in production; nonzero → misconfig     |
+
+`rate_limiter_configured` (string) reports the active settings on each
+boot for sanity-checking config rollouts.
+
+### Latency budget
+
+The Redis call is wrapped in a 200ms `context.WithTimeout`. Hitting that
+ceiling counts as a Redis error and triggers fail-open. The expected p99
+is well below 5ms on a same-AZ Redis; if you see higher, suspect Redis
+saturation rather than the limiter middleware.
+
 ## CI security scanning
 
 Every push and PR to `main` runs:
