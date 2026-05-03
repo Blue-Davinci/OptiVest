@@ -22,7 +22,7 @@ import (
 	"github.com/Blue-Davinci/OptiVest/internal/logger"
 	"github.com/Blue-Davinci/OptiVest/internal/mailer"
 	"github.com/Blue-Davinci/OptiVest/internal/vcs"
-	"github.com/go-redis/redis/v8"
+	"github.com/redis/go-redis/v9"
 	"github.com/gorilla/websocket"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
