@@ -524,9 +524,12 @@ func openRedis(cfg config) (*redis.Client, error) {
 		DB: cfg.redis.db, // Use default DB if not set
 	})
 
-	// Ping the Redis server to check if the connection is successful
-	err := rdb.Ping(context.Background()).Err()
-	if err != nil {
+	// Ping the Redis server with a short bounded deadline so a misconfigured
+	// Redis address fails fast at startup instead of hanging the process on
+	// the default dial timeout.
+	pingCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := rdb.Ping(pingCtx).Err(); err != nil {
 		return nil, err
 	}
 
