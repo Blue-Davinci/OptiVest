@@ -22,8 +22,11 @@
 FROM golang:1.25-alpine AS builder
 
 # Pin the goose version explicitly. Bumping it is a one-line change and a
-# new image tag, so operators can roll forward without surprise.
-ARG GOOSE_VERSION=v3.21.1
+# new image tag, so operators can roll forward without surprise. Keep this
+# at the latest 3.x release so transitive deps (jwt, pgx, x/crypto, grpc)
+# pick up upstream CVE fixes; trivy gates the build on HIGH/CRITICAL so
+# stale pins fail loudly rather than silently shipping vulnerable bytes.
+ARG GOOSE_VERSION=v3.27.1
 
 RUN apk add --no-cache git \
     && go install github.com/pressly/goose/v3/cmd/goose@${GOOSE_VERSION}
