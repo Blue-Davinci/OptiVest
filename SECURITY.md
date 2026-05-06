@@ -80,7 +80,9 @@ outage — unacceptable for a non-critical-path dependency.
 
 ### Required alerting
 
-Operators should configure alerts on these `/debug/vars` counters:
+Operators should configure alerts on these counters. They are exposed on
+both `/debug/vars` (JSON, raw expvar) and `/metrics` (Prometheus text
+exposition):
 
 | Metric                                  | Alert when                                         |
 | --------------------------------------- | -------------------------------------------------- |
@@ -90,7 +92,21 @@ Operators should configure alerts on these `/debug/vars` counters:
 | `rate_limiter_disabled_total`           | Should be 0 in production; nonzero → misconfig     |
 
 `rate_limiter_configured` (string) reports the active settings on each
-boot for sanity-checking config rollouts.
+boot for sanity-checking config rollouts; it is published on
+`/debug/vars` only because Prometheus has no native string type.
+
+### Operational endpoint exposure
+
+`/metrics` and `/debug/vars` are mounted on the base router and bypass
+the global middleware chain on purpose: they are not authenticated, not
+rate-limited, and not counted by the request-log middleware. The
+deployment is responsible for **scoping reachability to the internal
+scrape network** (cluster-local Prometheus, an IP allow-list at the load
+balancer, or an mTLS sidecar). `/debug/vars` exposes runtime memstats
+and goroutine counts that are not strictly secret but should not be
+publicly browsable; `/metrics` carries the curated subset documented in
+`README.md`. If a deployment must expose these endpoints publicly, gate
+them at the ingress rather than weakening the bypass semantics here.
 
 ### Latency budget
 

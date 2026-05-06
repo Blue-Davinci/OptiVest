@@ -1,6 +1,7 @@
 package main
 
 import (
+	"expvar"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -70,11 +71,29 @@ func (app *application) routes() http.Handler {
 	// dynamic protected middleware
 	dynamicMiddleware := alice.New(app.requireAuthenticatedUser, app.requireActivatedUser)
 
-	// Apply the global middleware to the router
-	router.Use(globalMiddleware)
+	// Operational endpoints. Deliberately attached to the base router with
+	// only CORS in front of them, so scrape traffic bypasses the global
+	// middleware chain that wraps /v1. That avoids three issues a Prometheus
+	// scraper would otherwise cause:
+	//   1. circular counting — every scrape would increment the very metrics
+	//      it is trying to read (request_log_total, total_requests_received).
+	//   2. log noise — at a 15s scrape interval logRequests would emit
+	//      thousands of lines per scrape source per day.
+	//   3. self-rate-limit — a fast scraper or a misconfigured cluster could
+	//      exhaust the per-IP token bucket and start receiving 429s on the
+	//      very endpoint operators rely on for diagnosis.
+	// The endpoints are intentionally unauthenticated; deployments are
+	// expected to scope reachability to the internal scrape network. See
+	// SECURITY.md for the reasoning.
+	router.Get("/metrics", app.prometheusMetricsHandler)
+	router.Handle("/debug/vars", expvar.Handler())
 
-	// Make our categorized routes
+	// Make our categorized routes. globalMiddleware is attached to v1Router,
+	// not the base router, so /v1/* keeps its full chain (metrics, requestID,
+	// logRequests, recoverPanic, rateLimit, authenticate) while /metrics and
+	// /debug/vars stay clean.
 	v1Router := chi.NewRouter()
+	v1Router.Use(globalMiddleware)
 
 	v1Router.Mount("/users", app.userRoutes(&dynamicMiddleware))
 	v1Router.Mount("/api", app.apiKeyRoutes())
