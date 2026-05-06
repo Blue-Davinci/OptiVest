@@ -80,6 +80,7 @@ BEGIN
             FROM awards a
             WHERE a.code = 'first_budget';
         END IF;
+    END IF;
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;

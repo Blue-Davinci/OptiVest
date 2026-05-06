@@ -1,0 +1,207 @@
+# =============================================================================
+# OptiVest local development stack
+# =============================================================================
+#
+# Brings up the full stack a fresh contributor needs to run the API:
+#
+#   - postgres   PostgreSQL 17, primary data store
+#   - redis      Redis 7, cache + rate-limiter bucket store
+#   - migrate    one-shot goose runner that applies internal/sql/schema/*.sql
+#                against postgres, then exits with status 0
+#   - api        the Go binary built from ./Dockerfile
+#
+# Use:
+#
+#   docker compose up --build              # bring up the full stack
+#   docker compose down                    # stop and remove containers
+#   docker compose down -v                 # also wipe the postgres volume
+#   docker compose logs -f api             # tail just the API logs
+#   docker compose run --rm migrate up     # re-apply migrations manually
+#
+# The Makefile wraps these as `make docker/up`, `make docker/down`,
+# `make docker/logs`, and `make docker/migrate` for convenience.
+#
+# Networking: every service joins the default compose network and is
+# reachable from the others by service name (postgres, redis). The API
+# container therefore uses postgres:5432 / redis:6379, NOT localhost.
+# Host-side tooling (psql, redis-cli, an HTTP client) reaches the same
+# services on localhost via the published port mappings below.
+#
+# Two distinct .env files are in play here. They are NOT the same thing:
+#
+#   1. /.env (project root)        loaded by docker compose ITSELF for
+#                                  ${VAR} interpolation in this YAML —
+#                                  carries POSTGRES_USER /
+#                                  POSTGRES_PASSWORD / POSTGRES_DB so
+#                                  there is no hardcoded credential in
+#                                  the file. Template at /.env.example,
+#                                  gitignored otherwise.
+#
+#   2. cmd/api/.env                loaded by the API container via
+#                                  `env_file:` below — carries the
+#                                  binary's runtime config (smtp,
+#                                  exchange-rate keys, encryption key,
+#                                  etc). Template at cmd/api/.env.example,
+#                                  gitignored otherwise.
+#
+# Variables that need to differ between the host-run binary and the
+# in-container binary — namely the DSN host (localhost vs postgres) —
+# are overridden via the explicit `environment:` block on the api
+# service, which takes precedence over env_file entries.
+#
+# The `${VAR:?message}` syntax fails compose with a clear error if the
+# variable is unset, instead of silently substituting an empty string —
+# which would otherwise produce an unhelpful "password authentication
+# failed" failure deep in the migration step.
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # PostgreSQL 17 — primary data store
+  # ---------------------------------------------------------------------------
+  # The healthcheck uses pg_isready against the application user, so the
+  # `migrate` and `api` services do not start until postgres is ACTUALLY
+  # accepting connections (not just "the process is up"). 5s interval / 30s
+  # start_period covers a cold-start volume rebuild.
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required - copy .env.example to .env and fill it}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required - copy .env.example to .env and fill it}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required - copy .env.example to .env and fill it}
+      # Without this, pg defaults to scram-sha-256 which is fine but worth
+      # being explicit about for the dev image; matches what production
+      # should be running.
+      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+    # Bind to the host loopback only (127.0.0.1) rather than 0.0.0.0. With
+    # 0.0.0.0, the dev DB would be reachable from anyone on the same LAN /
+    # cafe wifi / coworking VLAN — combined with whatever credential the
+    # operator has in /.env, that is a credible risk even for a dev box.
+    # Loopback binding keeps the port reachable from the host (psql, sqlc,
+    # debugger) and from sibling containers (via the internal compose
+    # network on `postgres:5432`), but invisible from everything else.
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - optivest-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      # The $$ escapes compose interpolation so the shell inside the
+      # container expands the env vars at runtime — the postgres image
+      # already exports POSTGRES_USER / POSTGRES_DB.
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 30s
+
+  # ---------------------------------------------------------------------------
+  # Redis 7 — cache + rate-limiter bucket store
+  # ---------------------------------------------------------------------------
+  # AOF disabled and persistence kept on the default RDB snapshot policy:
+  # this is a dev cache, not a system of record. If a pod is killed we lose
+  # the cache and that's the correct behaviour. --maxmemory + LRU prevent a
+  # runaway test scenario from filling the host disk.
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    # Same loopback-only binding rationale as postgres above. Redis 7's
+    # default config has no auth in dev (we run with an empty password),
+    # so a 0.0.0.0 binding would trivially leak the cache to anyone on
+    # the network.
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ---------------------------------------------------------------------------
+  # goose migrations — one-shot
+  # ---------------------------------------------------------------------------
+  # Runs `goose up` against postgres on every `compose up`, then exits.
+  # `restart: no` keeps it from looping. depends_on with condition
+  # service_healthy means the migrate container blocks on postgres being
+  # ready before it tries to connect; without that we'd see a string of
+  # "connection refused" failures while postgres is still booting.
+  #
+  # We build a tiny in-house image (Dockerfile.migrate) that pins the goose
+  # version explicitly. There is no official pressly Docker image and
+  # community mirrors drift, so building from source keeps the supply
+  # chain narrow and reproducible.
+  #
+  # The schema directory is mounted read-only so adding a new migration
+  # does not require an image rebuild; just `make docker/migrate` re-runs
+  # against the existing image.
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile.migrate
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      GOOSE_DRIVER: postgres
+      GOOSE_DBSTRING: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+      GOOSE_MIGRATION_DIR: /migrations
+    volumes:
+      - ./internal/sql/schema:/migrations:ro
+    command: ["up"]
+
+  # ---------------------------------------------------------------------------
+  # OptiVest API — the binary built from ./Dockerfile
+  # ---------------------------------------------------------------------------
+  # The container's HEALTHCHECK polls /healthcheck (registered on the base
+  # router, no auth, no rate limiting). depends_on with service_completed_
+  # successfully on `migrate` means the API does not start until schema is
+  # in place; without that, the first request that touches a missing table
+  # would fail at runtime instead of at boot.
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    env_file:
+      - cmd/api/.env
+    environment:
+      # Override the host-targeted DSN with the in-network one. env_file
+      # is loaded first; explicit `environment:` entries below win. The
+      # POSTGRES_* values come from /.env via compose interpolation, so
+      # there is one source of truth for the credential.
+      OPTIVEST_DB_DSN: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+      # No password on the dev redis; an empty string is valid.
+      OPTIVEST_REDIS_PASSWORD: ""
+    # Unlike postgres / redis, the api ports stay on 0.0.0.0 so a phone or
+    # second laptop on the same LAN can hit the dev API for frontend
+    # integration testing. The binary itself enforces auth (bearer tokens)
+    # and rate limiting, so this is a less stark exposure than the bare
+    # databases — but if a contributor wants stricter isolation they can
+    # change these to "127.0.0.1:4000:4000" / "127.0.0.1:4001:4001". The
+    # observability endpoints (/healthcheck, /metrics, /debug/vars) on
+    # the base router are unauthenticated; SECURITY.md documents the
+    # assumption that a public-internet-facing deploy gates them at the
+    # ingress.
+    ports:
+      - "4000:4000"   # API
+      - "4001:4001"   # WebSocket
+    # Override the binary's CLI flags so it reaches redis by service name
+    # rather than the localhost default. Everything else (port, env name,
+    # rate-limiter knobs) keeps its in-code default.
+    command:
+      - "/app/api"
+      - "-redis-addr=redis:6379"
+
+volumes:
+  # Named volume so `docker compose down` does not wipe the database. Use
+  # `docker compose down -v` to drop it intentionally.
+  optivest-postgres-data:

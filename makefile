@@ -8,6 +8,13 @@ help:
 	@echo "  audit               - Run vet, staticcheck, govulncheck, and the test suite (matches CI)"
 	@echo "  tidy                - Format code and tidy go.mod/go.sum"
 	@echo "  test                - Run the full test suite with -race"
+	@echo "  docker/up           - Build images and bring up the local stack (postgres, redis, migrations, api)"
+	@echo "  docker/down         - Stop and remove the local stack (volumes preserved)"
+	@echo "  docker/down/clean   - Stop the stack AND drop the postgres data volume"
+	@echo "  docker/logs         - Tail the api service logs"
+	@echo "  docker/migrate      - Re-run the goose up migrations against the running postgres"
+	@echo "  docker/build        - Build the api image without starting anything"
+	@echo "  docker/ps           - Show the running compose services"
 
 .PHONY: run/api
 run/api:
@@ -58,3 +65,42 @@ audit:
 	govulncheck ./...
 	@echo 'Running tests with race detector...'
 	go test -race -count=1 -timeout=120s ./...
+
+## docker/up: build images and bring up the full local stack in detached mode
+.PHONY: docker/up
+docker/up:
+	@echo 'Bringing up postgres, redis, migrate, api...'
+	docker compose up --build -d
+
+## docker/down: stop the stack but preserve the postgres data volume
+.PHONY: docker/down
+docker/down:
+	@echo 'Stopping stack (volumes preserved)...'
+	docker compose down
+
+## docker/down/clean: stop the stack AND wipe the postgres data volume
+.PHONY: docker/down/clean
+docker/down/clean:
+	@echo 'Stopping stack and dropping the postgres volume...'
+	docker compose down -v
+
+## docker/logs: tail the api service logs (Ctrl-C to stop)
+.PHONY: docker/logs
+docker/logs:
+	docker compose logs -f api
+
+## docker/migrate: re-run goose up against the running postgres
+.PHONY: docker/migrate
+docker/migrate:
+	@echo 'Re-running migrations...'
+	docker compose run --rm migrate up
+
+## docker/build: build the api image without bringing the stack up
+.PHONY: docker/build
+docker/build:
+	docker compose build api
+
+## docker/ps: list the running compose services
+.PHONY: docker/ps
+docker/ps:
+	docker compose ps

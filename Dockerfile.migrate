@@ -1,0 +1,54 @@
+# syntax=docker/dockerfile:1.7
+
+# =============================================================================
+# Goose migration runner — one-shot container.
+# =============================================================================
+#
+# Pressly publishes the goose Go module but does not maintain an official
+# CLI Docker image, and the community-mirrored variants drift in version
+# pinning and trust. Building our own from the same golang:1.25-alpine
+# base used by the API image keeps us off third-party registries entirely
+# and pins to the exact goose version the codebase was tested with.
+#
+# The container is intentionally a single binary on alpine — no /app, no
+# user account, no shell session expected. It runs once per
+# `docker compose up`, applies the migrations from /migrations (mounted by
+# compose), and exits with status 0 on success or non-zero on failure.
+# Compose's depends_on -> service_completed_successfully is what gates the
+# api service from starting before this one finishes.
+# =============================================================================
+
+# ---------- Stage 1: install goose ----------
+FROM golang:1.25-alpine AS builder
+
+# Pin the goose version explicitly. Bumping it is a one-line change and a
+# new image tag, so operators can roll forward without surprise.
+ARG GOOSE_VERSION=v3.21.1
+
+RUN apk add --no-cache git \
+    && go install github.com/pressly/goose/v3/cmd/goose@${GOOSE_VERSION}
+
+# ---------- Stage 2: minimal runtime ----------
+FROM alpine:3.20
+
+# postgresql-client is convenient for ad-hoc inspection during migration
+# debugging (`docker compose exec migrate psql ...`); strip if you want
+# the smallest possible image.
+#
+# We add a dedicated non-root user even though this container exits in
+# under a second on a normal run. Defense-in-depth: a malformed migration
+# that triggers, say, a goose CVE should not be running with root inside
+# the container. The migrations are read-only-mounted at /migrations from
+# the host, so the only privilege the migrator needs is "open a TCP
+# connection to postgres", which any user has.
+RUN apk add --no-cache ca-certificates postgresql-client \
+    && addgroup -S goose \
+    && adduser -S -u 10001 -G goose goose
+
+COPY --from=builder /go/bin/goose /usr/local/bin/goose
+
+WORKDIR /migrations
+USER goose
+
+ENTRYPOINT ["goose"]
+CMD ["up"]
