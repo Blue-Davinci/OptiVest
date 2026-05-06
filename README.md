@@ -7,6 +7,9 @@
 
 <div align="center">
 
+[![CI](https://github.com/Blue-Davinci/OptiVest/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Blue-Davinci/OptiVest/actions/workflows/ci.yml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/Blue-Davinci/OptiVest)](https://goreportcard.com/report/github.com/Blue-Davinci/OptiVest)
+[![Go Version](https://img.shields.io/badge/go-1.25-00ADD8.svg?logo=go&logoColor=white)](https://go.dev/doc/go1.25)
 [![Status](https://img.shields.io/badge/status-active-success.svg)]()
 [![GitHub Issues](https://img.shields.io/github/issues/Blue-Davinci/OptiVest.svg)](https://github.com/Blue-Davinci/OptiVest/issues)
 [![GitHub Pull Requests](https://img.shields.io/github/issues-pr/Blue-Davinci/OptiVest.svg)](https://github.com/Blue-Davinci/OptiVest/pulls)
@@ -510,24 +513,268 @@ go run ./cmd/api
 
 <hr />
 
-### API Endpoints 📌 <a name="endpoints"></a>
-A full ist is documented using swagger, but here is a quick runwdown:
-1. **GET /v1/healthcheck:** Checks the health of the application. Returns a 200 OK status code if the application is running correctly.
+### API Endpoints <a name="endpoints"></a>
 
-2. **POST /v1/users:** Registers a new user.
+The API surface is split across an unauthenticated **operational** plane (mounted on the base router so probes bypass auth and rate limiting) and an authenticated **`/v1`** application plane that runs through the full middleware chain (request ID, structured logging, panic recovery, rate limiting, bearer-token auth).
 
-3. **PUT /v1/users/activated:** Activates a user.
+Auth tokens are obtained via `POST /v1/api/authentication` and sent as `Authorization: Bearer <token>` on every protected route. Every response carries an `X-Request-ID` header, propagated through outbound calls for end-to-end tracing.
 
-4. **POST /v1/api/authentication:** Creates an authentication token.
+#### Operational (unauthenticated)
 
-5. **GET /debug/vars:** Provides debug variables from the `expvar` package
-   in JSON form (raw counters and gauges, useful for ad-hoc inspection).
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/healthcheck` | Liveness probe; returns `{status, version, env, uptime_sec}` |
+| GET | `/metrics` | Prometheus text exposition of the curated metric set |
+| GET | `/debug/vars` | Raw `expvar` JSON dump for ad-hoc inspection |
 
-6. **GET /metrics:** Same operational signals as `/debug/vars` but in
-   Prometheus text exposition format, ready for a scrape config. See the
-   structured-logging section above for the curated metric list.
+#### Resource map (authenticated, all under `/v1`)
 
-(will be added)
+| Group | Mount | Endpoints | Auth required |
+|---|---|---|---|
+| Users & MFA | `/users` | 9 | Mixed (registration is open) |
+| API tokens | `/api` | 5 | Open (login flow) |
+| Budgets | `/budgets` | 5 | Yes |
+| Goals | `/goals` | 7 | Yes |
+| Groups | `/groups` | 19 | Yes |
+| Incomes | `/incomes` | 3 | Yes |
+| Debts | `/debts` | 5 | Yes |
+| Expenses | `/expenses` | 7 | Yes |
+| Investments | `/investments` | 14 | Yes |
+| Personal finance | `/personalfinance` | 4 | Yes |
+| Feeds (RSS) | `/feeds` | 7 | Yes |
+| Awards | `/awards` | 1 | Yes |
+| Search options | `/search-options` | 3 | Yes |
+| Notifications | `/notifications` | 4 | Yes |
+| Comments & reactions | `/comments` | 6 | Yes |
+| Contact | `/contact-us` | 1 | Yes |
+| Server-Sent Events | `/sse` | 1 | Yes |
+
+<details>
+<summary><b>Users &amp; MFA</b> &mdash; <code>/v1/users</code></summary>
+
+| Method | Path | Description |
+|---|---|---|
+| POST   | `/v1/users` | Register a new user |
+| PUT    | `/v1/users/activated` | Activate a newly-registered account |
+| PUT    | `/v1/users/password` | Reset password using a recovery token |
+| POST   | `/v1/users/recovery` | Validate a recovery code |
+| POST   | `/v1/users/mfa` | Enroll in MFA (TOTP) |
+| POST   | `/v1/users/mfa/verify` | Verify the MFA enrollment OTP |
+| GET    | `/v1/users/account` | Read the authenticated user's profile |
+| PATCH  | `/v1/users/account` | Update the authenticated user's profile |
+| POST   | `/v1/users/logout` | Terminate the current session / SSE channel |
+
+</details>
+
+<details>
+<summary><b>API tokens (login flow)</b> &mdash; <code>/v1/api</code></summary>
+
+| Method | Path | Description |
+|---|---|---|
+| POST | `/v1/api/authentication` | Issue an authentication token (login) |
+| POST | `/v1/api/authentication/verify` | Validate the MFA challenge after login |
+| POST | `/v1/api/password-reset` | Send a password-reset token by email |
+| POST | `/v1/api/recovery` | Initiate account recovery via recovery codes |
+| POST | `/v1/api/resend-activation` | Re-send an account activation token |
+
+</details>
+
+<details>
+<summary><b>Budgets</b> &mdash; <code>/v1/budgets</code></summary>
+
+| Method | Path | Description |
+|---|---|---|
+| GET    | `/v1/budgets` | List all budgets for the authenticated user |
+| GET    | `/v1/budgets/summary` | Aggregate budget / goal / expense summary |
+| POST   | `/v1/budgets` | Create a budget |
+| PATCH  | `/v1/budgets/{budgetID}` | Update a budget |
+| DELETE | `/v1/budgets/{budgetID}` | Delete a budget |
+
+</details>
+
+<details>
+<summary><b>Goals &amp; goal plans</b> &mdash; <code>/v1/goals</code></summary>
+
+| Method | Path | Description |
+|---|---|---|
+| POST  | `/v1/goals` | Create a goal |
+| PATCH | `/v1/goals/{goalID}` | Update a goal |
+| GET   | `/v1/goals/progression` | Goals enriched with progression % |
+| GET   | `/v1/goals/tracking` | Snapshot history of goal progression |
+| POST  | `/v1/goals/plan` | Create a goal plan |
+| PATCH | `/v1/goals/plan/{goalPlanID}` | Update a goal plan |
+| GET   | `/v1/goals/plan` | List the user's goal plans |
+
+</details>
+
+<details>
+<summary><b>Groups, invitations, group goals, group transactions, group expenses</b> &mdash; <code>/v1/groups</code></summary>
+
+| Method | Path | Description |
+|---|---|---|
+| GET    | `/v1/groups` | Groups the user is a member of |
+| GET    | `/v1/groups/{groupID}` | Detailed view of one group |
+| POST   | `/v1/groups` | Create a new group |
+| PATCH  | `/v1/groups/{groupID}` | Update a group |
+| PATCH  | `/v1/groups/member/{groupID}` | Update a member's role |
+| DELETE | `/v1/groups/member/{groupID}/{memberID}` | Admin removes a member |
+| DELETE | `/v1/groups/member/{groupID}` | User leaves the group |
+| GET    | `/v1/groups/created` | Groups created by the authenticated user |
+| POST   | `/v1/groups/invite` | Send a group invitation |
+| PATCH  | `/v1/groups/invite/{groupID}` | Accept / decline an invitation |
+| POST   | `/v1/groups/goal` | Create a group goal |
+| PATCH  | `/v1/groups/goal/{groupGoalID}` | Update a group goal |
+| GET    | `/v1/groups/transactions/{groupID}` | List transactions for a group |
+| POST   | `/v1/groups/transactions` | Create a group transaction |
+| DELETE | `/v1/groups/transactions/{groupTransactionID}` | Delete a group transaction |
+| GET    | `/v1/groups/expenses/{groupID}` | List expenses for a group |
+| POST   | `/v1/groups/expenses` | Create a group expense |
+| DELETE | `/v1/groups/expenses/{groupExpenseID}` | Delete a group expense |
+| GET    | `/v1/groups/public` | Browse public groups |
+| POST   | `/v1/groups/public` | Join a public group |
+
+</details>
+
+<details>
+<summary><b>Incomes</b> &mdash; <code>/v1/incomes</code></summary>
+
+| Method | Path | Description |
+|---|---|---|
+| GET   | `/v1/incomes` | List all incomes for the authenticated user |
+| POST  | `/v1/incomes` | Record a new income |
+| PATCH | `/v1/incomes/{incomeID}` | Update an income |
+
+</details>
+
+<details>
+<summary><b>Debts</b> &mdash; <code>/v1/debts</code></summary>
+
+| Method | Path | Description |
+|---|---|---|
+| GET   | `/v1/debts` | List all debts for the authenticated user |
+| POST  | `/v1/debts` | Create a debt |
+| PATCH | `/v1/debts/{debtID}` | Update a debt |
+| GET   | `/v1/debts/installment/{debtID}` | Repayment history for a debt |
+| PATCH | `/v1/debts/installment/{debtID}` | Make a debt payment |
+
+</details>
+
+<details>
+<summary><b>Expenses (one-shot, recurring, OCR receipts)</b> &mdash; <code>/v1/expenses</code></summary>
+
+| Method | Path | Description |
+|---|---|---|
+| GET   | `/v1/expenses` | List all expenses for the authenticated user |
+| POST  | `/v1/expenses` | Create an expense |
+| PATCH | `/v1/expenses/{expenseID}` | Update an expense |
+| POST  | `/v1/expenses/recurring` | Create a recurring expense |
+| GET   | `/v1/expenses/recurring` | List recurring expenses |
+| PATCH | `/v1/expenses/recurring/{expenseID}` | Update a recurring expense |
+| POST  | `/v1/expenses/receipts` | OCR-parse a receipt image and analyze it |
+
+</details>
+
+<details>
+<summary><b>Investments (stocks, bonds, alternatives, transactions, analysis)</b> &mdash; <code>/v1/investments</code></summary>
+
+| Method | Path | Description |
+|---|---|---|
+| GET    | `/v1/investments/stocks` | List stock holdings |
+| POST   | `/v1/investments/stocks` | Create a stock holding |
+| PATCH  | `/v1/investments/stocks/{stockID}` | Update a stock holding |
+| DELETE | `/v1/investments/stocks/{stockID}` | Delete a stock holding |
+| GET    | `/v1/investments/bonds` | List bond holdings |
+| POST   | `/v1/investments/bonds` | Create a bond holding |
+| PATCH  | `/v1/investments/bonds/{bondID}` | Update a bond holding |
+| DELETE | `/v1/investments/bonds/{bondID}` | Delete a bond holding |
+| GET    | `/v1/investments/alternative` | List alternative investments |
+| POST   | `/v1/investments/alternative` | Create an alternative investment |
+| PATCH  | `/v1/investments/alternative/{alternativeID}` | Update an alternative investment |
+| DELETE | `/v1/investments/alternative/{alternativeID}` | Delete an alternative investment |
+| POST   | `/v1/investments/transactions` | Record an investment transaction |
+| DELETE | `/v1/investments/transactions/{transactionID}` | Delete an investment transaction |
+| GET    | `/v1/investments/analysis` | Run a portfolio analysis (LLM-backed) |
+| GET    | `/v1/investments/analysis/summary` | Latest LLM analysis snapshot |
+
+</details>
+
+<details>
+<summary><b>Personal finance (analysis, predictions, summaries)</b> &mdash; <code>/v1/personalfinance</code></summary>
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/v1/personalfinance/analysis` | Aggregated financial detail for analysis |
+| GET | `/v1/personalfinance/summary` | Investment summary across all asset types |
+| GET | `/v1/personalfinance/prediction` | ML-backed personal-finance prediction |
+| GET | `/v1/personalfinance/expense-income/summary` | Expense vs. income summary report |
+
+</details>
+
+<details>
+<summary><b>Feeds (curated RSS &amp; favorites)</b> &mdash; <code>/v1/feeds</code></summary>
+
+| Method | Path | Description |
+|---|---|---|
+| GET    | `/v1/feeds` | RSS posts filtered by the user's favorite tags |
+| POST   | `/v1/feeds` | Submit a new feed for ingestion |
+| GET    | `/v1/feeds/{postID}` | Read a single RSS post |
+| PATCH  | `/v1/feeds/{feedID}` | Update a feed |
+| DELETE | `/v1/feeds/{feedID}` | Delete a feed |
+| POST   | `/v1/feeds/favorites` | Mark a post as a favorite |
+| DELETE | `/v1/feeds/favorites/{postID}` | Remove a favorite |
+
+</details>
+
+<details>
+<summary><b>Awards, search options, notifications, comments</b></summary>
+
+**Awards** (`/v1/awards`)
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/v1/awards` | All awards earned by the authenticated user |
+
+**Search options** (`/v1/search-options`)
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/v1/search-options/budget-categories` | Distinct budget categories |
+| GET | `/v1/search-options/currencies` | Supported currency codes |
+| GET | `/v1/search-options/budget-id-names` | Budget id / name pairs |
+
+**Notifications** (`/v1/notifications`)
+
+| Method | Path | Description |
+|---|---|---|
+| GET    | `/v1/notifications` | List notifications |
+| PATCH  | `/v1/notifications/{notificationID}` | Mark a notification as read |
+| DELETE | `/v1/notifications/{notificationID}` | Delete one notification |
+| DELETE | `/v1/notifications` | Clear all notifications |
+
+**Comments &amp; reactions** (`/v1/comments`)
+
+| Method | Path | Description |
+|---|---|---|
+| GET    | `/v1/comments` | List comments for an associated entity |
+| POST   | `/v1/comments` | Post a new comment |
+| PATCH  | `/v1/comments/{commentID}` | Edit a comment |
+| DELETE | `/v1/comments/{commentID}` | Delete a comment |
+| POST   | `/v1/comments/reaction` | React to a comment |
+| DELETE | `/v1/comments/reaction/{commentID}` | Remove a reaction |
+
+</details>
+
+<details>
+<summary><b>Other</b> &mdash; <code>/v1/contact-us</code>, <code>/v1/sse</code></summary>
+
+| Method | Path | Description |
+|---|---|---|
+| POST | `/v1/contact-us` | Submit a contact-us message |
+| GET  | `/v1/sse` | Server-Sent Events stream for live notifications |
+
+</details>
+
+A machine-readable OpenAPI/Swagger document is on the roadmap; the source of truth in the meantime is `cmd/api/routes.go`.
 
 ## 🔧 Running the tests <a name = "tests"></a>
 
@@ -558,7 +805,39 @@ ok      github.com/Blue-Davinci/OptiVest/internal/data  0.674s
 ```
 - <b>All other tests follow a similar prologue.</b>
 
-## 🎈 Usage <a name="usage"></a>
+### Continuous integration
+
+Every pull request to `main` and every push to `main` triggers the
+GitHub Actions workflow at [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
+The pipeline is parallel where it can be — eight independent jobs fan
+out from a single trigger and rejoin in a `ci-summary` aggregator that
+makes branch-protection wiring trivial:
+
+| Job | Tool | What it gates on |
+|---|---|---|
+| `lint` | golangci-lint v2 | govet, staticcheck, errcheck, ineffassign, unused, bodyclose, nolintlint, misspell, gofmt, goimports |
+| `test` | `go test -race` | Build, vet, race-tested unit tests, coverage summary in the run page |
+| `vuln` | govulncheck | Known CVEs in the dependency graph |
+| `secrets` | gitleaks | Hardcoded secrets in the diff (defense-in-depth alongside GitGuardian) |
+| `dockerfile-lint` | hadolint | Dockerfile + Dockerfile.migrate best practices |
+| `docker-build` | buildx + GHA cache | Builds both images, exports tarballs as artifacts |
+| `image-scan` | trivy | HIGH/CRITICAL CVEs and Dockerfile misconfig; SARIF uploaded to the Security tab |
+| `sbom` | syft | SPDX-JSON SBOM per image, retained 30 days |
+| `e2e` | docker compose | Brings the full stack up in CI, probes `/healthcheck`, `/metrics`, `/debug/vars`, tears down |
+
+A new commit on the same PR auto-cancels the in-flight run via the
+workflow's `concurrency` block, so the canonical "ready to merge"
+status is always the one on the latest commit.
+
+Caching is layered so warm runs are fast: `actions/setup-go` caches the
+Go module + build cache, the golangci-lint action caches its own
+analysis state, and `docker/build-push-action` uses `type=gha` so layer
+reuse persists across runs and across branches that share a base.
+
+Locally, `make audit` runs the same lint + vet + govulncheck + race-tested
+test suite that CI runs (minus the docker / scan / e2e jobs).
+
+
 As earlier mentioned, the api uses a myriad of flags which you can use to launch the application.
 An example of launching the application with your `smtp server's setting` includes:
 ```bash

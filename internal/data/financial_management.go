@@ -9,9 +9,10 @@ import (
 	"reflect"
 	"time"
 
+	"github.com/shopspring/decimal"
+
 	"github.com/Blue-Davinci/OptiVest/internal/database"
 	"github.com/Blue-Davinci/OptiVest/internal/validator"
-	"github.com/shopspring/decimal"
 )
 
 const (
@@ -465,13 +466,13 @@ func (m FinancialManagerModel) GetBudgetsForUser(ctx context.Context, userID int
 		// unmarshall [{}] goals to our goal summary
 		err := json.Unmarshal([]byte(row.Goals), &goalSummary)
 		if err != nil {
-			fmt.Println("Error unmarshalling goals: ", err)
+			fmt.Println("Error unmarshaling goals: ", err)
 			return nil, Metadata{}, err
 		}
 		// unmarshall [{}] recurring expenses to our recurring expense summary
 		err = json.Unmarshal([]byte(row.RecurringExpenses), &recurringExpenseSummary)
 		if err != nil {
-			fmt.Println("Error unmarshalling recurring expenses: ", err)
+			fmt.Println("Error unmarshaling recurring expenses: ", err)
 			return nil, Metadata{}, err
 		}
 		// return a goal summary and totals for each budget

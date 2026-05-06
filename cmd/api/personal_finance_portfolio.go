@@ -7,13 +7,14 @@ import (
 	"net/http"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/Blue-Davinci/OptiVest/internal/data"
 	"github.com/Blue-Davinci/OptiVest/internal/validator"
-	"go.uber.org/zap"
 )
 
 // getAllFinanceDetailsForAnalysisByUserIDHandler() is a handler that returns all the finance details for analysis by user ID
-// we will alse return  the LLM analysis later on
+// we will also return  the LLM analysis later on
 func (app *application) getAllFinanceDetailsForAnalysisByUserIDHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user ID
 	user := app.contextGetUser(r)
@@ -171,13 +172,13 @@ func (app *application) getPersonalFinancePrediction(w http.ResponseWriter, r *h
 
 }
 
-// getOCRDRecieptDataAnalysis() is a 2 step endpoint handler that will process reciept information provided
-// from the user. The user will only supply the URL of the reciept image and we will process the image.
+// getOCRDRecieptDataAnalysis() is a 2 step endpoint handler that will process receipt information provided
+// from the user. The user will only supply the URL of the receipt image and we will process the image.
 // We will perform a POST request to the OCR.Space API endpoint to get the text from the image.
-// After recieving this text, we will then send the data to our LLM to proceed with the analysis
+// After receiving this text, we will then send the data to our LLM to proceed with the analysis
 // And return the analysis to the user.
 func (app *application) getOCRDRecieptDataAnalysisHandler(w http.ResponseWriter, r *http.Request) {
-	// post request, we receive the URL of the reciept image
+	// post request, we receive the URL of the receipt image
 	var input struct {
 		URL string `json:"url"`
 	}
@@ -197,7 +198,7 @@ func (app *application) getOCRDRecieptDataAnalysisHandler(w http.ResponseWriter,
 	}
 	redisKey := fmt.Sprintf("%s%s", data.RedisOCRRedeiptPrefix, input.URL)
 	ctx := context.Background()
-	// check if we already saved this reciept image in REDIS, if yes, return the data directly
+	// check if we already saved this receipt image in REDIS, if yes, return the data directly
 	// if not, proceed with the OCR request
 	var cachedResponse *data.LLMAnalyzedPortfolio
 	cachedResponse, err = getFromCache[data.LLMAnalyzedPortfolio](
@@ -220,7 +221,7 @@ func (app *application) getOCRDRecieptDataAnalysisHandler(w http.ResponseWriter,
 	}
 	// check if the OCR response is empty/length is 0, if it is return a message saying we could not process the image
 	if len(ocrResponse.ParsedResults) == 0 {
-		v.AddError("error", "Could not process the reciept image")
+		v.AddError("error", "Could not process the receipt image")
 		app.failedValidationResponse(w, r, v.Errors)
 		return
 	}

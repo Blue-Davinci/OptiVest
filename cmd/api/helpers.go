@@ -15,12 +15,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Blue-Davinci/OptiVest/internal/data"
-	"github.com/Blue-Davinci/OptiVest/internal/validator"
 	"github.com/go-chi/chi/v5"
 	"github.com/redis/go-redis/v9"
 	"github.com/shopspring/decimal"
 	"go.uber.org/zap"
+
+	"github.com/Blue-Davinci/OptiVest/internal/data"
+	"github.com/Blue-Davinci/OptiVest/internal/validator"
 )
 
 var (
@@ -504,8 +505,8 @@ func (app *application) investmentTransactionValidatorHelper(ctx context.Context
 
 // updateInvestmentTransactionHelper() This will update the relevant table record when there is a new transaction
 // when a buy or sell is made, we update the quantity and the current value of the investment
-// we need to recieve the type of transaction and an interface which we need to cast to the correct type
-// Then all we update is the quantity, if transaction type is sell, we substract the quantity
+// we need to receive the type of transaction and an interface which we need to cast to the correct type
+// Then all we update is the quantity, if transaction type is sell, we subtract the quantity
 // if transaction type is buy, we add the quantity. Each unique investment type will have its own
 // case for this function in terms of updates i.e stock, bond and alternative
 func (app *application) updateInvestmentTransactionHelper(ctx context.Context, userID int64, transactionType string, transactionQuantity decimal.Decimal, investment interface{}) error {
@@ -563,7 +564,7 @@ func (app *application) updateInvestmentTransactionHelper(ctx context.Context, u
 }
 
 // Generic method to get data from Redis and unmarshal into the desired type.
-// Uses errors.Is for the redis.Nil check so behaviour is preserved if future
+// Uses errors.Is for the redis.Nil check so behavior is preserved if future
 // go-redis releases (or our own wrapping middleware) wrap the sentinel.
 func getFromCache[T any](ctx context.Context, rdb *redis.Client, key string) (*T, error) {
 	cachedData, err := rdb.Get(ctx, key).Result()
@@ -576,7 +577,7 @@ func getFromCache[T any](ctx context.Context, rdb *redis.Client, key string) (*T
 	var result T
 	err = json.Unmarshal([]byte(cachedData), &result)
 	if err != nil {
-		return nil, err // Error unmarshalling data
+		return nil, err // Error unmarshaling data
 	}
 
 	return &result, nil
@@ -615,7 +616,7 @@ func (app *application) postCategoryDecider(isEducational bool) string {
 
 // processOCRRequestHelper sends the receipt-image URL to the OCR.Space API
 // and returns the parsed OCRResponse. ctx flows from the caller so the
-// upstream call is cancelled when the originating HTTP client disconnects.
+// upstream call is canceled when the originating HTTP client disconnects.
 func (app *application) proces1sOCRRequestHelper(ctx context.Context, url string) (*data.OCRResponse, error) {
 	// we need a form Body for this, so we create a form body
 	var requestBody bytes.Buffer
@@ -672,7 +673,7 @@ func (app *application) proces1sOCRRequestHelper(ctx context.Context, url string
 }
 
 // notificationPreperationHelper() is a helper function that will prepare the notification
-// we will recieve the , []mesage,notificationtype , url, imgurl and tags
+// we will receive the , []mesage,notificationtype , url, imgurl and tags
 // for each item, we will make a notificationcontent struct and use app.PublishNotificationToRedis
 // to publish the notification to Redis, passing in the userID, notification type and the notification content
 func (app *application) notificationPreperationHelper(userID int64, messages []string, notificationType, url, imgURL, tags string) error {

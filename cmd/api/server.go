@@ -53,7 +53,7 @@ func connContext(ctx context.Context, _ net.Conn) context.Context {
 // ConnContext stamping a per-connection ID for log correlation.
 //
 // The handler is injected so tests can substitute a no-op mux without having
-// to materialise the full routes() tree (which depends on the expvar metric
+// to materialize the full routes() tree (which depends on the expvar metric
 // publishers and the entire middleware chain).
 func (app *application) apiServerConfig(handler http.Handler) *http.Server {
 	return &http.Server{

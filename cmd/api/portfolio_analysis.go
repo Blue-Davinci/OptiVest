@@ -9,10 +9,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/Blue-Davinci/OptiVest/internal/data"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/singleflight"
+
+	"github.com/Blue-Davinci/OptiVest/internal/data"
 )
 
 // ---------------------------------------------------------------------------
@@ -122,7 +123,7 @@ func singleflightDoTyped[T any](sf *singleflight.Group, key string, fn func() (T
 // so there is no aliasing. Verified with -race in the test suite.
 //
 // Backwards compatibility: setting -portfolio-worker-limit=1 reproduces the
-// previous serial behaviour exactly (errgroup with limit 1 is sequential).
+// previous serial behavior exactly (errgroup with limit 1 is sequential).
 // ---------------------------------------------------------------------------
 func (app *application) performInvestmentPortfolioAnalysis(ctx context.Context, investmentAnalysis *data.InvestmentAnalysis, user *data.User) error {
 	portfolioAnalysisRuns.Add(1)
@@ -196,7 +197,7 @@ func (app *application) performInvestmentPortfolioAnalysis(ctx context.Context, 
 		zap.Duration("duration", time.Since(start)),
 	)
 	// Alternative-investment analysis is intentionally not wired up here yet
-	// (matches pre-P3 behaviour). When it lands it should plug into the same
+	// (matches pre-P3 behavior). When it lands it should plug into the same
 	// errgroup loop above so it shares the worker cap and cancellation.
 	return nil
 }

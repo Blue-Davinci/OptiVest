@@ -9,10 +9,11 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/Blue-Davinci/OptiVest/internal/data"
-	"github.com/Blue-Davinci/OptiVest/internal/database"
 	"github.com/lib/pq"
 	"go.uber.org/zap"
+
+	"github.com/Blue-Davinci/OptiVest/internal/data"
+	"github.com/Blue-Davinci/OptiVest/internal/database"
 )
 
 // sseClientChanBuffer bounds how many pending notifications a single SSE client
@@ -25,7 +26,7 @@ const sseClientChanBuffer = 32
 // The handler reads from a per-user channel returned by AddClient (snapshotted
 // once on entry, no map lookups per iteration) and exits cleanly when either
 // (a) the client disconnects, (b) the channel is closed by AddClient because a
-// newer connection took over, or (c) the request context is cancelled by
+// newer connection took over, or (c) the request context is canceled by
 // graceful shutdown.
 func (app *application) ServeSSE(w http.ResponseWriter, r *http.Request) {
 	userID := app.contextGetUser(r).ID
@@ -80,7 +81,7 @@ func (app *application) ServeSSE(w http.ResponseWriter, r *http.Request) {
 // Redis and the database. It is invoked from a goroutine kicked off by
 // AddClient, so it is not request-scoped — we bind to the application
 // lifecycle context (app.ctx) so that on graceful shutdown the in-flight
-// Redis read is cancelled cleanly.
+// Redis read is canceled cleanly.
 func (app *application) loadAndSendPendingNotifications(userID int64) {
 	app.logger.Info("Loading and sending pending notifications for user:", zap.Int64("userID", userID))
 	ctx := app.ctx
@@ -132,7 +133,7 @@ func (app *application) loadAndProcessRedisData(ctx context.Context, userID int6
 
 // loadAndProcessDBData loads and processes pending notifications from
 // the database. ctx is bound to the application lifecycle by the caller
-// (loadAndSendPendingNotifications) so the in-flight SELECT is cancelled
+// (loadAndSendPendingNotifications) so the in-flight SELECT is canceled
 // cleanly on graceful shutdown.
 func (app *application) loadAndProcessDBData(ctx context.Context, userID int64, processed *map[int64]bool) error {
 	pendingNotifications, err := app.models.NotificationManager.GetUnreadNotifications(ctx, userID)
@@ -152,7 +153,7 @@ func (app *application) loadAndProcessDBData(ctx context.Context, userID int64, 
 			app.logger.Info("Skipping duplicate notification from DB", zap.Int64("notification_id", notification.ID))
 			continue
 		}
-		app.logger.Info("Pending notifications recieved from Database", zap.Int64("Notification ID", notification.ID))
+		app.logger.Info("Pending notifications received from Database", zap.Int64("Notification ID", notification.ID))
 		var notificationMeta data.NotificationMeta
 		err := json.Unmarshal([]byte(notification.Meta), &notificationMeta)
 		if err != nil {
@@ -211,7 +212,7 @@ func (app *application) AddClient(userID int64) <-chan string {
 
 	// Install the new channel and start a fresh per-user pubsub listener.
 	// The pubsub ctx derives from app.ctx, not context.Background(), so on
-	// graceful shutdown every per-user Redis subscription is cancelled in
+	// graceful shutdown every per-user Redis subscription is canceled in
 	// addition to the explicit RemoveClient calls — no goroutine leak even
 	// if a client never disconnects cleanly.
 	ctx, cancelFunc := context.WithCancel(app.ctx)
@@ -309,7 +310,7 @@ func (app *application) PublishNotification(userID int64, notification data.Noti
 // which itself is called both from request flows and background schedulers.
 // We bind to app.ctx so the write completes regardless of whether the
 // triggering request has gone away — the user expects the notification to
-// arrive, not to be cancelled when their browser tab closes.
+// arrive, not to be canceled when their browser tab closes.
 func (app *application) storeNotificationInRedis(userID int64, notification data.NotificationContent) error {
 	ctx := app.ctx
 	pendingKey := fmt.Sprintf("%s:%d", data.RedisNotManPendingNotificationKey, userID)
@@ -400,7 +401,9 @@ func (app *application) PublishNotificationToRedis(userID int64, notificationTyp
 func (app *application) ListenForRedisPubSubUserMessages(ctx context.Context, userID int64) {
 	pubsub := app.RedisDB.Subscribe(ctx, fmt.Sprintf("%s:%d", data.RedisNotManNotificationKey, userID))
 
-	defer pubsub.Close()
+	// pubsub.Close shutdown error is informational only — the goroutine
+	// is exiting either way and there is no caller to report it back to.
+	defer func() { _ = pubsub.Close() }()
 
 	for {
 		select {
@@ -479,8 +482,12 @@ func (app *application) listenToAwardNotifications() {
 						app.logger.Error("Error publishing award notification to Redis", zap.Error(err))
 					}
 				}
-			case <-time.After(90 * time.Second): // Ping the listener every 90 seconds to prevent timeout
-				listener.Ping()
+			case <-time.After(90 * time.Second):
+				// Periodic ping keeps the pq listener connection from
+				// being closed by an idle-connection cutoff. A failure
+				// here just means the next loop iteration will
+				// reconnect; not worth surfacing.
+				_ = listener.Ping()
 			}
 		}
 	}()

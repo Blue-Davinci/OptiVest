@@ -6,8 +6,9 @@ import (
 	"math/rand"
 	"time"
 
-	"github.com/Blue-Davinci/OptiVest/internal/database"
 	"github.com/shopspring/decimal"
+
+	"github.com/Blue-Davinci/OptiVest/internal/database"
 )
 
 type AlgoManager struct {

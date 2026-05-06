@@ -4,16 +4,17 @@ import (
 	"fmt"
 	"net/http"
 
+	"go.uber.org/zap"
+
 	"github.com/Blue-Davinci/OptiVest/internal/data"
 	"github.com/Blue-Davinci/OptiVest/internal/validator"
-	"go.uber.org/zap"
 )
 
 // createContactUsHandler() is a handler function that creates a contact us request for a user with a specific email.
 // Check if a user is anonymous. If they are, set the userID to 0 otherwise set it to the user's ID via
 // The context value. Then, create a contact us struct and decode the request body into it.
 // Call the MapContactUsToConstant method to map the contact us status to a constant.
-// We then validate the recieved data and proceed to save the contact us request in the database.
+// We then validate the received data and proceed to save the contact us request in the database.
 func (app *application) createContactUsHandler(w http.ResponseWriter, r *http.Request) {
 	// set the input
 	var input struct {

@@ -9,9 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Blue-Davinci/OptiVest/internal/data"
 	"github.com/shopspring/decimal"
 	"go.uber.org/zap"
+
+	"github.com/Blue-Davinci/OptiVest/internal/data"
 )
 
 // updateBondAnalysis updates the BondAnalysis data with performance metrics.
@@ -138,7 +139,7 @@ func (app *application) performAndLogBondCalculations(ctx context.Context, symbo
 	}
 	app.loggerFromContext(ctx).Info("Bond Returns Calculated", zap.Int("num_returns", len(bondReturns)))
 
-	// Calculate Anual Bond Returns
+	// Calculate Annual Bond Returns
 	annualReturn := calculateAnnualReturn(bond.CouponRate, bond.FaceValue, bond.CurrentPrice)
 	//app.logger.Info("Annual Return", zap.String("symbol", symbol), zap.String("annual_return", annualReturn.String()))
 
@@ -438,7 +439,7 @@ func (app *application) performAndLogCalculations(ctx context.Context, timeSerie
 }
 
 // getAverageDailyReturn is a helper function that calculates the average daily return for a given stock symbol
-// We recieve a filtered map of TimeSeriesData and calculate the average daily return
+// We receive a filtered map of TimeSeriesData and calculate the average daily return
 func (app *application) getAverageDailyReturn(ctx context.Context, timeseriesData *data.TimeSeriesDailyResponse, lastYear int) []decimal.Decimal {
 	filteredData := filterTimeSeriesBetweenYears(timeseriesData, lastYear)
 	dailyReturns := calculateDailyReturns(filteredData)
@@ -452,7 +453,7 @@ func (app *application) getAverageDailyReturn(ctx context.Context, timeseriesDat
 //
 // Sorting is essential: calculateDailyReturns walks the slice computing
 // (price[i] - price[i-1]) / price[i-1], which only produces meaningful
-// returns when consecutive entries are chronological neighbours. Iterating
+// returns when consecutive entries are chronological neighbors. Iterating
 // response.DailyTimeSeries directly would inherit Go's randomized map order
 // and produce different Sharpe / Sortino ratios on every call — a real
 // financial-accuracy bug, not just a determinism nuisance.
@@ -804,7 +805,7 @@ func (app *application) getSectorPerformance(ctx context.Context, sector string)
 	if err != nil {
 		return decimal.NewFromInt(0), err
 	}
-	app.loggerFromContext(ctx).Info("Sector Obtained and Sector Performance", zap.String("Sector recieved", sector), zap.String("Sector Value", sectorScore.String()))
+	app.loggerFromContext(ctx).Info("Sector Obtained and Sector Performance", zap.String("Sector received", sector), zap.String("Sector Value", sectorScore.String()))
 	// return sectorPerformanceResponse.GetSectorChange()
 	return sectorScore, nil
 }

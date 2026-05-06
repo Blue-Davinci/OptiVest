@@ -9,9 +9,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shopspring/decimal"
+
 	"github.com/Blue-Davinci/OptiVest/internal/database"
 	"github.com/Blue-Davinci/OptiVest/internal/validator"
-	"github.com/shopspring/decimal"
 )
 
 type PersonalFinancePortfolioModel struct {

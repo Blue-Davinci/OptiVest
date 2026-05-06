@@ -7,10 +7,11 @@ import (
 	"errors"
 	"time"
 
-	"github.com/Blue-Davinci/OptiVest/internal/database"
-	"github.com/Blue-Davinci/OptiVest/internal/validator"
 	"github.com/nyaruka/phonenumbers"
 	"golang.org/x/crypto/bcrypt"
+
+	"github.com/Blue-Davinci/OptiVest/internal/database"
+	"github.com/Blue-Davinci/OptiVest/internal/validator"
 )
 
 // constants for general module usage

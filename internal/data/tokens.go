@@ -49,7 +49,7 @@ func ValidateTokenPlaintext(v *validator.Validator, tokenPlaintext string) {
 	v.Check(len(tokenPlaintext) == 26, "token", "must be valid")
 }
 
-// ValidateRecoveryCodes() checks that first the lenght of the recovery codes slice is 5
+// ValidateRecoveryCodes() checks that first the length of the recovery codes slice is 5
 // and for each of the codes, the length is 26 bytes
 func ValidateRecovery(v *validator.Validator, recoveryCodes []string, tokenPlainText string) {
 	v.Check(len(recoveryCodes) == 5, "recovery_codes", "must be a valid bundle")

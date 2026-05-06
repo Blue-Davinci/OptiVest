@@ -9,9 +9,10 @@ import (
 	"reflect"
 	"time"
 
+	"github.com/shopspring/decimal"
+
 	"github.com/Blue-Davinci/OptiVest/internal/database"
 	"github.com/Blue-Davinci/OptiVest/internal/validator"
-	"github.com/shopspring/decimal"
 )
 
 const (
@@ -424,9 +425,9 @@ func (m FinancialGroupManagerModel) GetAllGroupsCreatedByUser(ctx context.Contex
 
 // GetDetailedGroupById() retrieves a group by its ID and the User ID of the user
 // This will return an error if the user is not a member of the group
-// The aggregated data includes a json array of the users (which will be unmarshalled to the GroupMember struct)
-// Pending invitations jsnon array (which will be unmarshalled to the GroupInvitation struct)
-// The group goals json array (which will be unmarshalled to the GroupGoal struct)
+// The aggregated data includes a json array of the users (which will be unmarshaled to the GroupMember struct)
+// Pending invitations jsnon array (which will be unmarshaled to the GroupInvitation struct)
+// The group goals json array (which will be unmarshaled to the GroupGoal struct)
 // And the totals for the total group transactions, total group expenses and the goal_with_most_transactions
 func (m FinancialGroupManagerModel) GetDetailedGroupById(ctx context.Context, userID, groupID int64) (*DetailedGroup, error) {
 	// get our context
@@ -1154,7 +1155,7 @@ func populateTransactions(transactionsRow interface{}) *GroupTransaction {
 func populateEnrichedGroup(enrichedGroupRow interface{}) (*EnrichedGroup, error) {
 	switch group := enrichedGroupRow.(type) {
 	case database.GetAllGroupsCreatedByUserRow:
-		// get the group goals marshalling them to a group sample goals
+		// get the group goals marshaling them to a group sample goals
 		var groupGoals []*SampleGroupGoal
 		// type assert topgoals to byte
 		topGoals, ok := group.TopGoals.([]byte)
@@ -1435,7 +1436,7 @@ func populateGroupGoal(groupGoalRow interface{}) *GroupGoal {
 func populateDetailedGroup(groupDetails interface{}, userID int64) (*DetailedGroup, error) {
 	switch groupDetails := groupDetails.(type) {
 	case database.GetDetailedGroupByIdRow:
-		// get the group goals marshalling them to a group sample goals
+		// get the group goals marshaling them to a group sample goals
 		var groupGoals []*GroupGoal
 		// type assert topgoals to byte
 		topGoals, ok := groupDetails.Goals.([]byte)

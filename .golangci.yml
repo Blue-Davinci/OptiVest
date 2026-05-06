@@ -1,0 +1,161 @@
+# =============================================================================
+# golangci-lint configuration for OptiVest (v2 schema)
+# =============================================================================
+#
+# The selected linter set is deliberately conservative for day one: we want
+# every rule that catches a real bug class and zero rules that produce noise
+# the team will start ignoring within a week.
+#
+# What's enabled, and why:
+#   govet         - the official vet checks; should always be on
+#   staticcheck   - SA / S / ST / U / QF checks; hugely valuable, low false-positive rate
+#   errcheck      - flags ignored errors; we already write tests in this style
+#   ineffassign   - assignments to a variable that's never read
+#   unused        - dead code / unused exported identifiers
+#   bodyclose     - HTTP response body close - relevant for our outbound clients
+#   nolintlint    - polices nolint directives so they document why
+#   misspell      - typos in strings, comments, identifiers
+#
+# (gofmt + goimports are configured via the formatters: section below.)
+#
+# What's deliberately disabled, and why:
+#   gocyclo / gocognit / dupl - cyclomatic-complexity tooling produces a
+#     long list of warnings on legacy handlers without telling us anything
+#     actionable. Re-enable per package once we're refactoring it.
+#   gosec - has a high false-positive rate on inline SQL strings even
+#     when they're clearly safe; trivy + govulncheck already cover the
+#     concrete vulnerability surface.
+#   lll - line length is a style argument, not a bug class.
+#   wsl / godot / godox - cosmetic.
+#
+# Run locally with:
+#   make audit              # the full suite (matches CI)
+#   make lint               # just this linter set
+#
+# When adding a linter, prefer adding it disabled-by-default and turning
+# it on per-directory via the issues.exclude-rules mechanism so we can
+# clean up incrementally rather than blocking a single mega-fix.
+# =============================================================================
+
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  default: none
+  enable:
+    - govet
+    - staticcheck
+    - errcheck
+    - ineffassign
+    - unused
+    - bodyclose
+    - nolintlint
+    - misspell
+
+  settings:
+    govet:
+      enable-all: true
+      disable:
+        # fieldalignment is overzealous about padding; we'd be reordering
+        # struct fields for 1-byte savings on every PR. Re-enable for
+        # hot-path structs case-by-case.
+        - fieldalignment
+        # shadow is opinionated and well-debated in the Go community.
+        # Most projects this size (kubernetes, consul, prometheus,
+        # caddy) disable it because `err := foo()` inside an if-block is
+        # idiomatic. Re-enable if a future bug traces back to a shadow.
+        - shadow
+
+    staticcheck:
+      # We start with the SA (correctness) checks, the U (unused)
+      # checks, and the S (simplification) checks all on, but disable
+      # three groups that a brownfield codebase like this one would
+      # otherwise drown in:
+      #
+      #   - ST1000  "at least one file in a package should have a package comment"
+      #             Cosmetic; not a bug class. Re-enable when we do a
+      #             package-doc pass.
+      #
+      #   - ST1003  "should not use underscores in Go names" + "var Foo
+      #             should be FooID". The codebase has ~50 instances of
+      #             id/url/api/foo_bar identifiers from out earlier eras.
+      #             Renaming them is a follow-up "naming-cleanup" PR;
+      #             doing it inside the CI-bootstrap PR would balloon
+      #             the diff and add noise to a security-hardening
+      #             milestone.
+      #
+      #   - ST1020 / ST1021  "comment on exported method/function/type
+      #             should be of the form 'Name ...'". The codebase has
+      #             ~50 doc comments in the form `// FuncName() does X`
+      #             instead of `// FuncName does X`. This is the same
+      #             follow-up scope as the ST1003 rename PR - both edit
+      #             the same identifiers - so they ship together.
+      #
+      #   - QF1xxx  Quick-fix suggestions (tagged switch, removing
+      #             embedded selectors, etc). These are refactoring
+      #             opportunities, not bug classes; we evaluate them
+      #             case-by-case in normal review.
+      #
+      # The SA family (real bugs: nil derefs, deadlocks, missing
+      # returns, etc.) is non-negotiable and stays on.
+      checks:
+        - all
+        - "-ST1000"
+        - "-ST1003"
+        - "-ST1020"   # exported function/method comments must start with name
+        - "-ST1021"   # exported type comments must start with name (or article)
+        - "-ST1022"   # same idea, for exported var/const comments
+        - "-QF1002"
+        - "-QF1003"
+        - "-QF1008"
+        - "-QF1012"
+
+    errcheck:
+      # Don't fail on these stdlib calls — almost every codebase's
+      # default allowlist. Anything else is a real ignored error.
+      exclude-functions:
+        - (*os.File).Close
+        - (io.Closer).Close
+        - (net/http.ResponseWriter).Write
+        - fmt.Fprintln
+        - fmt.Fprintf
+        - fmt.Fprint
+
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+      allow-unused: false
+
+    misspell:
+      locale: US
+
+  exclusions:
+    # 0 = no cap. v1 used max-issues-per-linter / max-same-issues; the v2
+    # equivalent is to leave the defaults (which already show all issues).
+    rules:
+      # Test files allow a few patterns we'd disallow in production paths.
+      - path: _test\.go
+        linters:
+          - errcheck     # not every (err) in a test path needs to be checked
+          - bodyclose    # httptest recorders don't need defer Close()
+
+      # Generated SQL bindings (sqlc output) are not ours to lint.
+      - path: internal/sql/sqlcgen/
+        linters:
+          - errcheck
+          - unused
+          - staticcheck
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    gofmt:
+      simplify: true
+    goimports:
+      local-prefixes:
+        - github.com/Blue-Davinci/OptiVest

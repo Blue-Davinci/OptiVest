@@ -90,11 +90,11 @@ var knownMetrics = map[string]metricMeta{
 	"request_id_rejected_total":  {kind: counterKind, help: "Total inbound X-Request-ID headers rejected for being malformed and replaced with a freshly generated value."},
 
 	// Rate limiter (middleware.go).
-	"rate_limiter_allowed_total":       {kind: counterKind, help: "Total rate-limiter checks that allowed the request."},
-	"rate_limiter_denied_total":        {kind: counterKind, help: "Total rate-limiter checks that denied the request with HTTP 429."},
-	"rate_limiter_redis_errors_total":  {kind: counterKind, help: "Total Redis errors observed while consulting the rate-limiter bucket."},
-	"rate_limiter_fail_open_total":     {kind: counterKind, help: "Total requests admitted because the rate limiter could not reach Redis (fail-open)."},
-	"rate_limiter_disabled_total":      {kind: counterKind, help: "Total requests that bypassed the rate limiter because it was disabled in config."},
+	"rate_limiter_allowed_total":      {kind: counterKind, help: "Total rate-limiter checks that allowed the request."},
+	"rate_limiter_denied_total":       {kind: counterKind, help: "Total rate-limiter checks that denied the request with HTTP 429."},
+	"rate_limiter_redis_errors_total": {kind: counterKind, help: "Total Redis errors observed while consulting the rate-limiter bucket."},
+	"rate_limiter_fail_open_total":    {kind: counterKind, help: "Total requests admitted because the rate limiter could not reach Redis (fail-open)."},
+	"rate_limiter_disabled_total":     {kind: counterKind, help: "Total requests that bypassed the rate limiter because it was disabled in config."},
 
 	// Portfolio analysis (portfolio_analysis.go).
 	"portfolio_analysis_runs_total":           {kind: counterKind, help: "Total portfolio-analysis pipeline runs started."},
@@ -120,12 +120,12 @@ var knownMetrics = map[string]metricMeta{
 	"timestamp":  {kind: gaugeKind, help: "Unix timestamp at which this scrape was served. Useful to detect stale exporters."},
 }
 
-// labelledMaps lists expvar.Map values whose keys should be promoted to a
+// labeledMaps lists expvar.Map values whose keys should be promoted to a
 // single Prom label. The Map name itself stays as the metric name; each map
-// entry becomes one labelled sample line. Right now this only covers the
+// entry becomes one labeled sample line. Right now this only covers the
 // status-code breakdown, but the table form means new maps can be added with
 // one line.
-var labelledMaps = map[string]struct {
+var labeledMaps = map[string]struct {
 	promName string
 	kind     metricKind
 	label    string
@@ -196,7 +196,7 @@ func writePrometheusExposition(w io.Writer) error {
 			b.samples = append(b.samples, fmt.Sprintf("%s %s", promName, val))
 			return
 		}
-		if meta, ok := labelledMaps[kv.Key]; ok {
+		if meta, ok := labeledMaps[kv.Key]; ok {
 			promName := meta.promName
 			if promName == "" {
 				promName = kv.Key

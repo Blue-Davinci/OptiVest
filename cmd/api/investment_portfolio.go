@@ -6,10 +6,11 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/Blue-Davinci/OptiVest/internal/data"
-	"github.com/Blue-Davinci/OptiVest/internal/validator"
 	"github.com/shopspring/decimal"
 	"go.uber.org/zap"
+
+	"github.com/Blue-Davinci/OptiVest/internal/data"
+	"github.com/Blue-Davinci/OptiVest/internal/validator"
 )
 
 /*
@@ -820,7 +821,7 @@ func (app *application) deleteInvestmentTransactionByIDHandler(w http.ResponseWr
 }
 
 // investmentPrtfolioAnalysisHandler() is a handler responsible for the analysis of the investment portfolio
-// we will recieve a user ID. We will proceed to get the following data:
+// we will receive a user ID. We will proceed to get the following data:
 // 1. User Goals - goals that a user has set
 // 2. Investment data - all the investments the user has made which include stocks, bonds & alternatives
 // 3. For each of the above investments, we will get additional statistics using investment operations i.e
@@ -914,7 +915,7 @@ func (app *application) getLatestLLMAnalysisResponseByUserIDHandler(w http.Respo
 }
 
 // getAllInvestmentInfoByUserIDHandler() is a handler responsible for getting all investment information by user ID
-// we will recieve a user ID. We will proceed to get the following data:
+// we will receive a user ID. We will proceed to get the following data:
 func (app *application) getAllInvestmentInfoByUserIDHandler(w http.ResponseWriter, r *http.Request) {
 	//  retrieve user ID from context
 	user := app.contextGetUser(r)

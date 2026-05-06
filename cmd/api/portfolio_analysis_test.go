@@ -9,8 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Blue-Davinci/OptiVest/internal/data"
 	"golang.org/x/sync/singleflight"
+
+	"github.com/Blue-Davinci/OptiVest/internal/data"
 )
 
 // makeStockWorkers builds n no-op workers that sleep for `each` and return
@@ -97,7 +98,7 @@ func TestRunPortfolioWorkers_ConcurrentFasterThanSerial(t *testing.T) {
 }
 
 // TestRunPortfolioWorkers_FirstErrorCancelsSiblings verifies errgroup
-// semantics: when one worker errors, the derived ctx is cancelled and
+// semantics: when one worker errors, the derived ctx is canceled and
 // in-flight siblings observe ctx.Done() and return ctx.Err(); g.Wait()
 // returns the first error.
 func TestRunPortfolioWorkers_FirstErrorCancelsSiblings(t *testing.T) {
@@ -176,7 +177,7 @@ func containsFailedToGet(s string) bool {
 	return false
 }
 
-// TestRunPortfolioWorkers_RespectsParentCancel ensures that cancelling the
+// TestRunPortfolioWorkers_RespectsParentCancel ensures that canceling the
 // parent context (e.g. client disconnect) propagates: in-flight workers see
 // ctx.Done() and the orchestrator returns context.Canceled (or the parent
 // error), not nil.

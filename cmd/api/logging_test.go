@@ -9,10 +9,11 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/Blue-Davinci/OptiVest/internal/data"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest/observer"
+
+	"github.com/Blue-Davinci/OptiVest/internal/data"
 )
 
 // fieldByKey returns the value of a zap field on a recorded log entry, or
@@ -82,7 +83,7 @@ func TestRequestID_PassthroughValid(t *testing.T) {
 // TestRequestID_RejectsUnsafeOrOversize verifies the sanitization policy:
 // inbound IDs that contain unsafe characters (CR/LF for log injection,
 // shell metas, spaces) or exceed requestIDMaxLen must be replaced with a
-// freshly generated ID. This is the security-relevant behaviour of the
+// freshly generated ID. This is the security-relevant behavior of the
 // middleware.
 func TestRequestID_RejectsUnsafeOrOversize(t *testing.T) {
 	cases := []struct {
@@ -301,7 +302,7 @@ func TestLogRequests_PanicSafe(t *testing.T) {
 // TestLogRequests_BytesWrittenAccurateAcrossMultipleWrites confirms that
 // httpsnoop (the wrapper this middleware relies on) sums bytes from
 // multiple Write calls correctly. If httpsnoop ever changes that
-// behaviour, this test will catch it before ops graphs lie.
+// behavior, this test will catch it before ops graphs lie.
 func TestLogRequests_BytesWrittenAccurateAcrossMultipleWrites(t *testing.T) {
 	app, recorded := observedApp(t)
 	chain := app.requestID(app.logRequests(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -328,7 +329,7 @@ func TestLogRequests_BytesWrittenAccurateAcrossMultipleWrites(t *testing.T) {
 // Going through the real authenticate function would require wiring
 // Models, Redis, DB, and a token; instead I exercise the same code path
 // with a contextSetUser equivalent and the holder write that authenticate
-// performs. The behaviour under test is the holder population, not the
+// performs. The behavior under test is the holder population, not the
 // auth lookup itself (which has its own coverage).
 func TestAuthenticate_PopulatesRequestLogHolder(t *testing.T) {
 	app, recorded := observedApp(t)
