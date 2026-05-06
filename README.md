@@ -161,6 +161,82 @@ db/psql            -  connect to the db using psql
 build/api          -  build the cmd/api application
 ```
 
+### Local stack with Docker / Podman
+
+If you don't want to install Postgres + Redis on your host, the repo ships
+a `docker-compose.yml` that brings up the entire stack (Postgres 17, Redis 7,
+a one-shot `goose` migration runner, and the API itself) with a single
+command. The same compose file works on Docker Desktop and on rootless
+Podman with the docker-compatibility shim.
+
+Prerequisites:
+- A container runtime (Docker Engine, Docker Desktop, or rootless Podman 5+)
+- Two populated `.env` files (templates committed, real files gitignored):
+  - `cmd/api/.env` for the API binary's runtime config (smtp, vendor API
+    keys, encryption key, etc) — copy `cmd/api/.env.example`
+  - `/.env` at the repo root for the docker stack's database credentials
+    (`POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB`) — copy
+    `/.env.example`
+
+The two files are deliberately separate: `cmd/api/.env` is loaded by
+the binary via `godotenv`, `/.env` is loaded by `docker compose` itself
+for `${VAR}` interpolation in the compose file. Compose `${VAR:?...}`
+syntax fails fast if anything in `/.env` is unset, so a missing variable
+shows up as a clear error at `make docker/up` time rather than as a
+"password authentication failed" deep in a migration.
+
+Bring everything up:
+
+```bash
+cp .env.example .env                     # first time only — set POSTGRES_PASSWORD
+cp cmd/api/.env.example cmd/api/.env     # first time only — fill the keys you have
+make docker/up
+```
+
+That builds the API image (multi-stage: `golang:1.25-alpine` builder →
+`alpine:3.20` runtime, non-root `optivest` user, static binary), pulls
+`postgres:17-alpine` + `redis:7-alpine`, runs every migration in
+`internal/sql/schema/` against the fresh database, and then starts the
+API. The API container is wired to a `HEALTHCHECK` that polls
+`/healthcheck` every 30s, so `docker compose ps` reflects healthy /
+unhealthy state. The first run takes 1-3 minutes (image pulls + Go module
+download); subsequent runs are layer-cached and start in seconds.
+
+Once it's up, the same observability surface that's exposed locally is
+available from the host:
+
+```bash
+curl http://localhost:4000/healthcheck     # JSON liveness payload
+curl http://localhost:4000/metrics         # Prometheus exposition
+curl http://localhost:4000/debug/vars      # raw JSON expvars
+psql "$OPTIVEST_DB_DSN"                    # interactive DB shell
+```
+
+Other useful targets:
+
+| Command                  | Effect                                                              |
+|--------------------------|---------------------------------------------------------------------|
+| `make docker/logs`       | tail just the API container logs                                    |
+| `make docker/ps`         | list the running compose services                                   |
+| `make docker/migrate`    | re-run `goose up` against the running Postgres                      |
+| `make docker/build`      | rebuild the API image without restarting the stack                  |
+| `make docker/down`       | stop and remove containers, **preserving** the Postgres data volume |
+| `make docker/down/clean` | same as above but **drops** the Postgres volume too                 |
+
+How the API in the container finds its config: docker-compose loads
+`cmd/api/.env` via `env_file`, then overrides the DSN host (`localhost`
+→ `postgres`) and the Redis password (empty in dev) via an explicit
+`environment:` block on the api service. The DSN itself is built from
+the `${POSTGRES_USER}` / `${POSTGRES_PASSWORD}` / `${POSTGRES_DB}` values
+that compose interpolates from the root `/.env`, so there is exactly one
+source of truth for the database credential. The binary itself was
+already tolerant of a missing `.env` file at runtime (it falls back to
+the process environment), which is what makes the same image work in
+cluster deployments where config comes from a Kubernetes Secret rather
+than a file. CLI flags overriding `-redis-addr=redis:6379` are passed
+via the service `command:` so the binary connects to the in-network
+service name rather than the localhost default.
+
 ### Description
 
 The application accepts command-line flags for configuration, establishes a connection pool to a database, and publishes variables for monitoring the application. The published variables include the application version, the number of active goroutines and the current Unix timestamp.

@@ -372,10 +372,23 @@ func main() {
 		ListeningUsers:    make(map[int64]bool),
 		ClientCancelFuncs: make(map[int64]context.CancelFunc),
 	}
-	err = app.startupFunction()
-	if err != nil {
-		logger.Fatal("Error while starting up application", zap.String("error", err.Error()))
-		return
+	if err := app.startupFunction(); err != nil {
+		// startupFunction's main job is seeding the default-currency cache
+		// from the Exchange Rate API. In a fresh environment the upstream
+		// call can legitimately fail (no API key in development, vendor
+		// outage, network egress restricted, etc.). validateConfig already
+		// treats missing required secrets as warn-in-dev / fatal-in-prod;
+		// the startup hook should follow the same policy so a developer
+		// without every vendor key can still bring the binary up.
+		// Currency-aware code paths will fail at first use with a clear
+		// per-request error, which is the right tradeoff vs. crash-looping
+		// at boot.
+		if cfg.env == "development" {
+			logger.Warn("startup: currency seeding failed (allowed in development)", zap.String("error", err.Error()))
+		} else {
+			logger.Fatal("Error while starting up application", zap.String("error", err.Error()))
+			return
+		}
 	}
 	// start schedulers
 	app.startSchedulers()
@@ -444,18 +457,31 @@ func publishMetrics() {
 	}))
 }
 
-// getCurrentPath invokes getEnvPath to get the path to the .env file based on the current working directory.
-// After that it loads the .env file using godotenv.Load to be used by the initFlags() function
+// getCurrentPath invokes getEnvPath to get the path to the .env file based on
+// the current working directory and asks godotenv to load it into the
+// process environment.
+//
+// Failure to load the file is intentionally a WARN, not a FATAL: when the
+// binary runs inside a container, k8s pod, or CI job, configuration is
+// usually injected via real environment variables and a .env file is
+// neither expected nor present. The downstream validateConfig() call is the
+// single source of truth for "do we have what we need to start"; it will
+// fatal cleanly with a list of every missing variable in non-development
+// environments and warn-only in development. Forcing a fatal here on top of
+// that just made the binary unrunnable in containers without a sentinel
+// file mounted at the right path.
 func getCurrentPath(logger *zap.Logger) string {
 	currentpath := getEnvPath(logger)
-	if currentpath != "" {
-		err := godotenv.Load(currentpath)
-		if err != nil {
-			logger.Fatal(err.Error(), zap.String("path", currentpath))
-		}
-	} else {
-
-		logger.Error("Path Error", zap.String("path", currentpath), zap.String("error", "unable to load .env file"))
+	if currentpath == "" {
+		logger.Warn("env loader: could not determine .env path; proceeding with process environment only")
+		return currentpath
+	}
+	if err := godotenv.Load(currentpath); err != nil {
+		logger.Warn("env loader: could not load .env; proceeding with process environment only",
+			zap.String("path", currentpath),
+			zap.String("error", err.Error()),
+		)
+		return currentpath
 	}
 	logger.Info("Loading Environment Variables", zap.String("path", currentpath))
 	return currentpath

@@ -85,6 +85,7 @@ func (app *application) routes() http.Handler {
 	// The endpoints are intentionally unauthenticated; deployments are
 	// expected to scope reachability to the internal scrape network. See
 	// SECURITY.md for the reasoning.
+	router.Get("/healthcheck", app.healthcheckHandler)
 	router.Get("/metrics", app.prometheusMetricsHandler)
 	router.Handle("/debug/vars", expvar.Handler())
 

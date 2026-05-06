@@ -1,0 +1,50 @@
+# Keep the build context tight. Anything not listed here is shipped to the
+# Docker daemon on every `docker build`, which slows builds and leaks files
+# we never want in an image.
+
+# VCS metadata. The build does not use any of it; vcs.Version() reads from
+# the Go module info, not from .git, so dropping the directory is safe.
+.git
+.gitignore
+.gitattributes
+
+# Editor / IDE state
+.vscode
+.idea
+*.swp
+
+# Local tooling caches and outputs
+.tmp
+bin
+*.exe
+api
+api.exe
+
+# Test artefacts and coverage profiles
+*.test
+*.out
+coverage.out
+coverage.html
+
+# OS noise
+.DS_Store
+Thumbs.db
+
+# Documentation that does not need to be in the image. Keep README + SECURITY
+# at runtime so `docker exec ... cat /app/README.md` still works during
+# incident triage if the operator copies them in via a future runtime stage
+# tweak; for now exclude.
+*.md
+!README.md
+!SECURITY.md
+
+# Local environment files. The image must not bake secrets in.
+*.env
+!*.env.example
+
+# Container artefacts of past builds
+docker-compose.override.yml
+.docker
+
+# Test data fixtures that are large and unused by the build
+testdata
