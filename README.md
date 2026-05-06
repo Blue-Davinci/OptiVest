@@ -112,36 +112,25 @@ goose postgres postgres://aggregate:password@localhost/aggregate  up
 
 5. **Download and Setup the MIcroService:** Follow the instructions highlighted [here](https://github.com/Blue-Davinci/OptiVest_Finance_Predictor_Micro_Service_V1) to get the micro-service up and running.
 
-6. **Environment Variable Setups:** OptiVest uses a few external APIs. You will need to set them up and make an `.env` containing the following templates:
-```bash
-# DSN Link to our Postgres database
-OPTIVEST_DB_DSN=postgres://optivest:yourpassword@localhost/optivest?sslmode=disable
-# For deployment: , comment the above and uncomment the below DSN
-#OPTIVEST_DB_DSN=postgres://optivest:yourpassword@host.docker.internal/optivest?sslmode=disable
-OPTIVEST_DATA_ENCRYPTION_KEY=xxxxxxx
+6. **Environment variables:** Copy the committed template into the location
+   the API loads at boot, then fill in real values:
 
-# Mailer configuration
-OPTIVEST_SMTP_HOST=xxxxx
-OPTIVEST_SMTP_USERNAME=xxxxxx
-OPTIVEST_SMTP_PASSWORD=xxxxxxx
-OPTIVEST_SMTP_SENDER=Optivest <no-reply@optivest.tech>
+   ```bash
+   cp cmd/api/.env.example cmd/api/.env
+   # then edit cmd/api/.env
+   ```
 
-# Exchange Rate API
-OPTIVEST_EXCHANGERATE_API_KEY=xxxxxxxxx
-# Alpha Vantage API
-OPTIVEST_ALPHAVANTAGE_API_KEY=xxxxxx
-# Fred API
-OPTIVEST_FRED_API_KEY=xxx
-# Financial Modeling Prep API
-OPTIVEST_FINANCIALMODELINGPREP_API_KEY=xxxxx
-# Samba Nova LLM API
-OPTIVEST_SAMBA_NOVA_LLM_API_KEY=xxxx
-# Optivest Predictor Microservice
-OPTIVEST_PREDICTOR_API_KEY=xxx
-# OCR.Space API
-OPTIVEST_OCRSPACE_API_KEY=xxxx
-```
-**The above .env is self explanatory for each API needed**
+   `cmd/api/.env.example` documents every variable, marks each one as
+   `[REQUIRED]` or `[OPTIONAL]`, calls out which ones are tolerated as
+   warnings in `-env=development` and fatal in non-development, and
+   includes a one-liner for generating the AES encryption key with
+   `openssl rand -hex 32`. The actual `cmd/api/.env` you create is
+   gitignored, so real secrets never enter the repo.
+
+   `godotenv.Load` runs against `cmd/api/.env` (or `.env` if your CWD is
+   already `cmd/api/`); environment variables exported in your shell take
+   precedence over the file, so per-shell overrides work without editing
+   it.
 
 5. **Build the project:** You can build the project using the makefile's command:
 
