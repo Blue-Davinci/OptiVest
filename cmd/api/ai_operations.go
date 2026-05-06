@@ -77,11 +77,11 @@ func (app *application) buildInvestmentPortfolioLLMRequest(ctx context.Context, 
     }
 }`
 	// get the analyzed portfolio
-	analyzedPortfolio, err := app.buildLLMRequestHelper(profile, instructions)
+	analyzedPortfolio, err := app.buildLLMRequestHelper(ctx, profile, instructions)
 	if err != nil {
 		return nil, err
 	}
-	app.logger.Info("Done building LLM request for investment portfolio")
+	app.loggerFromContext(ctx).Info("Done building LLM request for investment portfolio")
 	// save the analyzed portfolio to the database using CreateLLMAnalysisResponse
 	err = app.models.InvestmentPortfolioManager.CreateLLMAnalysisResponse(ctx, user.ID, analyzedPortfolio)
 	if err != nil {
@@ -91,7 +91,7 @@ func (app *application) buildInvestmentPortfolioLLMRequest(ctx context.Context, 
 	return analyzedPortfolio, nil
 }
 
-func (app *application) buildPersonalFinanceLLMRequest(user *data.User, unifiedPersonalFinanceAnalysis *data.UnifiedFinanceAnalysis) (*data.LLMAnalyzedPortfolio, error) {
+func (app *application) buildPersonalFinanceLLMRequest(ctx context.Context, user *data.User, unifiedPersonalFinanceAnalysis *data.UnifiedFinanceAnalysis) (*data.LLMAnalyzedPortfolio, error) {
 	// Create a profile
 	profile := UserPersonalFinanceProfile{
 		UserTimeHorizon:         user.TimeHorizon,
@@ -124,12 +124,12 @@ func (app *application) buildPersonalFinanceLLMRequest(user *data.User, unifiedP
 		}
 	  }`
 
-	return app.buildLLMRequestHelper(profile, instructions)
+	return app.buildLLMRequestHelper(ctx, profile, instructions)
 }
 
 // buildOCRRecieptAnalysisRequest sends a request to the LLM API with the OCR analysis data
 // and returns the analyzed OCR data.
-func (app *application) buildOCRRecieptAnalysisLLMRequest(ocrAnalysis *data.OCRResponse) (*data.LLMAnalyzedPortfolio, error) {
+func (app *application) buildOCRRecieptAnalysisLLMRequest(ctx context.Context, ocrAnalysis *data.OCRResponse) (*data.LLMAnalyzedPortfolio, error) {
 	// no profile for this one, let us create instructions
 	instructions := `
 {
@@ -155,15 +155,18 @@ func (app *application) buildOCRRecieptAnalysisLLMRequest(ocrAnalysis *data.OCRR
   }
 }
 `
-	return app.buildLLMRequestHelper(ocrAnalysis, instructions)
+	return app.buildLLMRequestHelper(ctx, ocrAnalysis, instructions)
 }
 
-// buildLLMRequestHelper builds and sends the LLM request for analysis
-func (app *application) buildLLMRequestHelper(profile interface{}, instructionsTemplate string) (*data.LLMAnalyzedPortfolio, error) {
+// buildLLMRequestHelper builds and sends the LLM request for analysis. ctx
+// flows from the originating handler so a client disconnect aborts the
+// long-running upstream stream and the outbound log line carries the
+// inbound request correlation.
+func (app *application) buildLLMRequestHelper(ctx context.Context, profile interface{}, instructionsTemplate string) (*data.LLMAnalyzedPortfolio, error) {
 	// Marshal the profile data
 	profileData, err := json.Marshal(profile)
 	if err != nil {
-		app.logger.Info("Error marshalling profile data")
+		app.loggerFromContext(ctx).Info("Error marshalling profile data")
 		return nil, err
 	}
 
@@ -175,7 +178,7 @@ func (app *application) buildLLMRequestHelper(profile interface{}, instructionsT
 	url := app.config.api.apikeys.sambanova.url
 	apiKey := app.config.api.apikeys.sambanova.key
 
-	fullResponse, err := app.LLMRequest(url, map[string]string{
+	fullResponse, err := app.LLMRequest(ctx, url, map[string]string{
 		"Authorization": "Bearer " + apiKey,
 	}, finalLLMRequest)
 	if err != nil {

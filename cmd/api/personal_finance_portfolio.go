@@ -30,7 +30,7 @@ func (app *application) getAllFinanceDetailsForAnalysisByUserIDHandler(w http.Re
 		}
 	}
 	// call the LLM analysis
-	llmPersonalFinanceAnalysis, err := app.buildPersonalFinanceLLMRequest(user, unifiedFinanceAnalysis)
+	llmPersonalFinanceAnalysis, err := app.buildPersonalFinanceLLMRequest(r.Context(), user, unifiedFinanceAnalysis)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
@@ -151,6 +151,7 @@ func (app *application) getPersonalFinancePrediction(w http.ResponseWriter, r *h
 	// Send get Post request using our http client
 	// include an "X-API-KEY" using our config
 	response, err := POSTRequest[data.PersonalFinancePredictionResponse](
+		r.Context(),
 		app.http_client,
 		app.config.api.apikeys.optivestmicroservice.url,
 		map[string]string{"X-API-KEY": app.config.api.apikeys.optivestmicroservice.key,
@@ -212,7 +213,7 @@ func (app *application) getOCRDRecieptDataAnalysisHandler(w http.ResponseWriter,
 		return
 	}
 	// process the OCR request
-	ocrResponse, err := app.proces1sOCRRequestHelper(input.URL)
+	ocrResponse, err := app.proces1sOCRRequestHelper(r.Context(), input.URL)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
@@ -224,7 +225,7 @@ func (app *application) getOCRDRecieptDataAnalysisHandler(w http.ResponseWriter,
 		return
 	}
 	// send ocrRespinse to our LLM buildOCRRecieptAnalysisRequest
-	llmOCRRecieptAnalysis, err := app.buildOCRRecieptAnalysisLLMRequest(ocrResponse)
+	llmOCRRecieptAnalysis, err := app.buildOCRRecieptAnalysisLLMRequest(r.Context(), ocrResponse)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return

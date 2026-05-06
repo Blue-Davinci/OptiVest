@@ -340,8 +340,10 @@ func main() {
 	if err != nil {
 		logger.Fatal(err.Error(), zap.String("dsn", cfg.db.dsn))
 	}
-	// create out http client
-	httpClient := NewClient(cfg.http_client.timeout, cfg.http_client.retrymax)
+	// create out http client. The shared logger flows in so every outbound
+	// call participates in the inbound request-correlation pipeline (see
+	// cmd/api/http_clients.go for the schema).
+	httpClient := NewClient(cfg.http_client.timeout, cfg.http_client.retrymax, logger)
 	// log our connection pool
 	logger.Info("database connection pool established", zap.String("dsn", cfg.db.dsn))
 	// Init our exp metrics variables for server metrics.
@@ -398,7 +400,7 @@ func (app *application) startupFunction() error {
 			// log the error and continue to fetch the data from the API
 			app.logger.Error("Failed to get currency from Redis", zap.String("currency", app.config.api.defaultcurrency))
 			// read and load currencies
-			err = app.getAndSaveAvailableCurrencies()
+			err = app.getAndSaveAvailableCurrencies(app.ctx)
 			if err != nil {
 				return err
 			}

@@ -218,11 +218,15 @@ func (app *application) verifyCurrencyInRedis(currency string) error {
 	return nil
 }
 
-// getAndSaveAvailableCurrencies() gets the available currencies from the exchange rate API
-func (app *application) getAndSaveAvailableCurrencies() error {
+// getAndSaveAvailableCurrencies pulls the latest exchange-rate snapshot
+// for the configured default currency and persists it in Redis. Called
+// from a cron, so the caller passes app.ctx (the lifecycle context) to
+// keep startup-time cancellation working: a SIGTERM during startup must
+// still abort the outbound call.
+func (app *application) getAndSaveAvailableCurrencies(ctx context.Context) error {
 	url := fmt.Sprintf("%s/%s/latest/%s", app.config.api.apikeys.exchangerates.url,
 		app.config.api.apikeys.exchangerates.key, app.config.api.defaultcurrency)
-	currencies, err := GETRequest[data.CurrencyRates](app.http_client, url, nil)
+	currencies, err := GETRequest[data.CurrencyRates](ctx, app.http_client, url, nil)
 	if err != nil {
 		return err
 	}
@@ -609,10 +613,10 @@ func (app *application) postCategoryDecider(isEducational bool) string {
 	return "finance"
 }
 
-// processOCRRequestHelper() is a helper function that will process the OCR request
-// We will send a POST request to the OCR.Space API endpoint to get the text from the image
-// We will then return the OCRResponse
-func (app *application) proces1sOCRRequestHelper(url string) (*data.OCRResponse, error) {
+// processOCRRequestHelper sends the receipt-image URL to the OCR.Space API
+// and returns the parsed OCRResponse. ctx flows from the caller so the
+// upstream call is cancelled when the originating HTTP client disconnects.
+func (app *application) proces1sOCRRequestHelper(ctx context.Context, url string) (*data.OCRResponse, error) {
 	// we need a form Body for this, so we create a form body
 	var requestBody bytes.Buffer
 	writer := multipart.NewWriter(&requestBody)
@@ -650,6 +654,7 @@ func (app *application) proces1sOCRRequestHelper(url string) (*data.OCRResponse,
 	//app.logger.Info(requestBody.String())
 	// call our POSTREQUEST http client with OCRResponse
 	response, err := POSTRequest[data.OCRResponse](
+		ctx,
 		app.http_client,
 		app.config.api.apikeys.ocrspace.url,
 		headers,
