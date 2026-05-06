@@ -256,7 +256,7 @@ func (app *application) getAllStockInvestmentByUserIDHandler(w http.ResponseWrit
 	// save the stock in our cache using data.DefaultInvestmentPortfolioSummaryTTL(currently 10mins)
 	err = setToCache(ctx, app.RedisDB, redisKey, &stockData{Stock: stock, Metadata: metadata}, data.DefaultInvestmentPortfolioSummaryTTL)
 	if err != nil {
-		app.logger.Info("Error caching stock data:", zap.Error(err)) // Log but don't stop execution
+		app.loggerFromRequest(r).Info("Error caching stock data:", zap.Error(err)) // Log but don't stop execution
 	}
 	// send response
 	err = app.writeJSON(w, http.StatusOK, envelope{"stock": stock, "metadata": metadata}, nil)
@@ -491,7 +491,7 @@ func (app *application) getAllBondInvestmentByUserIDHandler(w http.ResponseWrite
 	// save the bond in our cache using data.DefaultInvestmentPortfolioSummaryTTL(currently 10mins)
 	err = setToCache(ctx, app.RedisDB, redisKey, &bondData{Bond: bond, Metadata: metadata}, data.DefaultInvestmentPortfolioSummaryTTL)
 	if err != nil {
-		app.logger.Info("Error caching bond data:", zap.Error(err)) // Log but don't stop execution
+		app.loggerFromRequest(r).Info("Error caching bond data:", zap.Error(err)) // Log but don't stop execution
 	}
 	// send response
 	err = app.writeJSON(w, http.StatusOK, envelope{"bond": bond, "metadata": metadata}, nil)
@@ -776,7 +776,7 @@ func (app *application) createNewInvestmentTransactionHandler(w http.ResponseWri
 	// if transaction was successful, let us update the investment
 	err = app.updateInvestmentTransactionHelper(r.Context(), user.ID, input.TransactionType, input.Quantity, resultValue)
 	if err != nil {
-		app.logger.Info("error updating investment", zap.Error(err))
+		app.loggerFromRequest(r).Info("error updating investment", zap.Error(err))
 	}
 	// send response
 	err = app.writeJSON(w, http.StatusCreated, envelope{"investment_transaction": transaction, "updated_investment": resultValue}, nil)
@@ -853,7 +853,7 @@ func (app *application) investmentPrtfolioAnalysisHandler(w http.ResponseWriter,
 		case errors.Is(err, data.ErrGeneralRecordNotFound):
 			// ignore to proceed with other check
 		default:
-			app.logger.Info(("================ Error getting all investments by user ID: %v"), zap.Error(err))
+			app.loggerFromRequest(r).Info(("================ Error getting all investments by user ID: %v"), zap.Error(err))
 			app.serverErrorResponse(w, r, err)
 			return
 		}
@@ -878,7 +878,7 @@ func (app *application) investmentPrtfolioAnalysisHandler(w http.ResponseWriter,
 	analyzedLLMResponse, err := app.buildInvestmentPortfolioLLMRequest(r.Context(), user, goals, investmentAnalysis)
 	if err != nil {
 		//app.serverErrorResponse(w, r, err)
-		app.logger.Info("Error building LLM request:", zap.Error(err))
+		app.loggerFromRequest(r).Info("Error building LLM request:", zap.Error(err))
 	}
 	// output this infor
 	err = app.writeJSON(w, http.StatusOK,
@@ -952,7 +952,7 @@ func (app *application) getAllInvestmentInfoByUserIDHandler(w http.ResponseWrite
 	// set the cache
 	err = setToCache(ctx, app.RedisDB, redisKey, &investmentAnalysis, data.DefaultInvestmentPortfolioSummaryTTL)
 	if err != nil {
-		app.logger.Info("Error caching inestment data:", zap.Error(err)) // Log but don't stop execution
+		app.loggerFromRequest(r).Info("Error caching inestment data:", zap.Error(err)) // Log but don't stop execution
 	}
 
 	// output this infor
@@ -993,7 +993,7 @@ func (app *application) getAllAlternativeInvestmentByUserIDHandler(w http.Respon
 	}
 	// make redis key with data.RedisInvestmentPortfolioAlternativePrefix, user.ID, input.Name, input.Filters.Page and input.Filters.PageSize
 	redisKey := fmt.Sprintf("%s:%d:%s:%d:%d", data.RedisInvestmentPortfolioAlternativePrefix, app.contextGetUser(r).ID, input.Name, input.Filters.Page, input.Filters.PageSize)
-	app.logger.Info("Redis Key:", zap.String("key", redisKey))
+	app.loggerFromRequest(r).Info("Redis Key:", zap.String("key", redisKey))
 	ctx := r.Context()
 	// set the struct we will need which will include the alternative ([]*data.EnrichedAlternativeInvestment) and metadata (*data.Metadata)
 	type alternativeData struct {
@@ -1033,7 +1033,7 @@ func (app *application) getAllAlternativeInvestmentByUserIDHandler(w http.Respon
 	// save the alternative in our cache using data.DefaultInvestmentPortfolioSummaryTTL(currently 10mins)
 	err = setToCache(ctx, app.RedisDB, redisKey, &alternativeData{Alternative: alternative, Metadata: metadata}, data.DefaultInvestmentPortfolioSummaryTTL)
 	if err != nil {
-		app.logger.Info("Error caching alternative data:", zap.Error(err)) // Log but don't stop execution
+		app.loggerFromRequest(r).Info("Error caching alternative data:", zap.Error(err)) // Log but don't stop execution
 	}
 	// send response
 	err = app.writeJSON(w, http.StatusOK, envelope{"alternative": alternative, "metadata": metadata}, nil)

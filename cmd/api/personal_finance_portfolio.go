@@ -99,7 +99,7 @@ func (app *application) getPersonalFinancePrediction(w http.ResponseWriter, r *h
 	// Initialize the personalFinancePrediction variable
 	var personalFinancePrediction []*data.PredictionPersonalFinanceData
 	if input.Timeline == "weekly" {
-		app.logger.Info("Getting personal finance data for weekly")
+		app.loggerFromRequest(r).Info("Getting personal finance data for weekly")
 		personalFinancePrediction, err = app.models.PersonalFinancePortfolio.GetPersonalFinanceDataForWeeklyByUserID(r.Context(), user.ID, input.StartDate)
 		if err != nil {
 			app.serverErrorResponse(w, r, err)
@@ -283,7 +283,7 @@ func (app *application) getExpenseIncomeSummaryReportHandler(w http.ResponseWrit
 	// Cache the result in Redis
 	err = setToCache(ctx, app.RedisDB, redisKey, &expenseIncomeSummaryReport, data.DefaultRedisExpenseIncomeSummaryTTL) // Cache for 24 hours
 	if err != nil {
-		app.logger.Info("Error caching data:", zap.Error(err)) // Log but don't stop execution
+		app.loggerFromRequest(r).Info("Error caching data:", zap.Error(err)) // Log but don't stop execution
 	}
 
 	// Return the response

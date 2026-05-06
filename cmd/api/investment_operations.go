@@ -136,7 +136,7 @@ func (app *application) performAndLogBondCalculations(ctx context.Context, symbo
 	if len(bondReturns) == 0 {
 		return nil, fmt.Errorf("no valid bond returns to calculate")
 	}
-	app.logger.Info("Bond Returns Calculated", zap.Int("num_returns", len(bondReturns)))
+	app.loggerFromContext(ctx).Info("Bond Returns Calculated", zap.Int("num_returns", len(bondReturns)))
 
 	// Calculate Anual Bond Returns
 	annualReturn := calculateAnnualReturn(bond.CouponRate, bond.FaceValue, bond.CurrentPrice)
@@ -184,7 +184,7 @@ func (app *application) getBondInvestmentDataHandler(ctx context.Context, symbol
 		app.config.api.apikeys.fred.key,
 		data.FRED_FILE_TYPE_JSON)
 
-	app.logger.Info("Fetching FRED bond time series", zap.String("symbol", symbol))
+	app.loggerFromContext(ctx).Info("Fetching FRED bond time series", zap.String("symbol", symbol))
 	// check if it was cached
 	cachedResponse, err := getFromCache[data.BondResponse](ctx, app.RedisDB, redisKey)
 	if err != nil {
@@ -197,7 +197,7 @@ func (app *application) getBondInvestmentDataHandler(ctx context.Context, symbol
 	}
 	if cachedResponse != nil {
 		// Data found in cache, perform and log the calculations
-		app.logger.Info("Bond Data found in cache", zap.String("symbol", symbol))
+		app.loggerFromContext(ctx).Info("Bond Data found in cache", zap.String("symbol", symbol))
 		return cachedResponse, nil
 	}
 	// Cache miss: fetch upstream behind a per-symbol singleflight so two
@@ -213,14 +213,14 @@ func (app *application) getBondInvestmentDataHandler(ctx context.Context, symbol
 			return data.BondResponse{}, fmt.Errorf("no time series data found for symbol: %s", symbol)
 		}
 		if cacheErr := setToCache(ctx, app.RedisDB, redisKey, &resp, ttl); cacheErr != nil {
-			app.logger.Error("Failed to cache time series data in Redis", zap.Error(cacheErr))
+			app.loggerFromContext(ctx).Error("Failed to cache time series data in Redis", zap.Error(cacheErr))
 		}
 		return resp, nil
 	})
 	if err != nil {
 		return nil, err
 	}
-	app.logger.Info("Bond File Type", zap.String("filetype", bondTimeSeriesResponse.FileType))
+	app.loggerFromContext(ctx).Info("Bond File Type", zap.String("filetype", bondTimeSeriesResponse.FileType))
 	return &bondTimeSeriesResponse, nil
 }
 
@@ -320,7 +320,7 @@ func (app *application) getStockInvestmentDataHandler(ctx context.Context, symbo
 		// version called performAndLogCalculations twice on this branch and
 		// discarded the first return value, doubling the CPU cost on every
 		// cache hit and producing duplicate "Average Daily Return" log lines.
-		returns, sharpe_ratio, sortino_ratio := app.performAndLogCalculations(cachedResponse, riskFreeRate)
+		returns, sharpe_ratio, sortino_ratio := app.performAndLogCalculations(ctx, cachedResponse, riskFreeRate)
 		newStockAnalysisStatistics := data.StockAnalysisStatistics{
 			Returns:      returns,
 			SharpeRatio:  sharpe_ratio,
@@ -330,9 +330,9 @@ func (app *application) getStockInvestmentDataHandler(ctx context.Context, symbo
 		err = app.fillSentimentDataHelper(ctx, &newStockAnalysisStatistics, symbol)
 		if err != nil {
 			// just print the error
-			app.logger.Error("Error filling sentiment data", zap.String("symbol", symbol))
+			app.loggerFromContext(ctx).Error("Error filling sentiment data", zap.String("symbol", symbol))
 		}
-		app.logger.Info("Current simble, average sentiment and most frequent label: ",
+		app.loggerFromContext(ctx).Info("Current simble, average sentiment and most frequent label: ",
 			zap.String("symbol", symbol),
 			zap.String("average_sentiment", newStockAnalysisStatistics.AverageSentiment.String()),
 			zap.String("most_frequent_label", newStockAnalysisStatistics.MostFrequentLabel))
@@ -353,7 +353,7 @@ func (app *application) getStockInvestmentDataHandler(ctx context.Context, symbo
 		data.ALPHA_VANTAGE_API_KEY,
 		app.config.api.apikeys.alphavantage.key,
 	)
-	app.logger.Info("Time Series URL", zap.String("symbol", symbol))
+	app.loggerFromContext(ctx).Info("Time Series URL", zap.String("symbol", symbol))
 
 	timeSeriesResponse, err := singleflightDoTyped(&app.sf, "av:timeseries:"+symbol, func() (data.TimeSeriesDailyResponse, error) {
 		resp, fetchErr := GETRequest[data.TimeSeriesDailyResponse](app.http_client, timeSeriesURL, nil)
@@ -364,17 +364,17 @@ func (app *application) getStockInvestmentDataHandler(ctx context.Context, symbo
 			return data.TimeSeriesDailyResponse{}, fmt.Errorf("no time series data found for symbol: %s", symbol)
 		}
 		if cacheErr := setToCache(ctx, app.RedisDB, redisKey, &resp, ttl); cacheErr != nil {
-			app.logger.Error("Failed to cache time series data in Redis", zap.Error(cacheErr))
+			app.loggerFromContext(ctx).Error("Failed to cache time series data in Redis", zap.Error(cacheErr))
 		}
 		return resp, nil
 	})
 	if err != nil {
 		return nil, err
 	}
-	app.logger.Info("Current risk free rate: ", zap.String("risk_free_rate", riskFreeRate.String()))
+	app.loggerFromContext(ctx).Info("Current risk free rate: ", zap.String("risk_free_rate", riskFreeRate.String()))
 
 	// Perform and log the calculations
-	returns, sharpe_ratio, sortino_ratio := app.performAndLogCalculations(&timeSeriesResponse, riskFreeRate)
+	returns, sharpe_ratio, sortino_ratio := app.performAndLogCalculations(ctx, &timeSeriesResponse, riskFreeRate)
 	newStockAnalysisStatistics := data.StockAnalysisStatistics{
 		Returns:      returns,
 		SharpeRatio:  sharpe_ratio,
@@ -383,7 +383,7 @@ func (app *application) getStockInvestmentDataHandler(ctx context.Context, symbo
 	err = app.fillSentimentDataHelper(ctx, &newStockAnalysisStatistics, symbol)
 	if err != nil {
 		// just print the error
-		app.logger.Error("Error filling sentiment data", zap.Error(err))
+		app.loggerFromContext(ctx).Error("Error filling sentiment data", zap.Error(err))
 	}
 
 	return &newStockAnalysisStatistics, nil
@@ -422,13 +422,16 @@ func (app *application) fillSentimentDataHelper(ctx context.Context, stockAnalys
 	return nil
 }
 
-// Perform and log calculations like returns, Sharpe ratio, and Sortino ratio
-func (app *application) performAndLogCalculations(timeSeriesResponse *data.TimeSeriesDailyResponse, riskFreeRate decimal.Decimal) (
+// Perform and log calculations like returns, Sharpe ratio, and Sortino ratio.
+// ctx is accepted purely so the "Average Daily Return" log line emitted deep
+// inside getAverageDailyReturn can carry req_id/conn_id/user_id when this
+// function runs under an HTTP request. The actual numerical work is pure.
+func (app *application) performAndLogCalculations(ctx context.Context, timeSeriesResponse *data.TimeSeriesDailyResponse, riskFreeRate decimal.Decimal) (
 	[]decimal.Decimal, // returns []
 	decimal.Decimal, // sharpe ratio
 	decimal.Decimal, // sortino ratio
 ) {
-	returns := app.getAverageDailyReturn(timeSeriesResponse, time.Now().Year()-4)
+	returns := app.getAverageDailyReturn(ctx, timeSeriesResponse, time.Now().Year()-4)
 	sharpeRatio := sharpeRatio(returns, riskFreeRate)
 	sortinoRatio := sortinoRatio(returns, riskFreeRate)
 	return returns, sharpeRatio, sortinoRatio
@@ -436,10 +439,10 @@ func (app *application) performAndLogCalculations(timeSeriesResponse *data.TimeS
 
 // getAverageDailyReturn is a helper function that calculates the average daily return for a given stock symbol
 // We recieve a filtered map of TimeSeriesData and calculate the average daily return
-func (app *application) getAverageDailyReturn(timeseriesData *data.TimeSeriesDailyResponse, lastYear int) []decimal.Decimal {
+func (app *application) getAverageDailyReturn(ctx context.Context, timeseriesData *data.TimeSeriesDailyResponse, lastYear int) []decimal.Decimal {
 	filteredData := filterTimeSeriesBetweenYears(timeseriesData, lastYear)
 	dailyReturns := calculateDailyReturns(filteredData)
-	app.logger.Info("Average Daily Return", zap.String("average_daily_return", calculateAverage(dailyReturns).String()))
+	app.loggerFromContext(ctx).Info("Average Daily Return", zap.String("average_daily_return", calculateAverage(dailyReturns).String()))
 	return dailyReturns
 }
 
@@ -614,7 +617,7 @@ func (app *application) getSentimentAnalysis(ctx context.Context, symbol string)
 		data.ALPHA_VANTAGE_API_KEY,
 		app.config.api.apikeys.alphavantage.key,
 	)
-	app.logger.Info("Fetching Alpha Vantage sentiment", zap.String("symbol", symbol))
+	app.loggerFromContext(ctx).Info("Fetching Alpha Vantage sentiment", zap.String("symbol", symbol))
 
 	// check if it was cached
 	cachedResponse, err := getFromCache[data.SentimentData](ctx, app.RedisDB, redisKey)
@@ -623,12 +626,12 @@ func (app *application) getSentimentAnalysis(ctx context.Context, symbol string)
 		case errors.Is(err, ErrNoDataFoundInRedis):
 			//return nil, ErrNoDataFoundInRedis
 		default:
-			app.logger.Error("Error retrieving data from Redis", zap.Error(err))
+			app.loggerFromContext(ctx).Error("Error retrieving data from Redis", zap.Error(err))
 		}
 	}
 	if cachedResponse != nil {
 		// Data found in cache, perform and log the calculations
-		app.logger.Info("Sentiment Data found in cache", zap.String("symbol", symbol))
+		app.loggerFromContext(ctx).Info("Sentiment Data found in cache", zap.String("symbol", symbol))
 		return cachedResponse, nil
 	}
 
@@ -645,7 +648,7 @@ func (app *application) getSentimentAnalysis(ctx context.Context, symbol string)
 	// Cache the data using the updated setToCache method
 	err = setToCache(ctx, app.RedisDB, redisKey, &sentimentResponse, ttl)
 	if err != nil {
-		app.logger.Error("Failed to cache sentiment data in Redis", zap.Error(err))
+		app.loggerFromContext(ctx).Error("Failed to cache sentiment data in Redis", zap.Error(err))
 	}
 
 	// print out the filetype
@@ -673,7 +676,7 @@ func (app *application) getRiskMetrics(ctx context.Context, timeHorizon string) 
 		data.ALPHA_VANTAGE_API_KEY,
 		app.config.api.apikeys.alphavantage.key,
 	)
-	app.logger.Info("Fetching Alpha Vantage treasury yield", zap.String("time_horizon", timeHorizon))
+	app.loggerFromContext(ctx).Info("Fetching Alpha Vantage treasury yield", zap.String("time_horizon", timeHorizon))
 	// check if cached
 	cachedResponse, err := getFromCache[data.TreasuryYieldData](ctx, app.RedisDB, redisKey)
 	if err != nil {
@@ -681,14 +684,14 @@ func (app *application) getRiskMetrics(ctx context.Context, timeHorizon string) 
 		case errors.Is(err, ErrNoDataFoundInRedis):
 			//return nil, ErrNoDataFoundInRedis
 		default:
-			app.logger.Error("Error retrieving data from Redis", zap.Error(err))
+			app.loggerFromContext(ctx).Error("Error retrieving data from Redis", zap.Error(err))
 			return decimal.NewFromInt(0), err
 		}
 	}
 	if cachedResponse != nil {
 		// Data found in cache, perform and log the calculations
-		app.logger.Info("Treasury Yield Data found in cache")
-		riskFactor := app.getRiskFactor(cachedResponse, timeHorizon)
+		app.loggerFromContext(ctx).Info("Treasury Yield Data found in cache")
+		riskFactor := app.getRiskFactor(ctx, cachedResponse, timeHorizon)
 		return riskFactor, nil
 	}
 	// if no cache was found, get the data
@@ -703,10 +706,10 @@ func (app *application) getRiskMetrics(ctx context.Context, timeHorizon string) 
 	// Cache the data using the updated setToCache method
 	err = setToCache(ctx, app.RedisDB, redisKey, &treasuryYieldResponse, ttl)
 	if err != nil {
-		app.logger.Error("Failed to cache treasury yield data in Redis", zap.Error(err))
+		app.loggerFromContext(ctx).Error("Failed to cache treasury yield data in Redis", zap.Error(err))
 	}
 	// calculate the latest yield
-	riskFactor := app.getRiskFactor(&treasuryYieldResponse, timeHorizon)
+	riskFactor := app.getRiskFactor(ctx, &treasuryYieldResponse, timeHorizon)
 	if err != nil {
 		return decimal.NewFromInt(0), err
 	}
@@ -716,20 +719,22 @@ func (app *application) getRiskMetrics(ctx context.Context, timeHorizon string) 
 	return riskFactor, nil
 }
 
-func (app *application) getRiskFactor(data *data.TreasuryYieldData, timeHorizone string) decimal.Decimal {
+// getRiskFactor accepts ctx so its error log lines can correlate with the
+// originating HTTP request. The treasury-yield computation itself is pure.
+func (app *application) getRiskFactor(ctx context.Context, data *data.TreasuryYieldData, timeHorizone string) decimal.Decimal {
 	// check time horizon
 	// if time horizon includes "short" then get latest yield otherwise get average yield
 	if strings.Contains(timeHorizone, "short") {
 		latestRisk, err := data.GetLatestYield()
 		if err != nil {
-			app.logger.Error("Failed to get latest risk rate", zap.Error(err))
+			app.loggerFromContext(ctx).Error("Failed to get latest risk rate", zap.Error(err))
 			return decimal.NewFromInt(0)
 		}
 		return latestRisk
 	}
 	averageRisk, err := data.CalculateAverageYield(180)
 	if err != nil {
-		app.logger.Error("Failed to calculate average risk rate", zap.Error(err))
+		app.loggerFromContext(ctx).Error("Failed to calculate average risk rate", zap.Error(err))
 		return decimal.NewFromInt(0)
 	}
 	return averageRisk
@@ -750,7 +755,7 @@ func (app *application) getSectorPerformance(ctx context.Context, sector string)
 		data.FMP_API_KEY,
 		app.config.api.apikeys.fmp.key,
 	)
-	app.logger.Info("Fetching FMP sector performance", zap.String("sector", sector))
+	app.loggerFromContext(ctx).Info("Fetching FMP sector performance", zap.String("sector", sector))
 	// check if cached
 	cachedResponse, err := getFromCache[data.SectorAnalysisData](ctx, app.RedisDB, redisKey)
 	if err != nil {
@@ -758,13 +763,13 @@ func (app *application) getSectorPerformance(ctx context.Context, sector string)
 		case errors.Is(err, ErrNoDataFoundInRedis):
 			//return nil, ErrNoDataFoundInRedis
 		default:
-			app.logger.Error("Error retrieving data from Redis", zap.Error(err))
+			app.loggerFromContext(ctx).Error("Error retrieving data from Redis", zap.Error(err))
 			return decimal.NewFromInt(0), err
 		}
 	}
 	if cachedResponse != nil {
 		// Data found in cache, perform and log the calculations
-		app.logger.Info("Sector Performance Data found in cache")
+		app.loggerFromContext(ctx).Info("Sector Performance Data found in cache")
 		sectorScore, err := cachedResponse.GetSectorChange(sector)
 		if err != nil {
 			return decimal.NewFromInt(0), err
@@ -787,7 +792,7 @@ func (app *application) getSectorPerformance(ctx context.Context, sector string)
 			return nil, fmt.Errorf("no sector performance data found")
 		}
 		if cacheErr := setToCache(ctx, app.RedisDB, redisKey, &resp, ttl); cacheErr != nil {
-			app.logger.Error("Failed to cache sector performance data in Redis", zap.Error(cacheErr))
+			app.loggerFromContext(ctx).Error("Failed to cache sector performance data in Redis", zap.Error(cacheErr))
 		}
 		return resp, nil
 	})
@@ -799,7 +804,7 @@ func (app *application) getSectorPerformance(ctx context.Context, sector string)
 	if err != nil {
 		return decimal.NewFromInt(0), err
 	}
-	app.logger.Info("Sector Obtained and Sector Performance", zap.String("Sector recieved", sector), zap.String("Sector Value", sectorScore.String()))
+	app.loggerFromContext(ctx).Info("Sector Obtained and Sector Performance", zap.String("Sector recieved", sector), zap.String("Sector Value", sectorScore.String()))
 	// return sectorPerformanceResponse.GetSectorChange()
 	return sectorScore, nil
 }

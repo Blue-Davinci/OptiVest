@@ -202,7 +202,18 @@ func (app *application) logRequests(next http.Handler) http.Handler {
 // struct: handlers may call this after authenticate has populated the
 // holder, so the user_id should be read fresh on every call.
 func (app *application) loggerFromRequest(r *http.Request) *zap.Logger {
-	ctx := r.Context()
+	return app.loggerFromContext(r.Context())
+}
+
+// loggerFromContext is the context-only sibling of loggerFromRequest.
+// Background helpers (e.g. anything in investment_operations.go that
+// receives a ctx but no *http.Request) call this so their log lines still
+// carry req_id/conn_id/user_id when the ctx originated from an HTTP
+// request. If the ctx never flowed through the request middleware (e.g.
+// a cron job or a test using context.Background), the missing fields
+// resolve to their zero values and the line is still emitted, just
+// without correlation - same behaviour as app.logger directly.
+func (app *application) loggerFromContext(ctx context.Context) *zap.Logger {
 	var userID int64
 	if holder := contextRequestLog(ctx); holder != nil {
 		userID = holder.userID
