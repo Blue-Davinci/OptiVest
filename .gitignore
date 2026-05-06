@@ -1,1 +1,6 @@
+# Local environment files. .env*.example is whitelisted so the committed
+# templates stay tracked; everything else (.env, .env.local, .env.production,
+# cmd/api/.env, etc.) is ignored to keep real secrets out of git.
 *.env
+!.env.example
+!.env*.example
