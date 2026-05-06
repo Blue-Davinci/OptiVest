@@ -370,6 +370,51 @@ the available commands for a quick lookup (INCOMPLETE, use help for full list).
 > `Error` (page on this), `ctx` cancel/deadline is `Info` (expected
 > client behaviour, not an upstream fault), everything else is `Info`.
 
+> **Prometheus `/metrics` endpoint:** Every operational signal we already
+> publish to `/debug/vars` is also exposed in [Prometheus text exposition
+> format](https://prometheus.io/docs/instrumenting/exposition_formats/) at
+> `GET /metrics`. The handler walks the existing `expvar` registry on each
+> scrape and emits a curated, allow-listed subset — runtime noise such as
+> `cmdline` and `memstats` is deliberately suppressed because neither
+> flattens cleanly into the Prom data model and Prom servers ship their own
+> Go runtime exporters.
+>
+> Currently exposed metrics (counters unless noted):
+> - `request_log_total`, `request_log_4xx_total`, `request_log_5xx_total`
+> - `request_id_generated_total`, `request_id_rejected_total`
+> - `rate_limiter_allowed_total`, `rate_limiter_denied_total`,
+>   `rate_limiter_redis_errors_total`, `rate_limiter_fail_open_total`,
+>   `rate_limiter_disabled_total`
+> - `portfolio_analysis_runs_total`, `portfolio_analysis_errors_total`,
+>   `portfolio_singleflight_collapsed_total`
+> - `portfolio_analysis_duration_ms` (gauge)
+> - `portfolio_analysis_workers_active`,
+>   `portfolio_analysis_workers_max_observed` (gauges)
+> - `total_requests_received`, `total_responses_sent`,
+>   `total_processing_time_us` (the underlying expvar uses the non-ASCII
+>   `μs` suffix, which Prom's metric-name regex rejects; the exposition
+>   renames it to `_us` while leaving `/debug/vars` untouched)
+> - `total_responses_sent_by_status` with a `code="<status>"` label per
+>   bucket
+> - `goroutines`, `timestamp` (gauges)
+> - `optivest_build_info{version="..."} 1` — canonical Prom info-pattern
+>   for build identity
+>
+> The `/metrics` and `/debug/vars` endpoints are mounted on the **base
+> router**, deliberately outside the global middleware chain that wraps
+> `/v1`. Scrape traffic therefore does not flow through `logRequests` (no
+> log-line-per-scrape noise), is not counted by the `metrics` middleware
+> (no circular self-incrementing of the very counters being read), and is
+> not subject to the per-IP rate limiter (a fast or misconfigured scraper
+> cannot lock itself out of the diagnosis endpoint). Both endpoints are
+> unauthenticated; the deployment is expected to scope reachability to the
+> internal scrape network — see `SECURITY.md` for the operator-side
+> assumptions.
+>
+> Adding a new metric to the `/metrics` surface is one line in
+> `cmd/api/metrics.go` (the `knownMetrics` allow-list); the friction is
+> intentional, since this is an operator-facing surface, not a debug dump.
+
 Using `make run`, will run the API with a default connection string located 
 in `cmd\api\.env`. If you're using `powershell`, you need to load the values otherwise you will get
 a `cannot load env file` error. Use the PS code below to load it or change the env variable:
@@ -410,7 +455,12 @@ A full ist is documented using swagger, but here is a quick runwdown:
 
 4. **POST /v1/api/authentication:** Creates an authentication token.
 
-5. **GET /debug/vars:** Provides debug variables from the `expvar` package. 
+5. **GET /debug/vars:** Provides debug variables from the `expvar` package
+   in JSON form (raw counters and gauges, useful for ad-hoc inspection).
+
+6. **GET /metrics:** Same operational signals as `/debug/vars` but in
+   Prometheus text exposition format, ready for a scrape config. See the
+   structured-logging section above for the curated metric list.
 
 (will be added)
 

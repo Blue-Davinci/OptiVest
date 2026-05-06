@@ -137,6 +137,21 @@ var (
 	rateLimitConfigured = expvar.NewString("rate_limiter_configured")
 )
 
+// Global request-lifecycle metrics maintained by the metrics middleware.
+// Hoisted to package scope so they are registered exactly once at package
+// init time. Previously they were declared inside the middleware
+// constructor, which made app.metrics non-idempotent: every call
+// re-registered the same names and expvar panics on duplicate registration.
+// In production that constructor only runs once, but any test that builds
+// the router more than once tripped the panic. Package-level vars match
+// the pattern used everywhere else in cmd/api.
+var (
+	totalRequestsReceived           = expvar.NewInt("total_requests_received")
+	totalResponsesSent              = expvar.NewInt("total_responses_sent")
+	totalProcessingTimeMicroseconds = expvar.NewInt("total_processing_time_μs")
+	totalResponsesSentByStatus      = expvar.NewMap("total_responses_sent_by_status")
+)
+
 // rateLimit returns a middleware that enforces a per-IP request rate using a
 // Redis-backed GCRA bucket (github.com/go-redis/redis_rate/v10). Replaces the
 // previous in-memory token-bucket implementation, which under-counted by a
@@ -249,24 +264,11 @@ func (app *application) rateLimit(next http.Handler) http.Handler {
 	})
 }
 func (app *application) metrics(next http.Handler) http.Handler {
-	// Initialize the new expvar variables when the middleware chain is first built.
-	totalRequestsReceived := expvar.NewInt("total_requests_received")
-	totalResponsesSent := expvar.NewInt("total_responses_sent")
-	totalProcessingTimeMicroseconds := expvar.NewInt("total_processing_time_μs")
-	totalResponsesSentByStatus := expvar.NewMap("total_responses_sent_by_status")
-
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Increment the number of requests received by 1.
 		totalRequestsReceived.Add(1)
-
-		// Use httpsnoop to capture metrics while passing along the original response writer.
-		metrics := httpsnoop.CaptureMetrics(next, w, r)
-
-		// Increment the total responses sent.
+		captured := httpsnoop.CaptureMetrics(next, w, r)
 		totalResponsesSent.Add(1)
-		// Increment the processing time.
-		totalProcessingTimeMicroseconds.Add(metrics.Duration.Microseconds())
-		// Increment the count for the response status code.
-		totalResponsesSentByStatus.Add(strconv.Itoa(metrics.Code), 1)
+		totalProcessingTimeMicroseconds.Add(captured.Duration.Microseconds())
+		totalResponsesSentByStatus.Add(strconv.Itoa(captured.Code), 1)
 	})
 }
