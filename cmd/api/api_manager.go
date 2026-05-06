@@ -41,7 +41,7 @@ func (app *application) convertAndGetExchangeRate(ctx context.Context, source_cu
 	url := fmt.Sprintf("%s/%s/pair/%s/%s", app.config.api.apikeys.exchangerates.url,
 		app.config.api.apikeys.exchangerates.key, source_currency, target_currency)
 
-	exchange, err := GETRequest[data.ExchangeRateResponse](app.http_client, url, nil)
+	exchange, err := GETRequest[data.ExchangeRateResponse](ctx, app.http_client, url, nil)
 	if err != nil {
 		return nil, err
 	}

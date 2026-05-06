@@ -27,8 +27,12 @@ func (app *application) rssFeedScraper(feed *data.Feed) {
 			app.logger.Info("An error occurred while marking feed as fetched", zap.String("Feed Name", feed.Name), zap.Int64("Feed ID", feed.ID))
 			return
 		}
-		// call our GetRSSFeeds to return all feeds for each specific URL
+		// call our GetRSSFeeds to return all feeds for each specific URL.
+		// app.ctx is the lifecycle context so a SIGTERM aborts in-flight
+		// scrapes promptly; the inner function further bounds the call
+		// with a 30s response timeout.
 		rssFeeds, err := app.scraperGetRSSFeeds(
+			app.ctx,
 			app.config.scraper.scraperclient.retrymax,
 			app.config.scraper.scraperclient.timeout,
 			feed.URL, app.config.sanitization.sanitizer)

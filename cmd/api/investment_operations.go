@@ -205,7 +205,7 @@ func (app *application) getBondInvestmentDataHandler(ctx context.Context, symbol
 	// bond series) collapse to one FRED call. The leader populates Redis
 	// inside the closure for downstream cache reads.
 	bondTimeSeriesResponse, err := singleflightDoTyped(&app.sf, "fred:bond:"+symbol, func() (data.BondResponse, error) {
-		resp, fetchErr := GETRequest[data.BondResponse](app.http_client, timeSeriesUrl, nil)
+		resp, fetchErr := GETRequest[data.BondResponse](ctx, app.http_client, timeSeriesUrl, nil)
 		if fetchErr != nil {
 			return data.BondResponse{}, fetchErr
 		}
@@ -356,7 +356,7 @@ func (app *application) getStockInvestmentDataHandler(ctx context.Context, symbo
 	app.loggerFromContext(ctx).Info("Time Series URL", zap.String("symbol", symbol))
 
 	timeSeriesResponse, err := singleflightDoTyped(&app.sf, "av:timeseries:"+symbol, func() (data.TimeSeriesDailyResponse, error) {
-		resp, fetchErr := GETRequest[data.TimeSeriesDailyResponse](app.http_client, timeSeriesURL, nil)
+		resp, fetchErr := GETRequest[data.TimeSeriesDailyResponse](ctx, app.http_client, timeSeriesURL, nil)
 		if fetchErr != nil {
 			return data.TimeSeriesDailyResponse{}, fetchErr
 		}
@@ -636,7 +636,7 @@ func (app *application) getSentimentAnalysis(ctx context.Context, symbol string)
 	}
 
 	// if no cache was found, get the data
-	sentimentResponse, err := GETRequest[data.SentimentData](app.http_client, sentimentURL, nil)
+	sentimentResponse, err := GETRequest[data.SentimentData](ctx, app.http_client, sentimentURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -695,7 +695,7 @@ func (app *application) getRiskMetrics(ctx context.Context, timeHorizon string) 
 		return riskFactor, nil
 	}
 	// if no cache was found, get the data
-	treasuryYieldResponse, err := GETRequest[data.TreasuryYieldData](app.http_client, treasuryYieldURL, nil)
+	treasuryYieldResponse, err := GETRequest[data.TreasuryYieldData](ctx, app.http_client, treasuryYieldURL, nil)
 	if err != nil {
 		return decimal.NewFromInt(0), err
 	}
@@ -784,7 +784,7 @@ func (app *application) getSectorPerformance(ctx context.Context, sector string)
 	// to Redis from inside the leader closure so the next miss elsewhere
 	// reads from cache instead of re-firing the upstream call.
 	sectorPerformanceResponse, err := singleflightDoTyped(&app.sf, "fmp:sector-performance", func() (data.SectorAnalysisData, error) {
-		resp, fetchErr := GETRequest[data.SectorAnalysisData](app.http_client, sectorPerformanceURL, nil)
+		resp, fetchErr := GETRequest[data.SectorAnalysisData](ctx, app.http_client, sectorPerformanceURL, nil)
 		if fetchErr != nil {
 			return nil, fetchErr
 		}

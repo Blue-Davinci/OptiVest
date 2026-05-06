@@ -352,6 +352,23 @@ the available commands for a quick lookup (INCOMPLETE, use help for full list).
 > - `request_id_rejected_total` - inbound IDs replaced for failing the
 >   sanitization policy (sustained non-zero suggests a misbehaving caller
 >   or active log-injection attempt)
+>
+> Outbound calls (Alpha Vantage, FRED, FMP, OCR.Space, the predictor
+> micro-service, SambaNova, RSS scraping) are wrapped through
+> `cmd/api/http_clients.go`. Each call:
+> - is bound to the caller's `context.Context`, so a client disconnect
+>   or timeout cancels the upstream request promptly;
+> - forwards the inbound `X-Request-ID` on the outbound when it is set
+>   on the ctx (and never clobbers a header the caller already chose);
+> - emits one structured `http outbound` log line per call carrying
+>   `method`, `host`, `path`, `status`, `bytes`, `latency_ms`, `req_id`,
+>   `conn_id`, `user_id`. The full URL is deliberately NOT logged because
+>   several upstream providers carry their API key in the query string;
+>   see `SECURITY.md` for the rotation runbook if a leak occurs.
+>
+> Log levels mirror the inbound logger: `5xx` and transport errors are
+> `Error` (page on this), `ctx` cancel/deadline is `Info` (expected
+> client behaviour, not an upstream fault), everything else is `Info`.
 
 Using `make run`, will run the API with a default connection string located 
 in `cmd\api\.env`. If you're using `powershell`, you need to load the values otherwise you will get
