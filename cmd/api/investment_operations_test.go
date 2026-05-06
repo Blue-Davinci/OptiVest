@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -64,8 +65,8 @@ func TestPerformAndLogCalculations_Deterministic(t *testing.T) {
 	ts := fakeTimeSeries(t)
 	rf := decimal.NewFromFloat(0.02)
 
-	r1, sh1, so1 := app.performAndLogCalculations(ts, rf)
-	r2, sh2, so2 := app.performAndLogCalculations(ts, rf)
+	r1, sh1, so1 := app.performAndLogCalculations(context.Background(), ts, rf)
+	r2, sh2, so2 := app.performAndLogCalculations(context.Background(), ts, rf)
 
 	if !sh1.Equal(sh2) {
 		t.Errorf("sharpe ratio non-deterministic: first=%s second=%s", sh1, sh2)
@@ -93,7 +94,7 @@ func TestPerformAndLogCalculations_SingleAverageReturnLogPerCall(t *testing.T) {
 	ts := fakeTimeSeries(t)
 	rf := decimal.NewFromFloat(0.02)
 
-	app.performAndLogCalculations(ts, rf)
+	app.performAndLogCalculations(context.Background(), ts, rf)
 
 	got := logs.FilterMessage("Average Daily Return").Len()
 	if got != 1 {

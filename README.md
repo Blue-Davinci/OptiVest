@@ -337,7 +337,12 @@ the available commands for a quick lookup (INCOMPLETE, use help for full list).
 > Handlers that want their own log lines to participate in the same
 > correlation should call `app.loggerFromRequest(r)` instead of using
 > `app.logger` directly: the returned logger is pre-enriched with
-> `req_id`, `conn_id`, and `user_id`.
+> `req_id`, `conn_id`, and `user_id`. Background helpers that receive a
+> `context.Context` but no `*http.Request` (the financial helpers under
+> `investment_operations.go` are the canonical example) call
+> `app.loggerFromContext(ctx)` for the same enrichment - the ctx must
+> have flowed from the originating request, otherwise the correlation
+> fields fall back to their zero values.
 >
 > Operational metrics on `/debug/vars`:
 > - `request_log_total` - total requests observed
