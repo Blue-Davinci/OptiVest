@@ -704,20 +704,18 @@ func (app *application) getRiskMetrics(ctx context.Context, timeHorizon string) 
 	if len(treasuryYieldResponse.Data) == 0 {
 		return decimal.NewFromInt(0), fmt.Errorf("no treasury yield data found")
 	}
-	// Cache the data using the updated setToCache method
-	err = setToCache(ctx, app.RedisDB, redisKey, &treasuryYieldResponse, ttl)
-	if err != nil {
+	// Cache the data using the updated setToCache method. A cache-write
+	// failure is not fatal — we have a valid upstream response and the
+	// next request will simply pay another upstream RTT. Returning the
+	// stale err from setToCache below would have aborted a perfectly
+	// valid risk-factor computation, which silently inflated returns
+	// because the caller substitutes zero on error.
+	if err := setToCache(ctx, app.RedisDB, redisKey, &treasuryYieldResponse, ttl); err != nil {
 		app.loggerFromContext(ctx).Error("Failed to cache treasury yield data in Redis", zap.Error(err))
 	}
-	// calculate the latest yield
-	riskFactor := app.getRiskFactor(ctx, &treasuryYieldResponse, timeHorizon)
-	if err != nil {
-		return decimal.NewFromInt(0), err
-	}
-	// print out the name
-	//app.logger.Info("Treasury Yield Name", zap.String("name", treasuryYieldResponse.Name))
-	//app.getRiskFactor(&treasuryYieldResponse, timeHorizon)
-	return riskFactor, nil
+	// calculate the latest yield. getRiskFactor is pure (no error return)
+	// so we forward its result straight through.
+	return app.getRiskFactor(ctx, &treasuryYieldResponse, timeHorizon), nil
 }
 
 // getRiskFactor accepts ctx so its error log lines can correlate with the

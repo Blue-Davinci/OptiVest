@@ -51,8 +51,16 @@ func (app *application) convertAndGetExchangeRate(ctx context.Context, source_cu
 		zap.String("to", target_currency),
 		zap.String("rate", exchange.ConversionRate.String()),
 	)
+	// Cache-write failure is not fatal - we already have a valid upstream
+	// response. Aborting the request here turned every Redis blip into a
+	// user-visible 5xx on the FX path, which then cascaded into broken
+	// portfolio analyses for any non-USD-denominated holdings.
 	if err := app.RedisDB.Set(ctx, redisKey, exchange.ConversionRate.String(), data.APIExchangeCacheTTL).Err(); err != nil {
-		return nil, err
+		app.logger.Error("Failed to cache exchange rate in Redis",
+			zap.String("from", source_currency),
+			zap.String("to", target_currency),
+			zap.Error(err),
+		)
 	}
 
 	return &exchange, nil

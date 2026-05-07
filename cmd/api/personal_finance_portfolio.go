@@ -29,6 +29,13 @@ func (app *application) getAllFinanceDetailsForAnalysisByUserIDHandler(w http.Re
 		default:
 			app.serverErrorResponse(w, r, err)
 		}
+		// Without this return, control fell through into a SambaNova
+		// LLM call with a nil payload — burning tokens for nothing —
+		// and the subsequent writeJSON tried to write a 200 body after
+		// notFoundResponse / serverErrorResponse had already written
+		// the status, producing the "superfluous response.WriteHeader"
+		// warning in logs.
+		return
 	}
 	// call the LLM analysis
 	llmPersonalFinanceAnalysis, err := app.buildPersonalFinanceLLMRequest(r.Context(), user, unifiedFinanceAnalysis)
