@@ -19,7 +19,7 @@
 # =============================================================================
 
 # ---------- Stage 1: install goose ----------
-FROM golang:1.25-alpine AS builder
+FROM golang:1.26-alpine AS builder
 
 # Pin the goose version explicitly. Bumping it is a one-line change and a
 # new image tag, so operators can roll forward without surprise. Keep this
