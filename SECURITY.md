@@ -97,16 +97,34 @@ boot for sanity-checking config rollouts; it is published on
 
 ### Operational endpoint exposure
 
-`/metrics` and `/debug/vars` are mounted on the base router and bypass
-the global middleware chain on purpose: they are not authenticated, not
-rate-limited, and not counted by the request-log middleware. The
-deployment is responsible for **scoping reachability to the internal
-scrape network** (cluster-local Prometheus, an IP allow-list at the load
-balancer, or an mTLS sidecar). `/debug/vars` exposes runtime memstats
-and goroutine counts that are not strictly secret but should not be
-publicly browsable; `/metrics` carries the curated subset documented in
-`README.md`. If a deployment must expose these endpoints publicly, gate
-them at the ingress rather than weakening the bypass semantics here.
+`/metrics`, `/debug/vars`, `/healthcheck`, and `/readyz` are all mounted
+on the base router and bypass the global middleware chain on purpose:
+they are not authenticated, not rate-limited, and not counted by the
+request-log middleware. The deployment is responsible for **scoping
+reachability to the internal scrape / probe network** (cluster-local
+Prometheus and the kubelet, an IP allow-list at the load balancer, or
+an mTLS sidecar).
+
+What each endpoint discloses, by design:
+
+- `/healthcheck` — version, env name, process uptime in seconds. Wired
+  to the container `livenessProbe`; failure causes a restart.
+- `/readyz` — version, env, uptime, plus a `checks` map naming the
+  required dependencies (`postgres`, `redis`) and reporting each as
+  `ok` or `down`. The body deliberately does **not** include driver
+  error strings, which can leak hostnames, ports, and version banners;
+  operators read the structured logs for the "why". Wired to the load
+  balancer / `readinessProbe`; failure pulls the instance from rotation
+  without restart.
+- `/debug/vars` — raw runtime memstats and goroutine counts. Not
+  strictly secret but should not be publicly browsable.
+- `/metrics` — the curated subset documented in `README.md`.
+
+If a deployment must expose these endpoints publicly, gate them at the
+ingress rather than weakening the bypass semantics here. In particular,
+do NOT add authentication to `/healthcheck` or `/readyz`: orchestrators
+do not carry tokens on probe requests, and an authenticated probe
+endpoint will report the instance as failing for the wrong reason.
 
 ### Latency budget
 

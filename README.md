@@ -210,6 +210,7 @@ available from the host:
 
 ```bash
 curl http://localhost:4000/healthcheck     # JSON liveness payload
+curl http://localhost:4000/readyz          # JSON readiness payload (postgres + redis)
 curl http://localhost:4000/metrics         # Prometheus exposition
 curl http://localhost:4000/debug/vars      # raw JSON expvars
 psql "$OPTIVEST_DB_DSN"                    # interactive DB shell
@@ -468,16 +469,18 @@ the available commands for a quick lookup (INCOMPLETE, use help for full list).
 > - `optivest_build_info{version="..."} 1` — canonical Prom info-pattern
 >   for build identity
 >
-> The `/metrics` and `/debug/vars` endpoints are mounted on the **base
-> router**, deliberately outside the global middleware chain that wraps
-> `/v1`. Scrape traffic therefore does not flow through `logRequests` (no
-> log-line-per-scrape noise), is not counted by the `metrics` middleware
-> (no circular self-incrementing of the very counters being read), and is
-> not subject to the per-IP rate limiter (a fast or misconfigured scraper
-> cannot lock itself out of the diagnosis endpoint). Both endpoints are
-> unauthenticated; the deployment is expected to scope reachability to the
-> internal scrape network — see `SECURITY.md` for the operator-side
-> assumptions.
+> The `/metrics`, `/debug/vars`, `/healthcheck`, and `/readyz` endpoints
+> are all mounted on the **base router**, deliberately outside the global
+> middleware chain that wraps `/v1`. Probe and scrape traffic therefore
+> does not flow through `logRequests` (no log-line-per-scrape noise), is
+> not counted by the `metrics` middleware (no circular self-incrementing
+> of the very counters being read), and is not subject to the per-IP
+> rate limiter (a fast or misconfigured scraper cannot lock itself out
+> of the diagnosis endpoint, and a load balancer probing `/readyz` more
+> aggressively during a degradation cannot be told the instance is
+> unready by the limiter). All four endpoints are unauthenticated; the
+> deployment is expected to scope reachability to the internal scrape /
+> probe network — see `SECURITY.md` for the operator-side assumptions.
 >
 > Adding a new metric to the `/metrics` surface is one line in
 > `cmd/api/metrics.go` (the `knownMetrics` allow-list); the friction is
@@ -523,7 +526,8 @@ Auth tokens are obtained via `POST /v1/api/authentication` and sent as `Authoriz
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/healthcheck` | Liveness probe; returns `{status, version, env, uptime_sec}` |
+| GET | `/healthcheck` | Liveness probe; returns `{status, version, env, uptime_sec}`. Always 200 unless the process itself is unable to answer. Wire to k8s `livenessProbe` or Docker `HEALTHCHECK`. Failure causes a container restart. |
+| GET | `/readyz` | Readiness probe; pings Postgres and Redis in parallel, returns `200 {status: "ready", checks: {...}}` when both are reachable, `503 {status: "not_ready", checks: {...}}` when any required dep is down. Wire to k8s `readinessProbe` or load-balancer health checks. Failure pulls the instance out of rotation without restarting it. |
 | GET | `/metrics` | Prometheus text exposition of the curated metric set |
 | GET | `/debug/vars` | Raw `expvar` JSON dump for ad-hoc inspection |
 
@@ -823,7 +827,7 @@ makes branch-protection wiring trivial:
 | `docker-build` | buildx + GHA cache | Builds both images, exports tarballs as artifacts |
 | `image-scan` | trivy | HIGH/CRITICAL CVEs and Dockerfile misconfig; SARIF uploaded to the Security tab |
 | `sbom` | syft | SPDX-JSON SBOM per image, retained 30 days |
-| `e2e` | docker compose | Brings the full stack up in CI, probes `/healthcheck`, `/metrics`, `/debug/vars`, tears down |
+| `e2e` | docker compose | Brings the full stack up in CI, probes `/healthcheck`, `/readyz`, `/metrics`, `/debug/vars`, tears down |
 
 A new commit on the same PR auto-cancels the in-flight run via the
 workflow's `concurrency` block, so the canonical "ready to merge"

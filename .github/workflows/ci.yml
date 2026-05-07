@@ -425,6 +425,23 @@ jobs:
           echo "$body" | jq -e '.uptime_sec | type == "number"' >/dev/null
           echo "healthcheck OK: $body"
 
+      # /readyz is the readiness probe; with the full compose stack up
+      # (postgres + redis + migrate done), it must return 200 and report
+      # both deps as ok. A regression that bypasses pgs or redis pings or
+      # collapses the per-dep map will fail here.
+      - name: Assert /readyz reports ready with all deps up
+        run: |
+          status=$(curl -sS -o /tmp/readyz.body -w '%{http_code}' http://127.0.0.1:4000/readyz)
+          body=$(cat /tmp/readyz.body)
+          if [ "$status" != "200" ]; then
+            echo "expected 200, got $status; body=$body"
+            exit 1
+          fi
+          echo "$body" | jq -e '.status == "ready"' >/dev/null
+          echo "$body" | jq -e '.checks.postgres == "ok"' >/dev/null
+          echo "$body" | jq -e '.checks.redis == "ok"' >/dev/null
+          echo "readyz OK: $body"
+
       - name: Assert /metrics is Prometheus-format
         run: |
           body=$(curl -fsS http://127.0.0.1:4000/metrics)
