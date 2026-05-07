@@ -84,9 +84,9 @@ SELECT count(*) OVER() AS total_count,
     updated_at 
 FROM feeds
 WHERE ($1 = '' OR to_tsvector('simple', name) @@ plainto_tsquery('simple', $1))
-AND feed_type = $2 OR $2 = ''
+AND ($2 = '' OR feed_type = $2)
 AND is_hidden = FALSE
-AND approval_status='approved'
+AND approval_status = 'approved'
 ORDER BY created_at DESC
 LIMIT $3 OFFSET $4;
 

@@ -324,8 +324,21 @@ func main() {
 	// (600 req/min) it can safely go to 16+. Set to 1 to disable
 	// concurrency entirely and reproduce pre-P3 serial behavior.
 	flag.IntVar(&cfg.portfolio.workerLimit, "portfolio-worker-limit", 6, "Max concurrent per-asset workers in portfolio analysis (1 = serial; tune to upstream API rate limits)")
+
+	// -version must be declared BEFORE flag.Parse(); declaring it after
+	// (the prior layout) meant `optivest -version` failed at parse time
+	// with "flag provided but not defined" and the conditional below
+	// always saw the zero value. Image-publishing scripts that grep
+	// stdout for the build version saw nothing.
+	displayVersion := flag.Bool("version", false, "Display version and exit")
+
 	// Parse the flags
 	flag.Parse()
+
+	if *displayVersion {
+		fmt.Printf("Version:\t%s\n", version)
+		os.Exit(0)
+	}
 
 	// Fail fast if required secrets are missing in non-development environments.
 	// In development we tolerate empty secrets so the server can boot for partial
@@ -357,15 +370,6 @@ func main() {
 		cfg.sanitization.sanitizer = bluemonday.StrictPolicy()
 	} else {
 		cfg.sanitization.sanitizer = bluemonday.UGCPolicy()
-	}
-
-	// Create a new version boolean flag with the default value of false.
-	displayVersion := flag.Bool("version", false, "Display version and exit")
-	// If the version flag value is true, then print out the version number and
-	// immediately exit.
-	if *displayVersion {
-		fmt.Printf("Version:\t%s\n", version)
-		os.Exit(0)
 	}
 
 	// Initialize Redis connection

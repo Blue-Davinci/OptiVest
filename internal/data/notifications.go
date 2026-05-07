@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"time"
 
 	"github.com/sqlc-dev/pqtype"
@@ -128,22 +128,23 @@ func (m NotificationManagerModel) CreateNewNotification(ctx context.Context, use
 func (m NotificationManagerModel) UpdateNotificationReadAtAndStatus(ctx context.Context, notificationID int64, readAt sql.NullTime, status database.NotificationStatus) error {
 	ctx, cancel := contextGenerator(ctx, DefualtNotManContextTimeout)
 	defer cancel()
-	// Update the notification in the database
-	updatedAt, err := m.DB.UpdateNotificationReadAtAndStatus(ctx, database.UpdateNotificationReadAtAndStatusParams{
+	// Update the notification in the database. sql.ErrNoRows here means
+	// the row simply does not exist for this user — there is no version
+	// field on the notifications table for true optimistic locking, so
+	// returning ErrEditConflict (the prior behaviour) was a category
+	// error: callers retried, hit the same not-found, and surfaced an
+	// "edit conflict" to the user for what was actually a missing row.
+	_, err := m.DB.UpdateNotificationReadAtAndStatus(ctx, database.UpdateNotificationReadAtAndStatusParams{
 		ID:     notificationID,
 		ReadAt: readAt,
 		Status: status,
 	})
 	if err != nil {
-		switch {
-		case err == sql.ErrNoRows:
-			return ErrEditConflict
-		default:
-			return err
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrGeneralRecordNotFound
 		}
+		return err
 	}
-	fmt.Println("Notification: ", notificationID, ", was updated at: ", updatedAt)
-	// return nil if there was no error
 	return nil
 }
 
