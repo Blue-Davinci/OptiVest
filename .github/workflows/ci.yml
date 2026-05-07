@@ -451,10 +451,28 @@ jobs:
           echo "$body" | grep -qE '^optivest_'
           echo "metrics OK"
 
-      - name: Assert /debug/vars is JSON
+      - name: Assert /debug/vars is JSON and cmdline is stripped
         run: |
-          curl -fsS http://127.0.0.1:4000/debug/vars | jq -e '.cmdline' >/dev/null
-          echo "debug/vars OK"
+          # The OptiVest /debug/vars handler is a curated wrapper around
+          # expvar.Handler that blocklists keys that leak operational
+          # information about the running process. cmdline is the canonical
+          # one - the std expvar package publishes os.Args verbatim, which
+          # exposes any secret-bearing flag an operator typed instead of
+          # exporting via env var. Strip plus regression-test is the only
+          # thing that keeps the behavior from quietly being re-added by
+          # an `import _ "expvar"` somewhere in a future PR.
+          body=$(curl -fsS http://127.0.0.1:4000/debug/vars)
+          echo "$body" | jq -e 'type == "object"' >/dev/null
+          if echo "$body" | jq -e 'has("cmdline")' >/dev/null; then
+            echo "FAIL: /debug/vars exposed 'cmdline'; debugVarsBlocklist regressed" >&2
+            exit 1
+          fi
+          # memstats is auto-registered by the std expvar package and is the
+          # most stable presence-check we have - it confirms (a) the handler
+          # is actually walking the expvar registry, not returning {}, and
+          # (b) the JSON envelope round-trips cleanly through jq.
+          echo "$body" | jq -e '.memstats | type == "object"' >/dev/null
+          echo "debug/vars OK (cmdline stripped, memstats present)"
 
       - name: Compose ps
         if: always()
