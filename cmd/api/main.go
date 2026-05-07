@@ -159,6 +159,11 @@ type application struct {
 	mailer      mailer.Mailer
 	wg          sync.WaitGroup
 	RedisDB     *redis.Client
+	// db is the raw connection pool. Held alongside models (sqlc-generated
+	// Queries) so operational endpoints — specifically /readyz — can call
+	// PingContext on it without going through the typed query layer, which
+	// hides *sql.DB behind an unexported DBTX field.
+	db *sql.DB
 	// ctx is the application's lifecycle context. It is canceled when the
 	// process receives SIGINT/SIGTERM (see main()). HTTP servers wire it into
 	// BaseContext so in-flight requests get cancellation propagation, and
@@ -336,8 +341,10 @@ func main() {
 		logger.Fatal("Error while connecting to REDIS.", zap.String("error", err.Error()))
 	}
 	logger.Info("Redis connection established", zap.String("addr", cfg.redis.addr))
-	// create our connection pull
-	db, err := openDB(cfg)
+	// create our connection pull. openDB returns both the raw *sql.DB pool
+	// (used by /readyz for liveness pings) and the sqlc-generated Queries
+	// wrapper (used by the data layer).
+	rawDB, queries, err := openDB(cfg)
 	if err != nil {
 		logger.Fatal(err.Error(), zap.String("dsn", cfg.db.dsn))
 	}
@@ -360,10 +367,11 @@ func main() {
 	app := &application{
 		config:      cfg,
 		logger:      logger,
-		models:      data.NewModels(db),
+		models:      data.NewModels(queries),
 		http_client: httpClient,
 		mailer:      mailer.New(cfg.smtp.host, cfg.smtp.port, cfg.smtp.username, cfg.smtp.password, cfg.smtp.sender),
 		RedisDB:     rdb,
+		db:          rawDB,
 		ctx:         appCtx,
 		WebSocketUpgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
@@ -501,27 +509,29 @@ func getEnvPath(logger *zap.Logger) string {
 	return filepath.Join("cmd", "api", ".env")
 }
 
-// openDB() opens a new database connection using the provided configuration.
-// It returns a pointer to the sql.DB connection pool and an error value.
-func openDB(cfg config) (*database.Queries, error) {
+// openDB opens the Postgres connection pool and wraps it with the sqlc
+// Queries layer. Both handles are returned: the raw *sql.DB so operational
+// endpoints (e.g. /readyz) can ping it directly, and *database.Queries so
+// the data layer can issue typed queries.
+func openDB(cfg config) (*sql.DB, *database.Queries, error) {
 	db, err := sql.Open("postgres", cfg.db.dsn)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	db.SetMaxOpenConns(cfg.db.maxOpenConns)
 	db.SetMaxIdleConns(cfg.db.maxIdleConns)
 	duration, err := time.ParseDuration(cfg.db.maxIdleTime)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	db.SetConnMaxIdleTime(duration)
 	// Use ping to establish new conncetions
 	err = db.Ping()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	queries := database.New(db)
-	return queries, nil
+	return db, queries, nil
 }
 
 // validateConfig returns a list of human-readable errors describing required
