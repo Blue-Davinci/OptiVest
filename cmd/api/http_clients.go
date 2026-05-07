@@ -13,10 +13,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Blue-Davinci/OptiVest/internal/data"
 	"github.com/hashicorp/go-retryablehttp"
 	"github.com/microcosm-cc/bluemonday"
 	"go.uber.org/zap"
+
+	"github.com/Blue-Davinci/OptiVest/internal/data"
 )
 
 // Optivet_Client is the central HTTP client wrapper used for every outbound
@@ -30,7 +31,7 @@ type Optivet_Client struct {
 
 // NewClient builds an Optivet_Client. The logger is optional; pass nil to
 // suppress outbound tracing. The retry policy stays linear-jitter with the
-// caller's RetryMax so the existing reliability behaviour is preserved.
+// caller's RetryMax so the existing reliability behavior is preserved.
 func NewClient(timeout time.Duration, retries int, logger *zap.Logger) *Optivet_Client {
 	retryClient := retryablehttp.NewClient()
 	retryClient.RetryMax = retries
@@ -140,7 +141,7 @@ func logOutbound(log *zap.Logger, method, rawURL string, status int, bytes int64
 // the JSON response into T. The caller's ctx is propagated to the underlying
 // http.Request, so a client disconnect or upstream timeout cancels the call
 // promptly. The inbound X-Request-ID is forwarded on the outbound when one
-// is set on the ctx, and a single structured log line is emitted summarising
+// is set on the ctx, and a single structured log line is emitted summarizing
 // the call (see logOutbound for the schema).
 func GETRequest[T any](ctx context.Context, c *Optivet_Client, requestURL string, headers map[string]string) (T, error) {
 	var result T
@@ -188,8 +189,8 @@ func GETRequest[T any](ctx context.Context, c *Optivet_Client, requestURL string
 }
 
 // POSTRequest sends a context-bound POST to the specified URL with either a
-// JSON-marshalled body or a pre-built multipart bytes.Buffer. Same context
-// propagation, header stamping, and structured logging behaviour as
+// JSON-marshaled body or a pre-built multipart bytes.Buffer. Same context
+// propagation, header stamping, and structured logging behavior as
 // GETRequest.
 func POSTRequest[T any](ctx context.Context, c *Optivet_Client, requestURL string, headers map[string]string, body interface{}, isMultipart bool) (T, error) {
 	var result T
@@ -257,8 +258,8 @@ func POSTRequest[T any](ctx context.Context, c *Optivet_Client, requestURL strin
 // endpoint and reads the streaming response, accumulating chunk content into
 // a single string. ctx propagates so a client disconnect cancels the
 // long-running upstream stream promptly. The same outbound-correlation
-// behaviour as GETRequest/POSTRequest applies: X-Request-ID is forwarded
-// when present, and one structured log line summarises the call.
+// behavior as GETRequest/POSTRequest applies: X-Request-ID is forwarded
+// when present, and one structured log line summarizes the call.
 //
 // The streaming reader uses a 1 MiB scanner buffer because SambaNova chunks
 // can exceed bufio.Scanner's default 64 KiB limit on long responses.

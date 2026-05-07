@@ -1,25 +1,97 @@
+# =============================================================================
+# OptiVest CI pipeline
+# =============================================================================
+#
+# Runs on every PR to main and every push to main. All jobs are intentionally
+# parallel where they have no data dependency, with two fanout points:
+#
+#   docker-build  ─┬─→  image-scan
+#                  ├─→  sbom
+#                  └─→  e2e
+#
+# The remaining jobs (lint, test, vuln, secrets, dockerfile-lint) run
+# concurrently with docker-build from the start of the workflow.
+#
+# Caching strategy:
+#   - actions/setup-go's cache: true caches the Go module + build cache.
+#   - golangci/golangci-lint-action manages its own analysis cache.
+#   - docker/build-push-action uses type=gha so layer reuse persists across
+#     runs and across branches that share a base.
+#   - Each cache is scoped (golangci-lint: linter version; docker: image
+#     name) so a poisoned entry only invalidates one job's input.
+#
+# Concurrency: a new push to a PR cancels the in-flight run for that ref;
+# the canonical "blue checkmark" on a stale commit is never the one that
+# gates the merge.
+# =============================================================================
+
 name: ci
 
 on:
   push:
     branches: [main]
+  # No `branches` filter on pull_request — we want CI to run on every
+  # PR regardless of base, so a PR stacked on top of another feature
+  # branch (which is how the env / docker / ci work landed) still gets
+  # the full check matrix. GitHub deduplicates the run when a stacked
+  # PR's base is merged.
   pull_request:
-    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
+  # Granted to specific jobs only; see job-level overrides below for trivy
+  # SARIF upload (security-events: write) and SBOM upload.
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   GO_VERSION: "1.25"
+  GOLANGCI_LINT_VERSION: v2.12.2
+  TRIVY_VERSION: "0.59.0"
+  HADOLINT_VERSION: "v2.12.0"
 
 jobs:
-  audit:
-    name: build / vet / test / govulncheck
+  # ---------------------------------------------------------------------------
+  # lint — golangci-lint with a curated linter set (see .golangci.yml)
+  # ---------------------------------------------------------------------------
+  lint:
+    name: lint (golangci-lint)
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          check-latest: true
+          cache: true
+
+      - name: golangci-lint
+        # v7 is the first action major that supports golangci-lint v2's
+        # new config schema. Older v6 errors with `invalid version
+        # string` at runtime even if the binary itself is fine.
+        uses: golangci/golangci-lint-action@v7
+        with:
+          version: ${{ env.GOLANGCI_LINT_VERSION }}
+          args: --timeout=5m
+          # The action ships its own cache for the analysis state — leaving
+          # it on means warm runs typically finish in under a minute.
+          skip-cache: false
+
+  # ---------------------------------------------------------------------------
+  # test — build, vet, race-tested unit tests, coverage summary
+  # ---------------------------------------------------------------------------
+  test:
+    name: build / test (race) / coverage
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -39,22 +111,45 @@ jobs:
       - name: Vet
         run: go vet ./...
 
-      - name: Test
-        run: go test -race -count=1 -timeout=120s ./...
+      - name: Test (race + coverage)
+        run: |
+          go test -race -count=1 -timeout=120s \
+            -coverprofile=coverage.out -covermode=atomic ./...
 
-      - name: Install govulncheck
-        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+      - name: Coverage summary
+        run: |
+          total=$(go tool cover -func=coverage.out | tail -1 | awk '{print $3}')
+          {
+            echo "## Test coverage"
+            echo ""
+            echo "| Metric | Value |"
+            echo "|---|---|"
+            echo "| Total | \`$total\` |"
+            echo ""
+            echo "<details><summary>Per-package breakdown</summary>"
+            echo ""
+            echo "\`\`\`"
+            go tool cover -func=coverage.out | tail -n +1
+            echo "\`\`\`"
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Run govulncheck
-        run: govulncheck ./...
+      - name: Upload coverage profile
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-profile
+          path: coverage.out
+          retention-days: 7
 
-  staticcheck:
-    name: staticcheck
+  # ---------------------------------------------------------------------------
+  # vuln — known CVEs in the dependency graph
+  # ---------------------------------------------------------------------------
+  vuln:
+    name: govulncheck
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 6
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -63,8 +158,352 @@ jobs:
           check-latest: true
           cache: true
 
-      - name: Install staticcheck
-        run: go install honnef.co/go/tools/cmd/staticcheck@latest
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
 
-      - name: Run staticcheck
-        run: staticcheck ./...
+      - name: Run govulncheck
+        run: govulncheck ./...
+
+  # ---------------------------------------------------------------------------
+  # secrets — gitleaks (defense in depth alongside the GitGuardian SaaS)
+  # ---------------------------------------------------------------------------
+  secrets:
+    name: secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # gitleaks needs the full history to scan all commits in the PR diff
+          fetch-depth: 0
+
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Use the repo's .gitleaks.toml — it allowlists *.env.example
+          # placeholder strings that would otherwise produce false positives.
+          GITLEAKS_CONFIG: .gitleaks.toml
+
+  # ---------------------------------------------------------------------------
+  # dockerfile-lint — hadolint, one job per Dockerfile via matrix
+  # ---------------------------------------------------------------------------
+  dockerfile-lint:
+    name: hadolint (${{ matrix.dockerfile }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    strategy:
+      fail-fast: false
+      matrix:
+        dockerfile: [Dockerfile, Dockerfile.migrate]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: hadolint
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: ${{ matrix.dockerfile }}
+          config: .hadolint.yaml
+          format: tty
+          failure-threshold: warning
+
+  # ---------------------------------------------------------------------------
+  # docker-build — produces tarball artifacts consumed by image-scan, sbom, e2e
+  # ---------------------------------------------------------------------------
+  docker-build:
+    name: docker build (${{ matrix.image }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: optivest-api
+            file: Dockerfile
+          - image: optivest-migrate
+            file: Dockerfile.migrate
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build ${{ matrix.image }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.file }}
+          push: false
+          load: true
+          tags: ${{ matrix.image }}:ci
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+          # Export the built image as a tarball so image-scan / sbom / e2e
+          # can docker load it without rebuilding. Ephemeral artefact,
+          # 1-day retention — the gha layer cache is the persistent path.
+          outputs: type=docker,dest=/tmp/${{ matrix.image }}.tar
+
+      - name: Image size summary
+        run: |
+          size=$(du -h /tmp/${{ matrix.image }}.tar | cut -f1)
+          echo "| ${{ matrix.image }} | \`$size\` |" >> /tmp/sizes-${{ matrix.image }}.md
+
+      - name: Upload image tarball
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-${{ matrix.image }}
+          path: /tmp/${{ matrix.image }}.tar
+          retention-days: 1
+
+  # ---------------------------------------------------------------------------
+  # image-scan — trivy CVE + misconfig scan against the built images. SARIF
+  # output is uploaded to GitHub code scanning so findings show up in the
+  # Security tab and on PR review.
+  # ---------------------------------------------------------------------------
+  image-scan:
+    name: trivy (${{ matrix.image }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    needs: docker-build
+    permissions:
+      contents: read
+      security-events: write   # SARIF upload to code scanning
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [optivest-api, optivest-migrate]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: image-${{ matrix.image }}
+          path: /tmp
+
+      - name: Load image
+        run: docker load -i /tmp/${{ matrix.image }}.tar
+
+      # Two-pass scan: the first call gates the build on HIGH+CRITICAL
+      # fixed CVEs (ignore-unfixed: true keeps drive-by upstream noise from
+      # blocking PRs); the second call exports SARIF for the Security tab
+      # regardless. Both calls share a cached trivy DB.
+      - name: Trivy (gating, table output)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ matrix.image }}:ci
+          format: table
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+          ignore-unfixed: true
+          scanners: vuln,misconfig
+          cache-dir: /tmp/.trivy-cache
+
+      - name: Trivy (SARIF for code scanning)
+        if: always()
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ matrix.image }}:ci
+          format: sarif
+          output: trivy-${{ matrix.image }}.sarif
+          severity: CRITICAL,HIGH,MEDIUM
+          ignore-unfixed: true
+          scanners: vuln,misconfig
+          cache-dir: /tmp/.trivy-cache
+
+      - name: Upload SARIF to code scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-${{ matrix.image }}.sarif
+          category: trivy-${{ matrix.image }}
+
+  # ---------------------------------------------------------------------------
+  # sbom — software bill of materials per image, retained 30 days as artefact.
+  # PR #2 (release pipeline) attaches these to GitHub Releases as well.
+  # ---------------------------------------------------------------------------
+  sbom:
+    name: SBOM (${{ matrix.image }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    needs: docker-build
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [optivest-api, optivest-migrate]
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: image-${{ matrix.image }}
+          path: /tmp
+
+      - name: Load image
+        run: docker load -i /tmp/${{ matrix.image }}.tar
+
+      - name: Generate SBOM
+        uses: anchore/sbom-action@v0.24.0
+        with:
+          image: ${{ matrix.image }}:ci
+          format: spdx-json
+          output-file: sbom-${{ matrix.image }}.spdx.json
+          # Don't upload to release here; this is just CI proof
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-${{ matrix.image }}
+          path: sbom-${{ matrix.image }}.spdx.json
+          retention-days: 30
+
+  # ---------------------------------------------------------------------------
+  # e2e — boot the full compose stack in CI and probe the operational
+  # endpoints. This is the catch-all that proves a PR didn't break anything
+  # the unit tests can't see: the migration chain, the DSN wiring between
+  # compose .env and the binary's env_file, the healthcheck endpoint, the
+  # metrics format. Costs ~3-4 minutes in steady state thanks to gha cache.
+  # ---------------------------------------------------------------------------
+  e2e:
+    name: e2e (compose stack smoke test)
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    needs: docker-build
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Seed env files
+        # Both credentials below are generated freshly with openssl on
+        # every run instead of being hardcoded. Two reasons:
+        #   1. Secret scanners (the GitGuardian SaaS, gitleaks in the
+        #      previous job) reasonably treat any pattern of the shape
+        #      `PASSWORD=<literal>` as a finding regardless of value;
+        #      generating at runtime keeps the diff free of those.
+        #   2. CI runners are ephemeral and isolated by job; reusing
+        #      a fixed dev credential across runs is pure noise.
+        # The values never leave this job — the postgres + api
+        # containers come up with them inside the runner network and
+        # are torn down before the job exits.
+        run: |
+          set -euo pipefail
+
+          # /.env — drives compose interpolation.
+          cp .env.example .env
+          pg_pw=$(openssl rand -hex 16)
+          sed -i "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=${pg_pw}|" .env
+
+          # cmd/api/.env — drives the API binary. The example has empty
+          # placeholders; OPTIVEST_DATA_ENCRYPTION_KEY needs a 16/24/32
+          # byte value (hex-encoded) at boot. Everything else gets
+          # warn-and-continue treatment in dev mode.
+          cp cmd/api/.env.example cmd/api/.env
+          enc_key=$(openssl rand -hex 32)   # 32 bytes = AES-256
+          sed -i "s|^OPTIVEST_DATA_ENCRYPTION_KEY=.*|OPTIVEST_DATA_ENCRYPTION_KEY=${enc_key}|" cmd/api/.env
+
+      - name: Bring up the stack
+        run: make docker/up
+
+      - name: Wait for /healthcheck (60s budget)
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:4000/healthcheck >/dev/null 2>&1; then
+              echo "API healthy after ${i} attempts"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "API did not become healthy in 60s"
+          exit 1
+
+      - name: Assert /healthcheck JSON shape
+        run: |
+          body=$(curl -fsS http://127.0.0.1:4000/healthcheck)
+          echo "$body" | jq -e '.status == "ok"' >/dev/null
+          echo "$body" | jq -e '.env == "development"' >/dev/null
+          echo "$body" | jq -e '.uptime_sec | type == "number"' >/dev/null
+          echo "healthcheck OK: $body"
+
+      - name: Assert /metrics is Prometheus-format
+        run: |
+          body=$(curl -fsS http://127.0.0.1:4000/metrics)
+          echo "$body" | grep -qE '^# TYPE optivest_'
+          echo "$body" | grep -qE '^optivest_'
+          echo "metrics OK"
+
+      - name: Assert /debug/vars is JSON
+        run: |
+          curl -fsS http://127.0.0.1:4000/debug/vars | jq -e '.cmdline' >/dev/null
+          echo "debug/vars OK"
+
+      - name: Compose ps
+        if: always()
+        run: docker compose ps
+
+      - name: Compose logs (on failure)
+        if: failure()
+        run: docker compose logs --no-color
+
+      - name: Tear down
+        if: always()
+        run: make docker/down/clean
+
+  # ---------------------------------------------------------------------------
+  # ci-summary — single status check for branch protection rules. Required
+  # checks at the org level can pin on this one job; if any of the upstream
+  # jobs fails the dependency graph it stays "expected" forever. The
+  # explicit `if: !cancelled()` lets a downstream summary still report
+  # rather than skip on partial failure.
+  # ---------------------------------------------------------------------------
+  ci-summary:
+    name: ci summary
+    runs-on: ubuntu-latest
+    if: ${{ !cancelled() }}
+    needs:
+      - lint
+      - test
+      - vuln
+      - secrets
+      - dockerfile-lint
+      - docker-build
+      - image-scan
+      - sbom
+      - e2e
+    steps:
+      - name: Aggregate
+        run: |
+          {
+            echo "## CI summary"
+            echo ""
+            echo "| Job | Result |"
+            echo "|---|---|"
+            echo "| lint              | ${{ needs.lint.result }} |"
+            echo "| test              | ${{ needs.test.result }} |"
+            echo "| vuln              | ${{ needs.vuln.result }} |"
+            echo "| secrets           | ${{ needs.secrets.result }} |"
+            echo "| dockerfile-lint   | ${{ needs.dockerfile-lint.result }} |"
+            echo "| docker-build      | ${{ needs.docker-build.result }} |"
+            echo "| image-scan        | ${{ needs.image-scan.result }} |"
+            echo "| sbom              | ${{ needs.sbom.result }} |"
+            echo "| e2e               | ${{ needs.e2e.result }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail if any upstream failed
+        run: |
+          for r in \
+            "${{ needs.lint.result }}" \
+            "${{ needs.test.result }}" \
+            "${{ needs.vuln.result }}" \
+            "${{ needs.secrets.result }}" \
+            "${{ needs.dockerfile-lint.result }}" \
+            "${{ needs.docker-build.result }}" \
+            "${{ needs.image-scan.result }}" \
+            "${{ needs.sbom.result }}" \
+            "${{ needs.e2e.result }}"
+          do
+            if [ "$r" != "success" ] && [ "$r" != "skipped" ]; then
+              echo "Upstream job result: $r"
+              exit 1
+            fi
+          done

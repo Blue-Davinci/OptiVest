@@ -4,9 +4,10 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/Blue-Davinci/OptiVest/internal/data"
 	"github.com/shopspring/decimal"
 	"go.uber.org/zap"
+
+	"github.com/Blue-Davinci/OptiVest/internal/data"
 )
 
 // convertAndGetExchangeRate gets and returns the exchange rate between the

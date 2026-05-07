@@ -19,7 +19,7 @@ import (
 // and buildSSEServer need: a logger, a context, and the port fields read by
 // the constructors. Routes are stubbed because we never actually serve a
 // request through them in these tests — we test the http.Server's connection
-// behaviour, not the application's handler logic.
+// behavior, not the application's handler logic.
 func minimalApp(t *testing.T, ctx context.Context) *application {
 	t.Helper()
 	return &application{

@@ -190,7 +190,7 @@ type GoalStatus string
 const (
 	GoalStatusOngoing   GoalStatus = "ongoing"
 	GoalStatusCompleted GoalStatus = "completed"
-	GoalStatusCancelled GoalStatus = "cancelled"
+	GoalStatusCancelled GoalStatus = "canceled"
 )
 
 func (e *GoalStatus) Scan(src interface{}) error {

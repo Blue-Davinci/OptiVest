@@ -17,19 +17,20 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/gorilla/websocket"
+	"github.com/joho/godotenv"
+	_ "github.com/lib/pq"
+	"github.com/microcosm-cc/bluemonday"
+	"github.com/redis/go-redis/v9"
+	"github.com/robfig/cron/v3"
+	"go.uber.org/zap"
+	"golang.org/x/sync/singleflight"
+
 	"github.com/Blue-Davinci/OptiVest/internal/data"
 	"github.com/Blue-Davinci/OptiVest/internal/database"
 	"github.com/Blue-Davinci/OptiVest/internal/logger"
 	"github.com/Blue-Davinci/OptiVest/internal/mailer"
 	"github.com/Blue-Davinci/OptiVest/internal/vcs"
-	"github.com/redis/go-redis/v9"
-	"github.com/gorilla/websocket"
-	"github.com/joho/godotenv"
-	_ "github.com/lib/pq"
-	"github.com/microcosm-cc/bluemonday"
-	"github.com/robfig/cron/v3"
-	"go.uber.org/zap"
-	"golang.org/x/sync/singleflight"
 )
 
 // a quick variable to hold our version. ToDo: Change this.
@@ -145,7 +146,7 @@ type config struct {
 		// workerLimit caps the number of in-flight per-asset analyses
 		// (stocks + bonds) inside performInvestmentPortfolioAnalysis.
 		// Each in-flight worker may issue 2-3 upstream HTTP calls plus
-		// one DB INSERT. Set to 1 to reproduce the legacy serial behaviour.
+		// one DB INSERT. Set to 1 to reproduce the legacy serial behavior.
 		workerLimit int
 	}
 }
@@ -158,7 +159,7 @@ type application struct {
 	mailer      mailer.Mailer
 	wg          sync.WaitGroup
 	RedisDB     *redis.Client
-	// ctx is the application's lifecycle context. It is cancelled when the
+	// ctx is the application's lifecycle context. It is canceled when the
 	// process receives SIGINT/SIGTERM (see main()). HTTP servers wire it into
 	// BaseContext so in-flight requests get cancellation propagation, and
 	// background goroutines should select on app.ctx.Done() to exit cleanly.
@@ -283,7 +284,7 @@ func main() {
 	// (Premium tier = 75 req/min; each worker issues ~2 AV calls). On
 	// Free tier (5 req/min) consider lowering to 1; on Premium Plus
 	// (600 req/min) it can safely go to 16+. Set to 1 to disable
-	// concurrency entirely and reproduce pre-P3 serial behaviour.
+	// concurrency entirely and reproduce pre-P3 serial behavior.
 	flag.IntVar(&cfg.portfolio.workerLimit, "portfolio-worker-limit", 6, "Max concurrent per-asset workers in portfolio analysis (1 = serial; tune to upstream API rate limits)")
 	// Parse the flags
 	flag.Parse()
@@ -401,7 +402,7 @@ func main() {
 }
 
 func (app *application) startupFunction() error {
-	//fmt.Println("Recieved Bond Data: ", dataaa)
+	//fmt.Println("Received Bond Data: ", dataaa)
 	// first we need to check if the currency is in REDIS, if it is
 	// we skip requesting the data from the API
 	// if it is not we request the data from the API and save it to REDIS

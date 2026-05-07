@@ -1,0 +1,85 @@
+# =============================================================================
+# Dependabot configuration for OptiVest
+# =============================================================================
+#
+# Three independent ecosystems are tracked, each on a weekly Monday cadence:
+#
+#   - gomod          Go module updates
+#   - github-actions Action SHAs / versions used in .github/workflows
+#   - docker         Base image versions in Dockerfile and Dockerfile.migrate
+#
+# Strategy notes:
+#   - open-pull-requests-limit is intentionally low (5) so a quiet week
+#     does not produce a wall of 30 PRs that nobody reviews.
+#   - We group patch + minor updates into a single PR per ecosystem to cut
+#     review fatigue. Major updates always go out as their own PR so they
+#     get the attention they need.
+#   - The CI pipeline gates every Dependabot PR on the same checks as a
+#     human PR (lint / test / vuln / e2e), so accepting a green
+#     Dependabot PR is materially safer than the manual `go get -u` flow.
+#   - reviewers / assignees deliberately omitted here. Repository-level
+#     CODEOWNERS, when added, will route the PRs.
+# =============================================================================
+
+version: 2
+
+updates:
+  # ---------- Go modules ----------
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Africa/Nairobi
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - go
+    commit-message:
+      prefix: chore(deps)
+      include: scope
+    groups:
+      go-minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  # ---------- GitHub Actions ----------
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Africa/Nairobi
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - github-actions
+    commit-message:
+      prefix: chore(ci)
+      include: scope
+    groups:
+      actions-minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  # ---------- Docker base images ----------
+  # Two Dockerfiles in different locations. Dependabot watches each
+  # explicitly so a base image bump on one doesn't slip on the other.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Africa/Nairobi
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
+      - docker
+    commit-message:
+      prefix: chore(docker)
+      include: scope

@@ -7,10 +7,11 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/Blue-Davinci/OptiVest/internal/data"
-	"github.com/Blue-Davinci/OptiVest/internal/validator"
 	"github.com/shopspring/decimal"
 	"go.uber.org/zap"
+
+	"github.com/Blue-Davinci/OptiVest/internal/data"
+	"github.com/Blue-Davinci/OptiVest/internal/validator"
 )
 
 //==============================================================================================================
@@ -18,11 +19,11 @@ import (
 //==============================================================================================================
 
 // createNewBudgetdHandler() is a handler function that handles the creation of a Budget.
-// We validate a the recieved inputs in our input struct.
+// We validate a the received inputs in our input struct.
 // If everything is okay, we perform a check to see if the currency code of the budget is
 // the same as the user's currency code. If it is not the same, we use our convertor function
 // to convert the amount to the user's currency code. We then save the budget to the database
-// including the convertion rate.
+// including the conversion rate.
 func (app *application) createNewBudgetdHandler(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		Name         string          `json:"name"`
@@ -340,7 +341,7 @@ func (app *application) getBudgetsForUserHandler(w http.ResponseWriter, r *http.
 // ===================================================================================================================
 
 // createNewGoalHandler() is a handler function that handles the creation of a Goal.
-// The methid validates the Input recieved from the user
+// The methid validates the Input received from the user
 // Checks done include whether the Target amount is greater than the current amount
 // We also validate whether the goal is achievable within the dates provided
 // A check is also done to see if the new goal's contribution is less than the available surplus
@@ -526,8 +527,8 @@ func (app *application) updatedGoalHandler(w http.ResponseWriter, r *http.Reques
 	app.logger.Info("Total redcieved surplus", zap.String("Tota Surplus", budgetTotal.TotalSurplus.String()), zap.String("Monthly Contribution", goal.MonthlyContribution.String()))
 	availableSurplus := budgetTotal.TotalSurplus.Add(goal.MonthlyContribution)
 	app.logger.Info("Available Surplus", zap.String("Available Surplus", availableSurplus.String()))
-	// Step 2: Initialize newTotalSurplus with the available surplus
-	newTotalSurplus := availableSurplus
+	// Step 2: declare newTotalSurplus; both branches below assign it.
+	var newTotalSurplus decimal.Decimal
 
 	// Step 3: Check if the monthly contribution is being updated
 	if input.MonthlyContribution != nil && input.MonthlyContribution.Cmp(goal.MonthlyContribution) != 0 {

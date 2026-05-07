@@ -7,9 +7,10 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/araddon/dateparse"
+
 	"github.com/Blue-Davinci/OptiVest/internal/database"
 	"github.com/Blue-Davinci/OptiVest/internal/validator"
-	"github.com/araddon/dateparse"
 )
 
 type FeedManagerModel struct {
@@ -296,7 +297,7 @@ func (m FeedManagerModel) MarkFeedAsFetched(ctx context.Context, feedID int64) e
 // ==============================================================================================
 // CreateRssFeedPost inserts the parsed items from a fetched RSS feed.
 // ctx flows from the RSS scraper goroutine (derived from app.ctx) so the
-// in-flight INSERTs are cancelled cleanly on graceful shutdown.
+// in-flight INSERTs are canceled cleanly on graceful shutdown.
 func (m FeedManagerModel) CreateRssFeedPost(ctx context.Context, rssFeed *RSSFeed, feedID int64) error {
 	ChannelTitle := rssFeed.Channel.Title
 	ChannelUrl := rssFeed.Channel.Link

@@ -6,11 +6,12 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/Blue-Davinci/OptiVest/internal/data"
 	"github.com/microcosm-cc/bluemonday"
 	"github.com/mmcdole/gofeed"
 	"github.com/mmcdole/gofeed/atom"
 	"go.uber.org/zap"
+
+	"github.com/Blue-Davinci/OptiVest/internal/data"
 )
 
 // rssFeedScraper() is the main method which performs scraping for each

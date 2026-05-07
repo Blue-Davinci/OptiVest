@@ -1,0 +1,53 @@
+# =============================================================================
+# gitleaks configuration for OptiVest
+# =============================================================================
+#
+# We keep gitleaks's default ruleset (extends the upstream gitleaks/v8 base)
+# and only add an allowlist for the committed `.env.example` templates.
+# Those files exist precisely to document what variables the binary
+# reads — every line is in the form `OPTIVEST_FOO_API_KEY=` (empty), or a
+# safe non-secret default — but the upstream "Generic API Key" detector
+# matches the variable names regardless of value.
+#
+# Specifically the allowlist covers:
+#   - cmd/api/.env.example      (committed runtime config template)
+#   - .env.example              (committed compose interpolation template)
+# Real /.env and cmd/api/.env are both gitignored and not subject to this
+# allowlist; if they ever end up in a commit, gitleaks will catch them.
+#
+# Pattern allowlist:
+#   - The `openssl rand -hex 32` instruction in comments. Some scanners
+#     match on `[0-9a-f]{64}` adjacent to the word "key".
+#
+# Run locally with:
+#   gitleaks detect --config .gitleaks.toml --no-banner
+# =============================================================================
+
+[extend]
+# Inherit every rule from gitleaks's bundled v8 default config so we get
+# new detectors as the upstream tooling improves, instead of pinning a
+# stale snapshot here.
+useDefault = true
+
+[allowlist]
+description = "OptiVest committed environment templates and known-safe defaults"
+
+paths = [
+  '''(^|/)\.env\.example$''',
+  '''(^|/)cmd/api/\.env\.example$''',
+  # GHA workflows reference example values when seeding env files for e2e.
+  # Those references are not real credentials.
+  '''(^|/)\.github/workflows/.+\.ya?ml$''',
+]
+
+regexes = [
+  # Documentation-style hash showing the *length* of an AES-256 key
+  # without being a real key value.
+  '''openssl\s+rand\s+-hex\s+32''',
+]
+
+# Specific commits that landed before this config was added. Empty for now;
+# when we rotate a credential we add its commit SHA here so the historical
+# scan stays clean (the secret has been rotated and the live system no
+# longer accepts the old value).
+commits = []

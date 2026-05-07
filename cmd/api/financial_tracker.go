@@ -7,11 +7,12 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/shopspring/decimal"
+	"go.uber.org/zap"
+
 	"github.com/Blue-Davinci/OptiVest/internal/data"
 	"github.com/Blue-Davinci/OptiVest/internal/database"
 	"github.com/Blue-Davinci/OptiVest/internal/validator"
-	"github.com/shopspring/decimal"
-	"go.uber.org/zap"
 )
 
 // createNewExpenseHandler() creates a new one way/ none recurring expense to the database
