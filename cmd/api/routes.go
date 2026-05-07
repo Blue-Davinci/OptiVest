@@ -276,6 +276,7 @@ func (app *application) investmentPortfolioRoutes() chi.Router {
 
 	// Analysis
 	investmentPortfolioRoutes.Get("/analysis", app.investmentPrtfolioAnalysisHandler)
+	investmentPortfolioRoutes.Get("/analysis/stream", app.streamInvestmentPortfolioAnalysisHandler)
 	investmentPortfolioRoutes.Get("/analysis/summary", app.getLatestLLMAnalysisResponseByUserIDHandler)
 	return investmentPortfolioRoutes
 }

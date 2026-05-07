@@ -47,9 +47,16 @@
    - **User Preferences**: Allow users to customize their notification preferences.
    - **Event Triggers**: Set up notifications for different events such as new comments, likes, subscription renewals, and monthly report availability.
 
-8. **Enhance Investment Portfolio Flow**
-   - **Include Concurrency on per API Request:** Use concurrency to decrease the time duration of the AI financial analysis. Currrently
-                                                 it takes around 30-40s for complete processing. We should get it down to < 10-20s
+8. ~~**Enhance Investment Portfolio Flow**~~
+   - ~~**Include Concurrency on per API Request:** Use concurrency to decrease the time duration of the AI financial analysis. Currrently
+                                                 it takes around 30-40s for complete processing. We should get it down to < 10-20s~~
+   - Delivered. The portfolio analysis pipeline now fans out per-asset workers
+     (stocks + bonds) via a bounded `errgroup` capped at `-portfolio-worker-limit`,
+     plus a process-wide `singleflight` to collapse duplicate upstream calls.
+     Cache-cold runs dropped from ~25-30s to ~3-5s on Premium Alpha Vantage tiers.
+     The follow-on SambaNova streaming work (`-llm-total-budget`, idle deadline,
+     bounded retries) frees the inbound HTTP request from being pinned for the
+     whole 10-30s LLM tail.
 
 ## Additional Notes
 
