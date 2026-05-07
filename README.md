@@ -328,6 +328,12 @@ the available commands for a quick lookup (INCOMPLETE, use help for full list).
         Enable rate limiter (default true)
   -limiter-rps float
         Rate limiter maximum requests per second (default 5)
+  -llm-idle-timeout duration
+        Abort the LLM stream if no chunk arrives within this window (default 15s)
+  -llm-max-retries int
+        Max retries for the LLM call before the first SSE chunk; mid-stream errors never retry (default 2)
+  -llm-total-budget duration
+        Wallclock cap for an LLM streaming call across retries (default 1m30s)
   -portfolio-worker-limit int
         Max concurrent per-asset workers in portfolio analysis (1 = serial; tune to upstream API rate limits) (default 6)
 ```
@@ -485,6 +491,33 @@ the available commands for a quick lookup (INCOMPLETE, use help for full list).
 > Adding a new metric to the `/metrics` surface is one line in
 > `cmd/api/metrics.go` (the `knownMetrics` allow-list); the friction is
 > intentional, since this is an operator-facing surface, not a debug dump.
+
+> **SambaNova streaming + retry budget (P4.A):** The SambaNova chat-completions
+> path is special-cased away from the generic `Optivet_Client` because every
+> call holds a connection slot open for 10–30s while the model emits SSE
+> chunks. `LLMStream` in `cmd/api/http_clients.go` provides three guarantees
+> the generic path cannot:
+>
+> - A **wallclock budget context** (`-llm-total-budget`, default `90s`) caps
+>   the entire call across pre-first-byte retries plus the streaming read.
+>   The retry layer's backoff sleeps inherit this deadline, so a tight
+>   budget naturally compresses the effective retry window.
+> - An **idle deadline** (`-llm-idle-timeout`, default `15s`) aborts the
+>   stream when no chunk has arrived within the window. Protects connection
+>   slots from a stalled upstream that has sent headers but no body, and
+>   caps the impact of a slowloris-style upstream.
+> - **Bounded pre-first-byte retries** (`-llm-max-retries`, default `2`).
+>   Retries fire only on dial / TLS / non-2xx errors that happen *before*
+>   the response body is streamed. Once a chunk has been read, mid-stream
+>   errors return verbatim — replaying a 30s prompt for a transient blip
+>   would double user-visible latency and the token bill, with no
+>   reliability gain because SambaNova's API is not resumable.
+>
+> `LLMRequest` is preserved as a thin back-compat wrapper for callers that
+> only need the joined string (`buildLLMRequestHelper` and friends in
+> `cmd/api/ai_operations.go`). Future Server-Sent Events handlers should
+> call `LLMStream` directly with a non-nil `onChunk` callback to forward
+> partial deltas to the browser as they arrive.
 
 Using `make run`, will run the API with a default connection string located 
 in `cmd\api\.env`. If you're using `powershell`, you need to load the values otherwise you will get

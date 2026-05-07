@@ -23,11 +23,12 @@ type UserPersonalFinanceProfile struct {
 	PersonalFinanceAnalysis data.UnifiedFinanceAnalysis    `json:"personal_finance_analysis"`
 }
 type Chunk struct {
-	ID                string   `json:"id"`
-	Object            string   `json:"object"`
-	Model             string   `json:"model"`
-	SystemFingerprint string   `json:"system_fingerprint"`
-	Choices           []Choice `json:"choices"`
+	ID                string    `json:"id"`
+	Object            string    `json:"object"`
+	Model             string    `json:"model"`
+	SystemFingerprint string    `json:"system_fingerprint"`
+	Choices           []Choice  `json:"choices"`
+	Usage             *LLMUsage `json:"usage,omitempty"`
 }
 
 type Choice struct {
@@ -38,6 +39,17 @@ type Choice struct {
 
 type Delta struct {
 	Content string `json:"content"`
+}
+
+// LLMUsage captures the SambaNova/OpenAI-style token-usage block. It only
+// arrives in the final SSE chunk when the request was made with
+// stream_options.include_usage = true (which all the buildLLM* templates
+// in this file set), and is exposed on LLMStreamResult so future callers
+// can record per-call cost or rate-limit budgets.
+type LLMUsage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
 }
 
 // buildLLMRequest sends a request to the LLM API with the user's profile and
