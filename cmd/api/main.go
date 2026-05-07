@@ -325,6 +325,24 @@ func main() {
 	// concurrency entirely and reproduce pre-P3 serial behavior.
 	flag.IntVar(&cfg.portfolio.workerLimit, "portfolio-worker-limit", 6, "Max concurrent per-asset workers in portfolio analysis (1 = serial; tune to upstream API rate limits)")
 
+	// Refuse to start if a secret-bearing flag was passed on the command
+	// line. The flag definitions above remain so the StringVars still
+	// default-from-env, but operators who type the value into the shell
+	// (instead of exporting the env var) leak it to /proc/<pid>/cmdline,
+	// `ps -ef`, shell history, and any process supervisor that records
+	// argv. We do this BEFORE flag.Parse so the value is never decoded
+	// into a typed config field that might subsequently appear in a log
+	// line or in /debug/vars. Runs before the -version declaration too
+	// because rejectSecretFlags only looks at os.Args literally; it
+	// doesn't depend on any flag being registered yet.
+	if raw, name := rejectSecretFlags(os.Args[1:]); raw != "" {
+		fmt.Fprintf(os.Stderr,
+			"refusing to start: %q is a secret-bearing flag (matched %q); set the corresponding env var instead\n",
+			raw, name,
+		)
+		os.Exit(2)
+	}
+
 	// -version must be declared BEFORE flag.Parse(); declaring it after
 	// (the prior layout) meant `optivest -version` failed at parse time
 	// with "flag provided but not defined" and the conditional below
@@ -332,7 +350,6 @@ func main() {
 	// stdout for the build version saw nothing.
 	displayVersion := flag.Bool("version", false, "Display version and exit")
 
-	// Parse the flags
 	flag.Parse()
 
 	if *displayVersion {
@@ -571,6 +588,53 @@ func openDB(cfg config) (*sql.DB, *database.Queries, error) {
 	return db, queries, nil
 }
 
+// secretFlagPrefixes is the set of CLI flag name prefixes whose values are
+// sensitive credentials. The flag definitions in main() default-from-env for
+// each of these, so an operator who exports the env var still gets the
+// expected behavior. What's banned here is passing the value LITERALLY on
+// the command line, which leaks it to:
+//
+//   - /proc/<pid>/cmdline (world-readable on most Linux distros)
+//   - ps -ef and any tool that reads /proc/<pid>/cmdline
+//   - shell history (.bash_history / .zsh_history)
+//   - any process supervisor that records argv (systemd journal, k8s
+//     describe, docker inspect, supervisord logs)
+//
+// Prefix matching is intentional for "-api-key-" so we cover every API key
+// without having to list each one - new vendor integrations get the
+// protection automatically.
+var secretFlagPrefixes = []string{
+	"encryption-key",
+	"redis-password",
+	"smtp-password",
+	"db-dsn",
+	"api-key-",
+}
+
+// rejectSecretFlags scans args (typically os.Args[1:]) for any token
+// matching a secretFlagPrefixes entry. Returns the raw arg as the user
+// typed it (so error messages echo back exactly what was rejected) and
+// the normalised flag name; both empty if args are clean.
+//
+// Both single-dash (-encryption-key=...) and double-dash forms
+// (--encryption-key=...) are handled by trimming leading dashes before
+// the prefix match. Values are only extracted to find the '=' boundary;
+// they are never returned and never logged.
+func rejectSecretFlags(args []string) (raw, name string) {
+	for _, arg := range args {
+		trimmed := strings.TrimLeft(arg, "-")
+		if eq := strings.IndexByte(trimmed, '='); eq != -1 {
+			trimmed = trimmed[:eq]
+		}
+		for _, prefix := range secretFlagPrefixes {
+			if strings.HasPrefix(trimmed, prefix) {
+				return arg, trimmed
+			}
+		}
+	}
+	return "", ""
+}
+
 // validateConfig returns a list of human-readable errors describing required
 // configuration that is missing. It is intentionally cheap to call: it does not
 // perform any I/O. Callers decide whether missing values are fatal based on the
@@ -633,11 +697,21 @@ func validateConfig(cfg config) []string {
 // openRedis() opens a new Redis connection using the provided configuration.
 // It returns a pointer to the Redis client and an error value.
 func openRedis(cfg config) (*redis.Client, error) {
-	// Initialize the Redis client with the provided config
+	// Initialize the Redis client with the provided config. The Password
+	// field MUST be wired through here: cfg.redis.password is read from
+	// -redis-password / OPTIVEST_REDIS_PASSWORD, validated, and surfaced
+	// in the startup banner as "configured", but if the field below is
+	// commented out the driver sends every command unauthenticated. A
+	// Redis instance with `requirepass` rejects every call with NOAUTH,
+	// and the failure mode looks like a generic transient error in the
+	// caller stack rather than a configuration problem. Empty string
+	// means "no auth", which is the existing zero-value semantics of
+	// redis.Options - so leaving this enabled is safe even when the
+	// operator hasn't set OPTIVEST_REDIS_PASSWORD.
 	rdb := redis.NewClient(&redis.Options{
-		Addr: cfg.redis.addr, // Redis address
-		//Password: cfg.redis.password, // No password set if empty
-		DB: cfg.redis.db, // Use default DB if not set
+		Addr:     cfg.redis.addr,
+		Password: cfg.redis.password,
+		DB:       cfg.redis.db,
 	})
 
 	// Ping the Redis server with a short bounded deadline so a misconfigured

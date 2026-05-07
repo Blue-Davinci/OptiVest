@@ -31,6 +31,34 @@ start if any of the following is empty (see `validateConfig` in
 In `development` the same checks log warnings but do not abort startup, so
 local work with a partial `.env` continues to function.
 
+## Secrets must NEVER be passed on the command line
+
+The flag definitions in `cmd/api/main.go` default-from-env for every
+secret-bearing variable, so an operator who exports the corresponding
+`OPTIVEST_*` env var gets the expected behavior. What's banned at startup
+is passing the secret value LITERALLY on the command line - e.g.
+`./api -encryption-key=<hex>` or `./api -api-key-sambanova=<value>`.
+
+The `rejectSecretFlags` startup gate scans `os.Args` BEFORE `flag.Parse`
+and exits with code 2 if any of these prefixes appears:
+
+- `-encryption-key`, `--encryption-key`
+- `-redis-password`, `--redis-password`
+- `-smtp-password`, `--smtp-password`
+- `-db-dsn`, `--db-dsn` (DSNs typically embed credentials)
+- `-api-key-*` for any vendor (Alpha Vantage, FRED, FMP, SambaNova, etc.)
+
+The reason matters: command-line values land in `/proc/<pid>/cmdline`
+(world-readable on most Linux distros), `ps -ef`, shell history, and any
+process supervisor that records argv. The startup gate makes that leak
+impossible to introduce via a stressed engineer doing a quick experiment
+or a runbook that hardcodes the wrong example.
+
+The curated `/debug/vars` handler (`cmd/api/metrics.go`) provides a
+second layer: even if the gate is bypassed (e.g. by a forked build),
+the handler strips `cmdline` from the JSON output so operational
+endpoints don't echo back what was passed.
+
 ## Generating a fresh AES-GCM key
 
 ```bash

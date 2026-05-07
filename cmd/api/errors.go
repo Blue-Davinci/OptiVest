@@ -51,11 +51,37 @@ func (app *application) authenticationRequiredResponse(w http.ResponseWriter, r 
 	app.errorResponse(w, r, http.StatusUnauthorized, message)
 }
 
-// The inactiveAccountResponse() method will return 401 inactive account error, that is the account
-// needs to be activated to proceed.
+// The inactiveAccountResponse() method returns 423 Locked. It is used on
+// AUTHENTICATED routes (`requireActivatedUser` middleware) where the caller
+// has already proven possession of a valid bearer token and the server is
+// telling them their account is in a locked state - that response leaks
+// nothing new because the caller is already known. Do NOT use it on
+// unauthenticated routes (login, password-reset, recovery, activation):
+// those leak account-state to anonymous probes and must use
+// accountRecoveryEligibleResponse instead.
 func (app *application) inactiveAccountResponse(w http.ResponseWriter, r *http.Request) {
 	message := "your user account must be activated to access this resource"
 	app.errorResponse(w, r, http.StatusLocked, message)
+}
+
+// accountRecoveryEligibleResponse returns the canonical 202 Accepted envelope
+// used by every unauthenticated account-recovery, activation, and password-
+// reset flow. The wire format is byte-identical regardless of which branch
+// the caller actually took (email-not-found, already-activated, MFA-not-
+// enabled, or the genuine happy path), so the response itself reveals
+// nothing about the requester's account state. Callers MUST log the
+// real branch at WARN with the request_id (and user_id where available)
+// so support and incident-response can still triage legitimate users.
+//
+// Status code is 202 specifically because none of these flows synchronously
+// confirm the email was sent - delivery happens via app.background. 202
+// matches that semantics ("we'll get to it") and avoids the 200-vs-202
+// distinction being itself a tell.
+func (app *application) accountRecoveryEligibleResponse(w http.ResponseWriter, r *http.Request) {
+	env := envelope{"message": "if your account is eligible for this action, an email will be sent with further instructions"}
+	if err := app.writeJSON(w, http.StatusAccepted, env, nil); err != nil {
+		app.serverErrorResponse(w, r, err)
+	}
 }
 
 // The badRequestResponse() method will be used to send a 400 Bad Request status code and
