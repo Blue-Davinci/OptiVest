@@ -32,7 +32,7 @@ RUN apk add --no-cache git \
     && go install github.com/pressly/goose/v3/cmd/goose@${GOOSE_VERSION}
 
 # ---------- Stage 2: minimal runtime ----------
-FROM alpine:3.20
+FROM alpine:3.23
 
 # postgresql-client is convenient for ad-hoc inspection during migration
 # debugging (`docker compose exec migrate psql ...`); strip if you want

@@ -71,7 +71,7 @@ ENV CGO_ENABLED=0
 RUN go build -trimpath -ldflags='-s -w' -o /out/api ./cmd/api
 
 # ---------- Stage 2: runtime ----------
-FROM alpine:3.20
+FROM alpine:3.23
 
 # OCI image labels. Registries (GHCR, Harbor, Quay), Docker Desktop, and
 # SBOM tooling (syft, trivy) all key off these to display source links,
