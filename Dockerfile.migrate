@@ -6,7 +6,7 @@
 #
 # Pressly publishes the goose Go module but does not maintain an official
 # CLI Docker image, and the community-mirrored variants drift in version
-# pinning and trust. Building our own from the same golang:1.25-alpine
+# pinning and trust. Building our own from the same golang:1.26-alpine
 # base used by the API image keeps us off third-party registries entirely
 # and pins to the exact goose version the codebase was tested with.
 #

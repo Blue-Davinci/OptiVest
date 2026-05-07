@@ -9,6 +9,8 @@ help:
 	@echo "  lint                - Run golangci-lint (matches the CI lint job)"
 	@echo "  tidy                - Format code and tidy go.mod/go.sum"
 	@echo "  test                - Run the full test suite with -race"
+	@echo "  generate            - Regenerate sqlc Go code from internal/sql/queries"
+	@echo "  verify-generate     - Fail if sqlc generated code drifted from internal/sql/queries"
 	@echo "  docker/up           - Build images and bring up the local stack (postgres, redis, migrations, api)"
 	@echo "  docker/down         - Stop and remove the local stack (volumes preserved)"
 	@echo "  docker/down/clean   - Stop the stack AND drop the postgres data volume"
@@ -58,12 +60,40 @@ lint:
 	@echo 'Running golangci-lint (install: https://golangci-lint.run/usage/install/)...'
 	golangci-lint run --timeout=5m ./...
 
-## audit: full local equivalent of CI (tidy + vet + lint + govulncheck + test)
+## generate: regenerate sqlc Go from internal/sql/queries.
+## Uses the sqlc version pinned in go.mod's tool directive, so a fresh
+## clone or a CI runner with no preinstalled sqlc still produces
+## byte-identical output. Edit internal/sql/queries/*.sql, run this,
+## and commit the diff in internal/database/.
+.PHONY: generate
+generate:
+	@echo 'Running sqlc generate (pinned via go.mod tool directive)...'
+	go tool sqlc generate
+
+## verify-generate: regenerate, then fail if anything drifted.
+## Mirrors the verify-generate CI job. The intent is that any PR that
+## touches internal/sql/ or the schema must also commit the regenerated
+## Go, otherwise reviewers see a quiet drift between the SQL source of
+## truth and the typed Go façade.
+.PHONY: verify-generate
+verify-generate:
+	@echo 'Verifying generated code is up to date...'
+	go tool sqlc generate
+	@if ! git diff --quiet -- internal/database/ internal/sql/; then \
+		echo ""; \
+		echo "Generated code is out of date. Run 'make generate' and commit the result."; \
+		echo "Drift detected:"; \
+		git --no-pager diff --stat -- internal/database/ internal/sql/; \
+		exit 1; \
+	fi
+
+## audit: full local equivalent of CI (tidy + generate-drift + vet + lint + govulncheck + test)
 .PHONY: audit
 audit:
 	@echo 'Verifying go.mod is tidy...'
 	go mod tidy
 	git diff --exit-code go.mod go.sum
+	@$(MAKE) verify-generate
 	@echo 'Running go vet...'
 	go vet ./...
 	@echo 'Running golangci-lint (install: https://golangci-lint.run/usage/install/)...'
