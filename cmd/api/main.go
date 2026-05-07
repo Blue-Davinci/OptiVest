@@ -79,6 +79,31 @@ type config struct {
 		timeout  time.Duration
 		retrymax int
 	}
+	// llm holds runtime knobs for the streaming SambaNova client. The
+	// LLM path is special-cased away from the generic http_client tunables
+	// because chat-completions calls keep a connection slot open for
+	// 10-30s while the model emits SSE chunks; the generic 10s client
+	// timeout would just kill them mid-stream, and the generic 3-retry
+	// policy would replay a 30s prompt on a transient 5xx and double
+	// user-visible latency.
+	llm struct {
+		// totalBudget is a wallclock cap that supersedes any per-attempt
+		// timeout. It governs the entire call including pre-first-byte
+		// retries plus the streaming read. A value of 0 falls back to a
+		// safe internal default (see llmStreamingDefaults).
+		totalBudget time.Duration
+		// idleTimeout aborts the stream when no chunk has arrived within
+		// the window. Protects connection slots from a stalled upstream
+		// that has sent headers but no body, and also acts as a coarse
+		// DoS mitigation.
+		idleTimeout time.Duration
+		// maxRetriesBeforeFirstByte caps how many times the retryablehttp
+		// layer may replay the request on dial / TLS / 5xx errors *before*
+		// the first SSE chunk arrives. Mid-stream errors are never
+		// retried regardless of this value (see CheckRetry override in
+		// LLMStream).
+		maxRetriesBeforeFirstByte int
+	}
 	sanitization struct {
 		sanitizer *bluemonday.Policy
 		usestrict bool
@@ -244,6 +269,14 @@ func main() {
 	// HTTP client configuration
 	flag.DurationVar(&cfg.http_client.timeout, "http-client-timeout", 10*time.Second, "HTTP client timeout")
 	flag.IntVar(&cfg.http_client.retrymax, "http-client-retrymax", 3, "HTTP client maximum retries")
+	// LLM streaming client tunables (SambaNova chat-completions). See the
+	// type definition in the config struct for the rationale; defaults are
+	// chosen to match the observed p95 latency of the 405B model plus a
+	// margin, with retry budget tight enough to keep tail latency below
+	// 2x of a healthy single-attempt call.
+	flag.DurationVar(&cfg.llm.totalBudget, "llm-total-budget", 90*time.Second, "Wallclock cap for an LLM streaming call across retries")
+	flag.DurationVar(&cfg.llm.idleTimeout, "llm-idle-timeout", 15*time.Second, "Abort the LLM stream if no chunk arrives within this window")
+	flag.IntVar(&cfg.llm.maxRetriesBeforeFirstByte, "llm-max-retries", 2, "Max retries for the LLM call before the first SSE chunk; mid-stream errors never retry")
 	// Sanitization
 	flag.BoolVar(&cfg.sanitization.usestrict, "sanitization-strict", false, "Use strict sanitization")
 	// Encryption key

@@ -156,6 +156,30 @@ upstream fetches (e.g. two stocks of the same symbol), so even under
 fan-out we never N-multiply duplicate vendor calls. Watch
 `portfolio_singleflight_collapsed_total` to confirm dedup is firing.
 
+## SambaNova streaming budget (P4.A)
+
+The SambaNova chat-completions client (`LLMStream` in
+`cmd/api/http_clients.go`) holds a TCP connection open for 10–30s while
+the model emits SSE chunks. Three knobs gate that exposure:
+
+| Flag                   | Default | Role                                                                                                                  |
+| ---------------------- | ------- | --------------------------------------------------------------------------------------------------------------------- |
+| `-llm-total-budget`    | `90s`   | Wallclock cap across pre-first-byte retries plus the streaming read. Bounds the worst-case slot-hold per call.        |
+| `-llm-idle-timeout`    | `15s`   | Aborts the call when no chunk arrives within the window. Slowloris-style mitigation against a stalled or hostile API. |
+| `-llm-max-retries`     | `2`     | Pre-first-byte retry cap. Mid-stream errors **never** retry, regardless of this value.                                |
+
+The mid-stream no-retry rule is a deliberate trade-off: SambaNova's API
+is non-resumable, so replaying a partially-streamed prompt costs the
+full prompt evaluation again (latency + tokens) for no reliability
+gain. Operators wanting tighter blast-radius control should lower
+`-llm-total-budget` rather than raise `-llm-max-retries`.
+
+The idle timeout doubles as the primary defence against a hostile or
+compromised LLM upstream holding our connection slots indefinitely.
+Lowering it past 5s is not recommended - the model's first-token
+latency is genuinely variable, and false-positive aborts manifest as
+user-visible 5xxs.
+
 ## CI security scanning
 
 Every push and PR to `main` runs:
