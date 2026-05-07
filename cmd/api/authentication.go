@@ -9,9 +9,10 @@ import (
 	"strings"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/Blue-Davinci/OptiVest/internal/data"
 	"github.com/Blue-Davinci/OptiVest/internal/validator"
-	"go.uber.org/zap"
 )
 
 // createAuthenticationApiKeyHandler() is the main endpoint responsible for creating a new authentication
@@ -256,7 +257,7 @@ func (app *application) validateMFALoginAttemptHandler(w http.ResponseWriter, r 
 		return
 	}
 	app.logger.Info("MFA setup pending status decrypted token", zap.String("decryptedToken", decryptedToken), zap.String("stored token", (*mfaSession).Value))
-	app.logger.Info("Recieved TOTP Code", zap.String("TOTPCode", mfaToken.TOTPCode), zap.String("Recieved TOTPToken", mfaToken.TOTPToken))
+	app.logger.Info("Received TOTP Code", zap.String("TOTPCode", mfaToken.TOTPCode), zap.String("Received TOTPToken", mfaToken.TOTPToken))
 
 	// check if the decrypted token matches the one in redis
 	if decryptedToken != (*mfaSession).Value {

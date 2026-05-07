@@ -10,7 +10,7 @@ import (
 )
 
 // createNewFeedHandler() is a handler rresponsible for creating a new feed
-// We will recieve a feed, validate it, and insert it
+// We will receive a feed, validate it, and insert it
 func (app *application) createNewFeedHandler(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		Name            string `json:"name"`
@@ -70,7 +70,7 @@ func (app *application) createNewFeedHandler(w http.ResponseWriter, r *http.Requ
 }
 
 // updateFeedHandler() is a handler responsible for updating a feed
-// We will recieve a feed ID, validate it, and update it
+// We will receive a feed ID, validate it, and update it
 func (app *application) updateFeedHandler(w http.ResponseWriter, r *http.Request) {
 	// get the feed ID from the URL
 	feedID, err := app.readIDParam(r, "feedID")
@@ -166,7 +166,7 @@ func (app *application) updateFeedHandler(w http.ResponseWriter, r *http.Request
 }
 
 // deleteFeedByIDHandler() is a handler responsible for deleting a feed by its ID
-// We recieve the FeedID ffrom the URL, validate it and delete it
+// We receive the FeedID ffrom the URL, validate it and delete it
 func (app *application) deleteFeedByIDHandler(w http.ResponseWriter, r *http.Request) {
 	// get the feed ID from the URL
 	feedID, err := app.readIDParam(r, "feedID")
@@ -257,11 +257,13 @@ func (app *application) getAllRSSPostWithFavoriteTagsHandler(w http.ResponseWrit
 			Tags:     "goal,completed",
 		},
 	}
-	app.PublishNotificationToRedis(app.contextGetUser(r).ID, data.NotificationTypeFeeds, notificationContent)
+	// Notification publish is fire-and-forget; failure is logged inside
+	// PublishNotificationToRedis and does not fail the inbound request.
+	_ = app.PublishNotificationToRedis(app.contextGetUser(r).ID, data.NotificationTypeFeeds, notificationContent)
 }
 
 // getRssFeedPostByIDHandler() is a handler responsible for getting a post by its ID
-// We will recieve the post ID from the URL, validate it, and send it back
+// We will receive the post ID from the URL, validate it, and send it back
 func (app *application) getRssFeedPostByIDHandler(w http.ResponseWriter, r *http.Request) {
 	// get the post ID from the URL
 	postID, err := app.readIDParam(r, "postID")
@@ -294,7 +296,7 @@ func (app *application) getRssFeedPostByIDHandler(w http.ResponseWriter, r *http
 }
 
 // createNewFavoriteOnPostHandler() is a handler responsible for creating a new favorite on a post
-// We will recieve a post ID, validate it, and insert it
+// We will receive a post ID, validate it, and insert it
 func (app *application) createNewFavoriteOnPostHandler(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		PostID int64 `json:"post_id"`
@@ -337,7 +339,7 @@ func (app *application) createNewFavoriteOnPostHandler(w http.ResponseWriter, r 
 }
 
 // deleteFavoriteOnPostHandler() is a handler responsible for deleting a favorite on a post
-// We will recieve a post ID, validate it, and delete it
+// We will receive a post ID, validate it, and delete it
 func (app *application) deleteFavoriteOnPostHandler(w http.ResponseWriter, r *http.Request) {
 	// Get the post ID from the URL
 	postID, err := app.readIDParam(r, "postID")

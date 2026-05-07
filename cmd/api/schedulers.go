@@ -5,8 +5,9 @@ import (
 	"errors"
 	"time"
 
-	"github.com/Blue-Davinci/OptiVest/internal/data"
 	"go.uber.org/zap"
+
+	"github.com/Blue-Davinci/OptiVest/internal/data"
 )
 
 // trackMonthlyGoals() is a cronjob method that sets a cronJob to run at the end of every month
@@ -193,7 +194,7 @@ func (app *application) trackExpiredGroupInvitations() {
 }
 
 // trackRecurringExpenses() is the method called by the cronjob to track all the recurring expenses for users
-// We will need to pass a burst and offset. After each burst, wwe recieve the  expenses than need to be tracked
+// We will need to pass a burst and offset. After each burst, wwe receive the  expenses than need to be tracked
 // For each of those expenses, we add them to the expenses table after which we update the next tracking date
 // of the current recurring expense.
 // After processing we increment the offset by the burst and repeat the process until we get
@@ -266,7 +267,7 @@ func (app *application) trackRecurringExpenses() {
 }
 
 // trackOverdueDebts() is the method called by the cronjob to track all the debts that are overdue
-// Just like the trackRecurringExpenses, we will need to pass a burst and offset. After each burst, wwe recieve the  debts than need to be tracked
+// Just like the trackRecurringExpenses, we will need to pass a burst and offset. After each burst, wwe receive the  debts than need to be tracked
 // or rather the debts that need accrued interest recalculation
 // For each debt, recalculate the updated interest, update the accrued interest and remaining balance
 // After that, save the updated debt record back, and send a notification to the user

@@ -6,9 +6,10 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/shopspring/decimal"
+
 	"github.com/Blue-Davinci/OptiVest/internal/data"
 	"github.com/Blue-Davinci/OptiVest/internal/validator"
-	"github.com/shopspring/decimal"
 )
 
 // createNewUserGroupHandler() is a handler function that creates a new user group
@@ -333,7 +334,9 @@ func (app *application) createNewGroupInvitation(w http.ResponseWriter, r *http.
 			Tags:     "group,invitation",
 		},
 	}
-	app.PublishNotificationToRedis(inviteeUser.ID, data.NotificationTypeGroupInvite, notificationContent)
+	// Notification publish is fire-and-forget; failure is logged inside
+	// PublishNotificationToRedis and does not fail the inbound request.
+	_ = app.PublishNotificationToRedis(inviteeUser.ID, data.NotificationTypeGroupInvite, notificationContent)
 }
 
 // createNewPublicMembershipHandler() will create a new public membership for a group
@@ -483,7 +486,9 @@ func (app *application) updateGroupInvitationStatusHandler(w http.ResponseWriter
 			Tags:     "groups, invitation, status",
 		},
 	}
-	app.PublishNotificationToRedis(groupInvitation.InviterUserID, data.NotificationTypeGroupInvite, notificationContent)
+	// Notification publish is fire-and-forget; failure is logged inside
+	// PublishNotificationToRedis and does not fail the inbound request.
+	_ = app.PublishNotificationToRedis(groupInvitation.InviterUserID, data.NotificationTypeGroupInvite, notificationContent)
 }
 
 // createNewGroupGoalHandler() will create a new group goal for a group

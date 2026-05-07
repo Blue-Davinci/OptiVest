@@ -10,11 +10,12 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/Blue-Davinci/OptiVest/internal/data"
 	"github.com/felixge/httpsnoop"
 	"github.com/go-redis/redis_rate/v10"
 	"github.com/tomasen/realip"
 	"go.uber.org/zap"
+
+	"github.com/Blue-Davinci/OptiVest/internal/data"
 )
 
 func (app *application) recoverPanic(next http.Handler) http.Handler {
@@ -159,7 +160,7 @@ var (
 // each instance had its own clients map, so the configured limit was the
 // per-pod limit, not the per-cluster limit.
 //
-// Behaviour
+// Behavior
 //
 //   - Keying is per real-IP (via tomasen/realip, same as before). User-keying
 //     is intentionally out of scope for this PR because rateLimit runs before
@@ -178,7 +179,7 @@ var (
 //     fail-closed is total API outage every time Redis blips. Ops should
 //     alert on rate_limiter_redis_errors_total > 0 so this never goes
 //     unnoticed.
-//   - Honours app.config.limiter.enabled: when false, every request is
+//   - Honors app.config.limiter.enabled: when false, every request is
 //     allowed without touching Redis (counted via rate_limiter_disabled_total).
 func (app *application) rateLimit(next http.Handler) http.Handler {
 	// Build the Limit once at middleware-construction time. redis_rate.Limit

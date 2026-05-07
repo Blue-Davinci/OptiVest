@@ -53,7 +53,7 @@ var (
 // of the chain and echoed back to the client in the X-Request-ID response
 // header so they can include it in bug reports.
 //
-// Behaviour:
+// Behavior:
 //   - If the request arrives with X-Request-ID, validate and reuse it.
 //   - If not, or if the inbound value is empty/oversized/contains an
 //     unsafe character, generate a fresh ID via crypto/rand.
@@ -212,7 +212,7 @@ func (app *application) loggerFromRequest(r *http.Request) *zap.Logger {
 // request. If the ctx never flowed through the request middleware (e.g.
 // a cron job or a test using context.Background), the missing fields
 // resolve to their zero values and the line is still emitted, just
-// without correlation - same behaviour as app.logger directly.
+// without correlation - same behavior as app.logger directly.
 func (app *application) loggerFromContext(ctx context.Context) *zap.Logger {
 	var userID int64
 	if holder := contextRequestLog(ctx); holder != nil {

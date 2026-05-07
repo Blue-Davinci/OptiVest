@@ -169,7 +169,7 @@ func TestRateLimit_FailOpenOnRedisError(t *testing.T) {
 
 // TestRateLimit_PerIPIsolation confirms two distinct IPs maintain
 // independent buckets — exhausting one IP's budget must not affect another.
-// This is the property that prevents a noisy neighbour from rate-limiting
+// This is the property that prevents a noisy neighbor from rate-limiting
 // every other client behind the same load balancer.
 func TestRateLimit_PerIPIsolation(t *testing.T) {
 	mr := miniredis.RunT(t)

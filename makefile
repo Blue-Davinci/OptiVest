@@ -5,7 +5,8 @@ help:
 	@echo "  run/api/origins     - Run the API server with CORS origins"
 	@echo "  db/psql             - Connect to the db using psql"
 	@echo "  build/api           - Build the cmd/api application"
-	@echo "  audit               - Run vet, staticcheck, govulncheck, and the test suite (matches CI)"
+	@echo "  audit               - Run vet, golangci-lint, govulncheck, and the test suite (matches CI)"
+	@echo "  lint                - Run golangci-lint (matches the CI lint job)"
 	@echo "  tidy                - Format code and tidy go.mod/go.sum"
 	@echo "  test                - Run the full test suite with -race"
 	@echo "  docker/up           - Build images and bring up the local stack (postgres, redis, migrations, api)"
@@ -51,7 +52,13 @@ tidy:
 	gofmt -s -w .
 	go mod tidy
 
-## audit: full local equivalent of CI (vet + staticcheck + govulncheck + test)
+## lint: run golangci-lint with the repo's .golangci.yml ruleset
+.PHONY: lint
+lint:
+	@echo 'Running golangci-lint (install: https://golangci-lint.run/usage/install/)...'
+	golangci-lint run --timeout=5m ./...
+
+## audit: full local equivalent of CI (tidy + vet + lint + govulncheck + test)
 .PHONY: audit
 audit:
 	@echo 'Verifying go.mod is tidy...'
@@ -59,8 +66,8 @@ audit:
 	git diff --exit-code go.mod go.sum
 	@echo 'Running go vet...'
 	go vet ./...
-	@echo 'Running staticcheck (install: go install honnef.co/go/tools/cmd/staticcheck@latest)...'
-	staticcheck ./...
+	@echo 'Running golangci-lint (install: https://golangci-lint.run/usage/install/)...'
+	golangci-lint run --timeout=5m ./...
 	@echo 'Running govulncheck (install: go install golang.org/x/vuln/cmd/govulncheck@latest)...'
 	govulncheck ./...
 	@echo 'Running tests with race detector...'

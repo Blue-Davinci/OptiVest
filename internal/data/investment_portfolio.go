@@ -10,10 +10,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Blue-Davinci/OptiVest/internal/database"
-	"github.com/Blue-Davinci/OptiVest/internal/validator"
 	"github.com/araddon/dateparse"
 	"github.com/shopspring/decimal"
+
+	"github.com/Blue-Davinci/OptiVest/internal/database"
+	"github.com/Blue-Davinci/OptiVest/internal/validator"
 )
 
 type CustomTime1 struct {
@@ -517,7 +518,7 @@ func (m InvestmentPortfolioModel) GetAllStockInvestmentByUserID(ctx context.Cont
 		}
 		err := json.Unmarshal(analysisData, &stockAnalysis)
 		if err != nil {
-			fmt.Println("error unmarshalling stock analysis: ", err)
+			fmt.Println("error unmarshaling stock analysis: ", err)
 		}
 
 		// Unmarshal transactions to an array of JSON objects
@@ -529,7 +530,7 @@ func (m InvestmentPortfolioModel) GetAllStockInvestmentByUserID(ctx context.Cont
 		}
 		err = json.Unmarshal(transactionsData, &investmentTransactions)
 		if err != nil {
-			fmt.Println("error unmarshalling stock transactions: ", err)
+			fmt.Println("error unmarshaling stock transactions: ", err)
 		}
 
 		// Populate the enriched stock investment struct
@@ -697,7 +698,7 @@ func (m InvestmentPortfolioModel) GetAllBondInvestmentByUserID(ctx context.Conte
 		}
 		err := json.Unmarshal(analysisData, &bondAnalysis)
 		if err != nil {
-			fmt.Println("error unmarshalling bond analysis 1: ", err)
+			fmt.Println("error unmarshaling bond analysis 1: ", err)
 		}
 
 		// Unmarshal transactions to an array of JSON objects
@@ -709,7 +710,7 @@ func (m InvestmentPortfolioModel) GetAllBondInvestmentByUserID(ctx context.Conte
 		}
 		err = json.Unmarshal(transactionsData, &investmentTransactions)
 		if err != nil {
-			fmt.Println("error unmarshalling bond transactions 2: ", err)
+			fmt.Println("error unmarshaling bond transactions 2: ", err)
 		}
 
 		// Populate the enriched bond investment struct
@@ -882,7 +883,7 @@ func (m InvestmentPortfolioModel) GetAllAlternativeInvestmentByUserID(ctx contex
 		}
 		err := json.Unmarshal(transactionsData, &investmentTransactions)
 		if err != nil {
-			fmt.Println("error unmarshalling alternative transactions: ", err)
+			fmt.Println("error unmarshaling alternative transactions: ", err)
 		}
 
 		// Populate the enriched alternative investment struct
@@ -956,7 +957,7 @@ func (m InvestmentPortfolioModel) CreateNewInvestmentTransaction(ctx context.Con
 
 // GetAllInvestmentsByUserID() retrieves a subset of all data relating to a user's investments.
 // We take in a user ID and return a InvestmentAnalysis struct that will incorporate all investment types.
-// Each recieved investment has a column called investment_type, which will be used to determine the type of investment.
+// Each received investment has a column called investment_type, which will be used to determine the type of investment.
 // The investment_type will be a Stock, Bond or Alternative.
 // We return an error if there was an issue retrieving the investment data.
 func (m InvestmentPortfolioModel) GetAllInvestmentsByUserID(ctx context.Context, userID int64) (*InvestmentAnalysis, error) {
@@ -1019,7 +1020,7 @@ func (m InvestmentPortfolioModel) GetAllInvestmentsByUserID(ctx context.Context,
 }
 
 // CreateStockAnalysis() creates a stock analysis for a user's stock investment.
-// This method recieves a *StockAnalysisStatistics struct and returns an error if there was an issue creating the stock analysis.
+// This method receives a *StockAnalysisStatistics struct and returns an error if there was an issue creating the stock analysis.
 func (m InvestmentPortfolioModel) CreateStockAnalysis(ctx context.Context, userID int64, riskFreeRate decimal.Decimal, symbol string, stockAnalysis *StockAnalysis) error {
 	ctx, cancel := contextGenerator(ctx, DefaultInvPortContextTimeout)
 	defer cancel()
@@ -1050,7 +1051,7 @@ func (m InvestmentPortfolioModel) CreateStockAnalysis(ctx context.Context, userI
 }
 
 // CreateBondAnalysis() creates a bond analysis for a user's bond investment.
-// This method recieves a *BondAnalysisStatistics struct and returns an error if there was an issue creating the bond analysis.
+// This method receives a *BondAnalysisStatistics struct and returns an error if there was an issue creating the bond analysis.
 func (m InvestmentPortfolioModel) CreateBondAnalysis(ctx context.Context, userID int64, symbol string, bondAnalysis *BondAnalysis) error {
 	ctx, cancel := contextGenerator(ctx, DefaultInvPortContextTimeout)
 	defer cancel()

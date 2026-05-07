@@ -166,7 +166,7 @@ func (app *application) buildLLMRequestHelper(ctx context.Context, profile inter
 	// Marshal the profile data
 	profileData, err := json.Marshal(profile)
 	if err != nil {
-		app.loggerFromContext(ctx).Info("Error marshalling profile data")
+		app.loggerFromContext(ctx).Info("Error marshaling profile data")
 		return nil, err
 	}
 

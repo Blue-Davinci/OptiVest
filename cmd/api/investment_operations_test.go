@@ -5,10 +5,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Blue-Davinci/OptiVest/internal/data"
 	"github.com/shopspring/decimal"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
+
+	"github.com/Blue-Davinci/OptiVest/internal/data"
 )
 
 // fakeTimeSeries returns a deterministic, hand-crafted TimeSeriesDailyResponse

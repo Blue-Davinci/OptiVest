@@ -15,7 +15,7 @@ type CustomTime struct {
 // Custom time layout: "20241010T110000"
 const customTimeLayout = "20060102T150405"
 
-// UnmarshalJSON implements the unmarshalling for CustomTime
+// UnmarshalJSON implements the unmarshaling for CustomTime
 func (ct *CustomTime) UnmarshalJSON(b []byte) error {
 	// Remove quotes around the string
 	s := strings.Trim(string(b), "\"")
@@ -29,7 +29,7 @@ func (ct *CustomTime) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// MarshalJSON implements the marshalling for CustomTime
+// MarshalJSON implements the marshaling for CustomTime
 func (ct CustomTime) MarshalJSON() ([]byte, error) {
 	// Format the time using the custom layout
 	formattedTime := fmt.Sprintf("\"%s\"", ct.Time.Format(customTimeLayout))

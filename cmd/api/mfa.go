@@ -7,11 +7,12 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/Blue-Davinci/OptiVest/internal/data"
-	"github.com/Blue-Davinci/OptiVest/internal/validator"
 	"github.com/pquerna/otp"
 	"github.com/pquerna/otp/totp"
 	"go.uber.org/zap"
+
+	"github.com/Blue-Davinci/OptiVest/internal/data"
+	"github.com/Blue-Davinci/OptiVest/internal/validator"
 )
 
 // setupMFAHandler() sets up 2FA for a user. We generate a new Mfa secret key
@@ -51,7 +52,7 @@ func (app *application) setupMFAHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	// Save the secret to the user
 	user.MFASecret = secret.Secret()
-	// if succesful, update the user's key// in the DB
+	// if successful, update the user's key// in the DB
 	err = app.models.Users.UpdateUser(r.Context(), user, app.config.encryption.key)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
@@ -175,7 +176,7 @@ func (app *application) verifiy2FASetupHandler(w http.ResponseWriter, r *http.Re
 	err = app.writeJSON(w, http.StatusOK, envelope{
 		"first_name":       user.FirstName,
 		"last_name":        user.LastName,
-		"message":          "Your MFA request has been succesfully enabled. Please save your recovery codes",
+		"message":          "Your MFA request has been successfully enabled. Please save your recovery codes",
 		"recovery_details": recoveryCodes,
 	}, nil)
 	if err != nil {
@@ -194,7 +195,7 @@ func (app *application) verifiy2FASetupHandler(w http.ResponseWriter, r *http.Re
 	})
 	// send a notification to the user
 	notificationContent := data.NotificationContent{
-		Message: fmt.Sprintf(("%s, your MFA request has been succesfully enabled. Remember to save your recovery codes safely and securely. They are the only way to get your account in cases where your device is lost or damaged"), user.FirstName),
+		Message: fmt.Sprintf(("%s, your MFA request has been successfully enabled. Remember to save your recovery codes safely and securely. They are the only way to get your account in cases where your device is lost or damaged"), user.FirstName),
 		Meta: data.NotificationMeta{
 			Url:      app.config.frontend.profileurl,
 			ImageUrl: app.config.frontend.applogourl,

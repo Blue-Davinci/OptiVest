@@ -7,9 +7,10 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/shopspring/decimal"
+
 	"github.com/Blue-Davinci/OptiVest/internal/database"
 	"github.com/Blue-Davinci/OptiVest/internal/validator"
-	"github.com/shopspring/decimal"
 )
 
 type FinancialTrackingModel struct {
@@ -151,7 +152,7 @@ type DebtRepayment struct {
 }
 
 // Map a recurring expense to a corresponding constant
-func (expense *FinancialTrackingModel) MapToDatabaseRecurringExpense(interval string) (database.RecurrenceIntervalEnum, error) {
+func (m *FinancialTrackingModel) MapToDatabaseRecurringExpense(interval string) (database.RecurrenceIntervalEnum, error) {
 	switch interval {
 	case "daily":
 		return database.RecurrenceIntervalEnumDaily, nil

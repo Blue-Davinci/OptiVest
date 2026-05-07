@@ -7,8 +7,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Blue-Davinci/OptiVest/internal/database"
 	"github.com/sqlc-dev/pqtype"
+
+	"github.com/Blue-Davinci/OptiVest/internal/database"
 )
 
 type NotificationManagerModel struct {

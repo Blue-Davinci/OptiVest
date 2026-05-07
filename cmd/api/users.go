@@ -6,10 +6,11 @@ import (
 	"net/http"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/Blue-Davinci/OptiVest/internal/data"
 	"github.com/Blue-Davinci/OptiVest/internal/database"
 	"github.com/Blue-Davinci/OptiVest/internal/validator"
-	"go.uber.org/zap"
 )
 
 func (app *application) registerUserHandler(w http.ResponseWriter, r *http.Request) {
@@ -181,7 +182,7 @@ func (app *application) activateUserHandler(w http.ResponseWriter, r *http.Reque
 		app.serverErrorResponse(w, r, err)
 		return
 	}
-	// Succesful, so we send an email for a succesful activation
+	// Successful, so we send an email for a successful activation
 	app.background(func() {
 		// As there are now multiple pieces of data that we want to pass to our email
 		// templates, we create a map to act as a 'holding structure' for the data. This
@@ -193,7 +194,7 @@ func (app *application) activateUserHandler(w http.ResponseWriter, r *http.Reque
 			"lastName":  user.LastName,
 		}
 		// Send the welcome email, passing in the map above as dynamic data.
-		err = app.mailer.Send(user.Email, "user_succesful_activation.tmpl", data)
+		err = app.mailer.Send(user.Email, "user_successful_activation.tmpl", data)
 		if err != nil {
 			app.logger.Error("Error sending welcome email", zap.String("email", user.Email), zap.Error(err))
 		}
@@ -219,8 +220,9 @@ func (app *application) activateUserHandler(w http.ResponseWriter, r *http.Reque
 			Tags:     "welcome, activation, account",
 		},
 	}
-	// send the notification to the user
-	app.PublishNotificationToRedis(user.ID, data.NotificationTypeUserWelcome, notificationContent)
+	// Notification publish is fire-and-forget; failure is logged inside
+	// PublishNotificationToRedis and does not fail the inbound request.
+	_ = app.PublishNotificationToRedis(user.ID, data.NotificationTypeUserWelcome, notificationContent)
 }
 
 // updateUserPasswordHandler() Verifies the password reset token and sets a new password for the user.
@@ -279,7 +281,7 @@ func (app *application) updateUserPasswordHandler(w http.ResponseWriter, r *http
 		app.serverErrorResponse(w, r, err)
 		return
 	}
-	// Succesful, so we send an email for a succesful password reset
+	// Successful, so we send an email for a successful password reset
 	app.background(func() {
 		data := map[string]any{
 			"firstName": user.FirstName,
@@ -301,7 +303,7 @@ func (app *application) updateUserPasswordHandler(w http.ResponseWriter, r *http
 
 // getUserInformationHandler() is responsible for fetching the user's information.
 // soo far we will just return the User as obtained from the context.
-// we will need to also impliment an account, award and statistic return
+// we will need to also implement an account, award and statistic return
 func (app *application) getUserInformationHandler(w http.ResponseWriter, r *http.Request) {
 	// Get the user from the context
 	user := app.contextGetUser(r)
@@ -418,8 +420,9 @@ func (app *application) updateUserInformationHandler(w http.ResponseWriter, r *h
 			Tags:     "account, update, notification",
 		},
 	}
-	// Send the notification to the user
-	app.PublishNotificationToRedis(user.ID, data.NotificationTypeAccount, notificationContent)
+	// Notification publish is fire-and-forget; failure is logged inside
+	// PublishNotificationToRedis and does not fail the inbound request.
+	_ = app.PublishNotificationToRedis(user.ID, data.NotificationTypeAccount, notificationContent)
 }
 
 // logoutUserHandler() is the main endpoint responsible for logging out the user.

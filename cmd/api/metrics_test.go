@@ -111,7 +111,7 @@ func TestPrometheusExposition_MicroSignSanitised(t *testing.T) {
 	body := scrape(t)
 
 	if !strings.Contains(body, "total_processing_time_us ") {
-		t.Errorf("expected sanitised metric total_processing_time_us in output\n%s", body)
+		t.Errorf("expected sanitized metric total_processing_time_us in output\n%s", body)
 	}
 	if strings.Contains(body, "total_processing_time_μs") {
 		t.Errorf("non-ASCII μ leaked into Prom output:\n%s", body)
@@ -119,7 +119,7 @@ func TestPrometheusExposition_MicroSignSanitised(t *testing.T) {
 }
 
 // TestPrometheusExposition_MapBecomesLabelledLines verifies that an
-// expvar.Map turns into one labelled sample line per entry, and that the
+// expvar.Map turns into one labeled sample line per entry, and that the
 // type/help block is emitted exactly once even with multiple samples.
 func TestPrometheusExposition_MapBecomesLabelledLines(t *testing.T) {
 	m := getOrPublishMap(t, "total_responses_sent_by_status")
@@ -150,7 +150,7 @@ func TestPrometheusExposition_MapBecomesLabelledLines(t *testing.T) {
 }
 
 // TestPrometheusExposition_VersionBecomesInfoMetric covers the canonical
-// Prometheus pattern for build identity: a labelled gauge always set to 1
+// Prometheus pattern for build identity: a labeled gauge always set to 1
 // with the version carried in the label, never as the metric value.
 func TestPrometheusExposition_VersionBecomesInfoMetric(t *testing.T) {
 	versionVar := getOrPublishString(t, "version")
@@ -299,14 +299,14 @@ func TestPrometheusExposition_HelpLinesEscapeNewlines(t *testing.T) {
 }
 
 // TestRoutesIncludeMetrics asserts that the router actually wires /metrics
-// as a top-level GET route. This is structural rather than behavioural: we
+// as a top-level GET route. This is structural rather than behavioral: we
 // don't dispatch a real request through the full middleware chain (that
 // requires a fully-configured application), we just confirm chi has a route
 // matching the path. That is enough to catch the "forgot to register" class
 // of regression.
 func TestRoutesIncludeMetrics(t *testing.T) {
 	// Construct just enough application state to call routes() without
-	// initialising every downstream subsystem (DB, redis, mailer, etc.).
+	// initializing every downstream subsystem (DB, redis, mailer, etc.).
 	// The middleware constructors only read fields we set here.
 	app := &application{
 		logger: zap.NewNop(),
