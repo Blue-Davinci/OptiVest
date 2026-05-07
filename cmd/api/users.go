@@ -81,7 +81,10 @@ func (app *application) registerUserHandler(w http.ResponseWriter, r *http.Reque
 		app.serverErrorResponse(w, r, err)
 		return
 	}
-	app.logger.Info("Token Has Been generated for new user", zap.String("token", token.Plaintext), zap.Int("user id", int(user.ID)))
+	// Never log the activation token plaintext — anyone with log access could
+	// activate the account before the legitimate user clicks the email link.
+	// User ID alone is enough breadcrumb for the registration flow.
+	app.logger.Info("activation token generated for new user", zap.Int64("user_id", user.ID))
 	app.background(func() {
 		// As there are now multiple pieces of data that we want to pass to our email
 		// templates, we create a map to act as a 'holding structure' for the data. This

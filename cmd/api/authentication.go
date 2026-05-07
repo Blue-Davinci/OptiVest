@@ -257,7 +257,7 @@ func (app *application) validateMFALoginAttemptHandler(w http.ResponseWriter, r 
 		return
 	}
 	// Never log MFA secrets, decrypted tokens, the user-supplied TOTP code,
-	// or the stored MFA session value - they are auth-flow primitives that
+	// or the stored MFA session value — they are auth-flow primitives that
 	// would let any reader of the log replay or bypass the MFA challenge.
 	// If a future debug session needs to confirm "did the comparison run",
 	// log a boolean (decryptedToken == sessionValue) at Debug level, never
