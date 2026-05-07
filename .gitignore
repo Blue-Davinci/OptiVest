@@ -10,3 +10,6 @@
 # project layout is the source of truth, not whatever happens to be cached
 # on a developer's machine.
 .tmp/
+
+# Local-only working notes, trackers, and orientation scratch
+.notes/
