@@ -275,7 +275,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: image-${{ matrix.image }}
           path: /tmp
@@ -331,7 +331,7 @@ jobs:
       matrix:
         image: [optivest-api, optivest-migrate]
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: image-${{ matrix.image }}
           path: /tmp
