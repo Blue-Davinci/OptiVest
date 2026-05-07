@@ -131,7 +131,7 @@ func (m NotificationManagerModel) UpdateNotificationReadAtAndStatus(ctx context.
 	// Update the notification in the database. sql.ErrNoRows here means
 	// the row simply does not exist for this user — there is no version
 	// field on the notifications table for true optimistic locking, so
-	// returning ErrEditConflict (the prior behaviour) was a category
+	// returning ErrEditConflict (the prior behavior) was a category
 	// error: callers retried, hit the same not-found, and surfaced an
 	// "edit conflict" to the user for what was actually a missing row.
 	_, err := m.DB.UpdateNotificationReadAtAndStatus(ctx, database.UpdateNotificationReadAtAndStatusParams{
