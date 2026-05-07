@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>OptiVest — Portfolio Analysis Streaming Demo</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #1e293b;
+      --panel-border: #334155;
+      --fg: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --good: #4ade80;
+      --bad: #f87171;
+      --warn: #fbbf24;
+      --code-bg: #0b1220;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; padding: 0;
+      background: var(--bg); color: var(--fg);
+      font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      min-height: 100vh;
+    }
+    main { max-width: 1100px; margin: 0 auto; padding: 24px 20px 80px; }
+    header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 18px; }
+    h1 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }
+    h2 { margin: 24px 0 10px; font-size: 14px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+    .subtitle { color: var(--muted); font-size: 13px; }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--panel-border);
+      border-radius: 8px;
+      padding: 16px;
+    }
+    .form-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px 16px;
+    }
+    .form-grid label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+    .form-grid input {
+      background: var(--code-bg); color: var(--fg);
+      border: 1px solid var(--panel-border); border-radius: 6px;
+      padding: 8px 10px; font: 13px/1.4 ui-monospace, "SF Mono", Menlo, Monaco, monospace;
+    }
+    .form-grid input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+    .actions { display: flex; gap: 10px; margin-top: 14px; align-items: center; }
+    button {
+      background: var(--accent); color: #0b1220; border: 0;
+      padding: 8px 14px; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 13px;
+    }
+    button:disabled { opacity: 0.45; cursor: not-allowed; }
+    button.secondary { background: transparent; color: var(--fg); border: 1px solid var(--panel-border); }
+    .status {
+      margin-left: auto;
+      font-size: 12px; color: var(--muted);
+      display: flex; align-items: center; gap: 6px;
+    }
+    .status .dot {
+      width: 8px; height: 8px; border-radius: 50%; background: var(--muted);
+    }
+    .status[data-state="streaming"] .dot { background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
+    .status[data-state="done"]      .dot { background: var(--good); }
+    .status[data-state="error"]     .dot { background: var(--bad); }
+    @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: 0.35 } }
+
+    .transcript {
+      min-height: 220px;
+      max-height: 360px;
+      overflow: auto;
+      background: var(--code-bg);
+      border: 1px solid var(--panel-border);
+      border-radius: 8px;
+      padding: 14px;
+      white-space: pre-wrap;
+      font: 13px/1.5 ui-monospace, "SF Mono", Menlo, Monaco, monospace;
+    }
+    .transcript.empty { color: var(--muted); font-style: italic; }
+    pre.json {
+      background: var(--code-bg); border: 1px solid var(--panel-border);
+      padding: 12px; border-radius: 8px; overflow: auto; max-height: 320px;
+      font: 12px/1.45 ui-monospace, "SF Mono", Menlo, Monaco, monospace;
+      margin: 0;
+    }
+    .err-card {
+      background: rgba(248, 113, 113, 0.08);
+      border: 1px solid rgba(248, 113, 113, 0.4);
+      color: #fecaca;
+      padding: 10px 12px; border-radius: 6px; font-size: 13px;
+    }
+    .meta {
+      display: flex; gap: 18px; flex-wrap: wrap; font-size: 12px;
+      color: var(--muted);
+    }
+    .meta b { color: var(--fg); font-weight: 600; }
+    details { margin-top: 8px; }
+    details summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+    .footer-hint {
+      margin-top: 28px; font-size: 12px; color: var(--muted);
+      border-top: 1px solid var(--panel-border); padding-top: 14px;
+    }
+    .footer-hint code {
+      background: var(--code-bg); padding: 1px 5px; border-radius: 3px;
+      font-size: 11.5px;
+    }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>OptiVest portfolio analysis &mdash; streaming demo</h1>
+    <span class="subtitle">SSE smoke client</span>
+  </header>
+
+  <section class="panel">
+    <form id="cfg" class="form-grid" autocomplete="off" onsubmit="return false">
+      <label>API base URL
+        <input id="api" value="http://localhost:4000" spellcheck="false" />
+      </label>
+      <label>Bearer token (X-Auth)
+        <input id="token" placeholder="paste token from POST /v1/api/authentication" spellcheck="false" />
+      </label>
+    </form>
+    <div class="actions">
+      <button id="start">Stream analysis</button>
+      <button id="stop" class="secondary" disabled>Stop</button>
+      <button id="clear" class="secondary">Clear</button>
+      <span id="status" class="status" data-state="idle"><span class="dot"></span><span class="label">idle</span></span>
+    </div>
+  </section>
+
+  <h2>Live transcript</h2>
+  <div id="transcript" class="transcript empty">(deltas will appear here as the model streams)</div>
+
+  <h2>Final payload</h2>
+  <pre id="final" class="json">(awaiting <code>event: done</code>)</pre>
+
+  <div id="errBox" hidden>
+    <h2>Error</h2>
+    <div id="err" class="err-card"></div>
+  </div>
+
+  <h2>Per-event log</h2>
+  <details open>
+    <summary>Show wire-level events</summary>
+    <pre id="wirelog" class="json"></pre>
+  </details>
+
+  <p class="footer-hint">
+    The endpoint requires <code>Authorization: Bearer &lt;token&gt;</code>, which the
+    browser's native <code>EventSource</code> cannot send. This demo therefore
+    uses <code>fetch()</code> + a manual SSE parser over the response body's
+    <code>ReadableStream</code> &mdash; same wire format, just on a transport that
+    supports custom headers. If your API is running on a different origin from
+    this file, add it to <code>-cors-trusted-origins</code> on the server.
+  </p>
+</main>
+
+<script>
+// SSE frame parser. Spec: events are separated by a blank line; within an
+// event, lines starting with "event:" / "data:" / "id:" / "retry:" carry
+// the named field. Multiple data: lines concatenate with "\n". Anything
+// else is a comment we ignore. We deliberately re-implement this rather
+// than pulling in a library because the whole point of the smoke test is
+// to demonstrate the wire format with no external moving parts.
+function* parseSSE(buffer) {
+  let idx;
+  while ((idx = buffer.indexOf("\n\n")) !== -1) {
+    const raw = buffer.slice(0, idx);
+    buffer = buffer.slice(idx + 2);
+    let event = "message";
+    const dataLines = [];
+    for (const line of raw.split("\n")) {
+      if (line.startsWith(":")) continue;
+      const colon = line.indexOf(":");
+      if (colon === -1) continue;
+      const field = line.slice(0, colon);
+      const value = line.slice(colon + 1).replace(/^ /, "");
+      if (field === "event") event = value;
+      else if (field === "data") dataLines.push(value);
+    }
+    yield { event, data: dataLines.join("\n"), raw };
+  }
+  return buffer;
+}
+
+const $ = (id) => document.getElementById(id);
+const els = {
+  api: $("api"), token: $("token"),
+  start: $("start"), stop: $("stop"), clear: $("clear"),
+  status: $("status"), statusLabel: $("status").querySelector(".label"),
+  transcript: $("transcript"), final: $("final"),
+  err: $("err"), errBox: $("errBox"),
+  wirelog: $("wirelog"),
+};
+
+let abortCtrl = null;
+
+function setStatus(state, label) {
+  els.status.dataset.state = state;
+  els.statusLabel.textContent = label;
+}
+
+function appendTranscript(text) {
+  if (els.transcript.classList.contains("empty")) {
+    els.transcript.classList.remove("empty");
+    els.transcript.textContent = "";
+  }
+  els.transcript.append(document.createTextNode(text));
+  els.transcript.scrollTop = els.transcript.scrollHeight;
+}
+
+function logWire(event, data) {
+  const line = `event: ${event}\ndata: ${data}\n\n`;
+  els.wirelog.textContent += line;
+}
+
+function showError(message) {
+  els.err.textContent = message;
+  els.errBox.hidden = false;
+}
+
+function clearAll() {
+  els.transcript.classList.add("empty");
+  els.transcript.textContent = "(deltas will appear here as the model streams)";
+  els.final.textContent = "(awaiting event: done)";
+  els.wirelog.textContent = "";
+  els.err.textContent = "";
+  els.errBox.hidden = true;
+  setStatus("idle", "idle");
+}
+
+async function startStream() {
+  const apiBase = els.api.value.trim().replace(/\/$/, "");
+  const token = els.token.value.trim();
+  if (!apiBase) return showError("API base URL is required");
+  if (!token)   return showError("Bearer token is required (POST /v1/api/authentication to get one)");
+
+  clearAll();
+  setStatus("streaming", "connecting...");
+  els.start.disabled = true;
+  els.stop.disabled = false;
+
+  abortCtrl = new AbortController();
+  const url = `${apiBase}/v1/investments/analysis/stream`;
+  let res;
+  try {
+    res = await fetch(url, {
+      method: "GET",
+      headers: { "Authorization": `Bearer ${token}`, "Accept": "text/event-stream" },
+      signal: abortCtrl.signal,
+    });
+  } catch (e) {
+    if (e.name !== "AbortError") showError(`fetch failed: ${e.message}`);
+    return finish("error", "network error");
+  }
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    showError(`HTTP ${res.status} ${res.statusText} ${body}`);
+    return finish("error", `HTTP ${res.status}`);
+  }
+  const ctype = res.headers.get("Content-Type") || "";
+  if (!ctype.includes("text/event-stream")) {
+    showError(`unexpected Content-Type: ${ctype}`);
+    return finish("error", "bad content-type");
+  }
+  setStatus("streaming", "streaming");
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder("utf-8");
+  let buf = "";
+  for (;;) {
+    let chunk;
+    try { chunk = await reader.read(); }
+    catch (e) {
+      if (e.name === "AbortError") return finish("idle", "aborted");
+      showError(`read failed: ${e.message}`);
+      return finish("error", "read error");
+    }
+    if (chunk.done) return finish("done", "complete");
+    buf += decoder.decode(chunk.value, { stream: true });
+    let nextBuf = buf;
+    for (const ev of parseSSE(buf)) {
+      logWire(ev.event, ev.data);
+      handleEvent(ev);
+      nextBuf = nextBuf.slice(ev.raw.length + 2);
+    }
+    buf = nextBuf;
+  }
+}
+
+function handleEvent({ event, data }) {
+  let payload;
+  try { payload = JSON.parse(data); }
+  catch (_) { /* tolerate non-JSON for the comment / heartbeat case */ return; }
+
+  if (event === "message") {
+    if (typeof payload.delta === "string") appendTranscript(payload.delta);
+    return;
+  }
+  if (event === "done") {
+    els.final.textContent = JSON.stringify(payload, null, 2);
+    setStatus("done", `done (${payload.finish_reason || "no reason"}${payload.usage ? `, ${payload.usage.total_tokens} tok` : ""})`);
+    return;
+  }
+  if (event === "error") {
+    showError(payload.error || "unknown error");
+    setStatus("error", "error");
+  }
+}
+
+function finish(state, label) {
+  els.start.disabled = false;
+  els.stop.disabled = true;
+  abortCtrl = null;
+  if (els.status.dataset.state !== "done" && els.status.dataset.state !== "error") {
+    setStatus(state, label);
+  }
+}
+
+els.start.addEventListener("click", () => { startStream(); });
+els.stop.addEventListener("click",  () => { if (abortCtrl) abortCtrl.abort(); });
+els.clear.addEventListener("click", () => { clearAll(); });
+</script>
+</body>
+</html>

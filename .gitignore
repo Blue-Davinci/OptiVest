@@ -4,3 +4,9 @@
 *.env
 !.env.example
 !.env*.example
+
+# Local tool caches written under the workspace (golangci-lint, staticcheck
+# fallback caches, ad-hoc scratch). The CI runs in a clean container so the
+# project layout is the source of truth, not whatever happens to be cached
+# on a developer's machine.
+.tmp/

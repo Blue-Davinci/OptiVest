@@ -546,6 +546,13 @@ the available commands for a quick lookup (INCOMPLETE, use help for full list).
 > the result is already in the browser by then. Mid-stream errors are
 > reported via a single `event: error` event because by that point the
 > response status code is already on the wire and unchangeable.
+>
+> A single-file browser smoke-test client lives at
+> [`examples/sse-portfolio-analysis/`](examples/sse-portfolio-analysis/).
+> It uses `fetch()` + a manual SSE parser (rather than `EventSource`,
+> which cannot send `Authorization` headers) and renders deltas live
+> against a running API. Useful for eyeballing CORS, auth, and flushing
+> end-to-end without spinning up the full frontend.
 
 Using `make run`, will run the API with a default connection string located 
 in `cmd\api\.env`. If you're using `powershell`, you need to load the values otherwise you will get
