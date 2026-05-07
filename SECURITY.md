@@ -180,6 +180,43 @@ Lowering it past 5s is not recommended - the model's first-token
 latency is genuinely variable, and false-positive aborts manifest as
 user-visible 5xxs.
 
+## Streaming portfolio analysis endpoint (P4.B)
+
+`GET /v1/investments/analysis/stream` is the inbound counterpart to the
+SambaNova streaming client. It is mounted on the regular `/v1` router
+(not the long-lived `sseRoutes` server), so it inherits the full
+middleware chain: per-IP rate limiting, bearer-token auth + activated-user
+check, structured request logging, and X-Request-ID correlation. This is
+deliberate — each call is bounded by `-llm-total-budget` (default 90s)
+and behaves much more like a slow HTTP request than a persistent push
+channel, so the same controls that protect `/v1/investments/analysis`
+must apply here.
+
+Two wire-level rules limit information leakage on the SSE error path:
+
+- **No raw upstream errors hit the wire.** `classifyLLMStreamError`
+  collapses transport / dial / TLS errors to a fixed phrase (`internal
+  stream error`) and only surfaces messages we author ourselves
+  (`upstream stalled`, `upstream timed out`, `request canceled`,
+  `llm: non-2xx response: <code>`). Hostnames, retry counts, and
+  socket-level diagnostics stay in the structured server logs.
+- **No partial deltas after a failure.** `streamLLMToSSE` returns the
+  underlying error to the handler rather than emitting a synthetic
+  empty delta. The handler writes a single `event: error` and the
+  connection ends. Clients can therefore treat any received delta as
+  authoritative, with no need to reconcile partial frames.
+
+A persist failure on stream completion (writing the analyzed portfolio
+to the table read by `/v1/investments/analysis/summary`) is logged at
+Error level and surfaced via the standard request log line, but does
+not turn a successful stream into a visible error — the user already
+has the result in their browser. Operators see this as a
+`portfolio analysis stream persist failed` log entry, the metric
+counters are unchanged, and the user has to re-run the analysis to
+see it in their history view. We accept that trade-off because
+emitting a failure event for a *successful* stream would mislead the
+client into discarding a valid analysis.
+
 ## CI security scanning
 
 Every push and PR to `main` runs:

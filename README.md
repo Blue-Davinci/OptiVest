@@ -515,9 +515,37 @@ the available commands for a quick lookup (INCOMPLETE, use help for full list).
 >
 > `LLMRequest` is preserved as a thin back-compat wrapper for callers that
 > only need the joined string (`buildLLMRequestHelper` and friends in
-> `cmd/api/ai_operations.go`). Future Server-Sent Events handlers should
-> call `LLMStream` directly with a non-nil `onChunk` callback to forward
-> partial deltas to the browser as they arrive.
+> `cmd/api/ai_operations.go`).
+
+> **Streaming portfolio analysis (P4.B):**
+> `GET /v1/investments/analysis/stream` is the user-facing payoff for the
+> streaming client. It runs the same DB pre-checks as the synchronous
+> `/v1/investments/analysis` endpoint (goals + non-empty portfolio), and
+> only switches into `text/event-stream` mode once those 4xx-eligible
+> validations pass — so client-side error handling for "no goals set"
+> stays a normal JSON envelope, not a malformed SSE frame.
+>
+> Wire format (all events are JSON-encoded so the client always parses
+> `JSON.parse(event.data)`, regardless of which event name fires):
+>
+> ```text
+> data: {"delta": "<token text>"}             // one per LLM chunk, default event
+> event: done
+> data: {"finish_reason":"stop","usage":{...},"analyzed":{...}}
+>
+> event: error
+> data: {"error":"upstream stalled"}          // terminal failure
+> ```
+>
+> The handler reuses one prompt template across the streaming and
+> non-streaming paths via `renderInvestmentPortfolioPrompt` in
+> `ai_operations.go`, so a user gets the same analysis regardless of
+> which endpoint they hit. On stream completion the analyzed portfolio
+> is persisted to the same table read by `/v1/investments/analysis/summary`;
+> a persist failure logs but does not abort the user's stream, since
+> the result is already in the browser by then. Mid-stream errors are
+> reported via a single `event: error` event because by that point the
+> response status code is already on the wire and unchangeable.
 
 Using `make run`, will run the API with a default connection string located 
 in `cmd\api\.env`. If you're using `powershell`, you need to load the values otherwise you will get
@@ -731,6 +759,7 @@ Auth tokens are obtained via `POST /v1/api/authentication` and sent as `Authoriz
 | POST   | `/v1/investments/transactions` | Record an investment transaction |
 | DELETE | `/v1/investments/transactions/{transactionID}` | Delete an investment transaction |
 | GET    | `/v1/investments/analysis` | Run a portfolio analysis (LLM-backed) |
+| GET    | `/v1/investments/analysis/stream` | Stream a portfolio analysis as Server-Sent Events |
 | GET    | `/v1/investments/analysis/summary` | Latest LLM analysis snapshot |
 
 </details>

@@ -52,19 +52,14 @@ type LLMUsage struct {
 	TotalTokens      int `json:"total_tokens"`
 }
 
-// buildLLMRequest sends a request to the LLM API with the user's profile and
-// investment analysis data and returns the analyzed portfolio data. ctx flows
-// from the originating HTTP request so the downstream INSERT into
-// CreateLLMAnalysisResponse aborts when the client disconnects.
-func (app *application) buildInvestmentPortfolioLLMRequest(ctx context.Context, user *data.User, goals *data.InvestmentGoal, investmentAnalysis *data.InvestmentAnalysis) (*data.LLMAnalyzedPortfolio, error) {
-	// Create a profile
-	profile := UserPortfolioProfile{
-		UserTimeHorizon:    user.TimeHorizon,
-		UserRiskTolerance:  user.RiskTolerance,
-		InvestmentGoals:    goals,
-		InvestmentAnalysis: *investmentAnalysis,
-	}
-	instructions := `{
+// investmentPortfolioInstructionsTemplate is the chat-completions request body
+// sent to SambaNova for portfolio analysis, with a single %s slot where the
+// per-user UserPortfolioProfile is interpolated as JSON. It is package-level
+// so both the synchronous (buildInvestmentPortfolioLLMRequest) and streaming
+// (streamInvestmentPortfolioAnalysisHandler) paths share one prompt source —
+// drift between the two would silently produce different analyses for the
+// same user depending on which endpoint they hit.
+const investmentPortfolioInstructionsTemplate = `{
     "messages": [
 	{
 	  "role": "system",
@@ -88,18 +83,54 @@ func (app *application) buildInvestmentPortfolioLLMRequest(ctx context.Context, 
         "include_usage": true
     }
 }`
-	// get the analyzed portfolio
-	analyzedPortfolio, err := app.buildLLMRequestHelper(ctx, profile, instructions)
+
+// renderInvestmentPortfolioPrompt marshals the user profile and slots it into
+// the chat-completions template. Returns the final JSON body string that gets
+// POSTed to the LLM endpoint.
+func renderInvestmentPortfolioPrompt(profile UserPortfolioProfile) (string, error) {
+	profileData, err := json.Marshal(profile)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf(investmentPortfolioInstructionsTemplate, string(profileData)), nil
+}
+
+// buildLLMRequest sends a request to the LLM API with the user's profile and
+// investment analysis data and returns the analyzed portfolio data. ctx flows
+// from the originating HTTP request so the downstream INSERT into
+// CreateLLMAnalysisResponse aborts when the client disconnects.
+func (app *application) buildInvestmentPortfolioLLMRequest(ctx context.Context, user *data.User, goals *data.InvestmentGoal, investmentAnalysis *data.InvestmentAnalysis) (*data.LLMAnalyzedPortfolio, error) {
+	profile := UserPortfolioProfile{
+		UserTimeHorizon:    user.TimeHorizon,
+		UserRiskTolerance:  user.RiskTolerance,
+		InvestmentGoals:    goals,
+		InvestmentAnalysis: *investmentAnalysis,
+	}
+	body, err := renderInvestmentPortfolioPrompt(profile)
 	if err != nil {
 		return nil, err
+	}
+	url := app.config.api.apikeys.sambanova.url
+	apiKey := app.config.api.apikeys.sambanova.key
+	fullResponse, err := app.LLMRequest(ctx, url, map[string]string{
+		"Authorization": "Bearer " + apiKey,
+	}, body)
+	if err != nil {
+		return nil, err
+	}
+	header, llmAnalysis, footer, err := parseLLMResponse(fullResponse)
+	if err != nil {
+		return nil, err
+	}
+	analyzedPortfolio := &data.LLMAnalyzedPortfolio{
+		Header:   header,
+		Analysis: llmAnalysis,
+		Footer:   footer,
 	}
 	app.loggerFromContext(ctx).Info("Done building LLM request for investment portfolio")
-	// save the analyzed portfolio to the database using CreateLLMAnalysisResponse
-	err = app.models.InvestmentPortfolioManager.CreateLLMAnalysisResponse(ctx, user.ID, analyzedPortfolio)
-	if err != nil {
+	if err := app.models.InvestmentPortfolioManager.CreateLLMAnalysisResponse(ctx, user.ID, analyzedPortfolio); err != nil {
 		return nil, err
 	}
-	// return the analyzed portfolio
 	return analyzedPortfolio, nil
 }
 
