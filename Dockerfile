@@ -5,7 +5,7 @@
 # =============================================================================
 #
 # Stage 1: builder
-#   - golang:1.25-alpine matches the toolchain pinned in go.mod / CI
+#   - golang:1.26-alpine matches the toolchain pinned in go.mod / CI
 #   - dependencies are downloaded in a dedicated layer so source changes
 #     don't bust the (much slower) go mod download cache
 #   - CGO is explicitly disabled. None of our direct or transitive deps
@@ -16,7 +16,7 @@
 #     CI builds locally with -ldflags '-s' for the same reason.
 #
 # Stage 2: runtime
-#   - alpine:3.20 is small (~7 MiB) and ships an interactive shell + curl,
+#   - alpine:3.23 is small (~7 MiB) and ships an interactive shell + curl,
 #     which keeps `docker exec` debugging usable. A future tightening
 #     pass could swap to gcr.io/distroless/static:nonroot to drop another
 #     few MiB and remove the shell, but that comes at the cost of incident-

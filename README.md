@@ -9,7 +9,7 @@
 
 [![CI](https://github.com/Blue-Davinci/OptiVest/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Blue-Davinci/OptiVest/actions/workflows/ci.yml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/Blue-Davinci/OptiVest)](https://goreportcard.com/report/github.com/Blue-Davinci/OptiVest)
-[![Go Version](https://img.shields.io/badge/go-1.25-00ADD8.svg?logo=go&logoColor=white)](https://go.dev/doc/go1.25)
+[![Go Version](https://img.shields.io/badge/go-1.26-00ADD8.svg?logo=go&logoColor=white)](https://go.dev/doc/go1.26)
 [![Status](https://img.shields.io/badge/status-active-success.svg)]()
 [![GitHub Issues](https://img.shields.io/github/issues/Blue-Davinci/OptiVest.svg)](https://github.com/Blue-Davinci/OptiVest/issues)
 [![GitHub Pull Requests](https://img.shields.io/github/issues-pr/Blue-Davinci/OptiVest.svg)](https://github.com/Blue-Davinci/OptiVest/pulls)
@@ -113,6 +113,22 @@ cd internal\sql\schema
 goose postgres postgres://aggregate:password@localhost/aggregate  up
 ```
 
+> **Regenerating the SQLC layer.** `sqlc` is tracked as a Go tool dependency
+> in `go.mod`, so the version is pinned alongside the rest of the toolchain
+> and Dependabot's `gomod` ecosystem will surface upgrade PRs against it.
+> After editing anything under `internal/sql/queries/` or the schema, run:
+>
+> ```bash
+> make generate          # regenerates internal/database/*.sql.go
+> make verify-generate   # fails locally if you forgot to commit the regen
+> ```
+>
+> CI runs the same `verify-generate` check as a dedicated job, so a PR
+> that ships a query change without the regenerated Go won't merge. There
+> is intentionally no `go install sqlc@<floating>` fallback — pinning via
+> the `tool` directive is what kept the previous regen-version drift from
+> repeating.
+
 5. **Download and Setup the MIcroService:** Follow the instructions highlighted [here](https://github.com/Blue-Davinci/OptiVest_Finance_Predictor_Micro_Service_V1) to get the micro-service up and running.
 
 6. **Environment variables:** Copy the committed template into the location
@@ -196,8 +212,8 @@ cp cmd/api/.env.example cmd/api/.env     # first time only — fill the keys you
 make docker/up
 ```
 
-That builds the API image (multi-stage: `golang:1.25-alpine` builder →
-`alpine:3.20` runtime, non-root `optivest` user, static binary), pulls
+That builds the API image (multi-stage: `golang:1.26-alpine` builder →
+`alpine:3.23` runtime, non-root `optivest` user, static binary), pulls
 `postgres:17-alpine` + `redis:7-alpine`, runs every migration in
 `internal/sql/schema/` against the fresh database, and then starts the
 API. The API container is wired to a `HEALTHCHECK` that polls

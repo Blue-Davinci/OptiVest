@@ -7,7 +7,7 @@
 #
 #   DL3008 - "Pin versions in apt get install" — applied to apk add.
 #            Alpine repositories are themselves version-pinned by the base
-#            image tag (alpine:3.20). Adding =version pins on top of that
+#            image tag (alpine:3.23). Adding =version pins on top of that
 #            either silently breaks when the alpine point release moves or
 #            forces a flag-day rebuild every few weeks. The right level
 #            of version control is the alpine tag itself; we already pin
