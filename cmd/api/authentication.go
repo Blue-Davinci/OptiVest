@@ -52,9 +52,22 @@ func (app *application) createAuthenticationApiKeyHandler(w http.ResponseWriter,
 		}
 		return
 	}
-	// if the user is not activated, we return an error
+	// If the user exists but isn't activated, return the same generic
+	// invalid-credentials response we use for not-found / wrong-password.
+	// The previous behavior - 423 Locked with "your user account must be
+	// activated" - was a credential-stuffing oracle: an attacker testing
+	// an (email, password) combo could distinguish "right password,
+	// inactive account" (423) from "wrong password" (401), letting them
+	// confirm valid credentials even when the account couldn't be logged
+	// into. The activation requirement is still enforced - it just no
+	// longer leaks back to the unauthenticated caller. Log the
+	// distinction at WARN with the user_id so legitimate operators can
+	// still triage "user keeps trying to log in but never activated."
 	if !user.Activated {
-		app.inactiveAccountResponse(w, r)
+		app.logger.Warn("login attempted against inactive account; returning generic invalid-credentials",
+			zap.Int64("user_id", user.ID),
+		)
+		app.invalidCredentialsResponse(w, r)
 		return
 	}
 	// check if the password matches
@@ -315,24 +328,28 @@ func (app *application) createPasswordResetTokenHandler(w http.ResponseWriter, r
 		app.failedValidationResponse(w, r, v.Errors)
 		return
 	}
-	// Try to retrieve the corresponding user record for the email address. If it can't
-	// be found, return an error message to the client.
+	// All three branches below (email-not-found, account-inactive, and
+	// the genuine happy path) MUST return the same envelope and status
+	// code so an anonymous caller cannot distinguish them. The previous
+	// implementation got the email-not-found branch right in spirit but
+	// used a 422 envelope with v.Errors, while the inactive-account
+	// branch returned 423; both shapes were enumeration tells. Now all
+	// roads lead to accountRecoveryEligibleResponse with 202.
 	user, err := app.models.Users.GetByEmail(r.Context(), input.Email, app.config.encryption.key)
 	if err != nil {
-		switch {
-		// We willl use a generic error message to avoid leaking information about which
-		// email addresses are registered with the system.
-		case errors.Is(err, data.ErrGeneralRecordNotFound):
-			v.AddError("message", "if we found a matching email address, we have sent password reset instructions to it")
-			app.failedValidationResponse(w, r, v.Errors)
-		default:
-			app.serverErrorResponse(w, r, err)
+		if errors.Is(err, data.ErrGeneralRecordNotFound) {
+			app.loggerFromRequest(r).Warn("password-reset requested for unknown email; sending generic envelope")
+			app.accountRecoveryEligibleResponse(w, r)
+			return
 		}
+		app.serverErrorResponse(w, r, err)
 		return
 	}
-	// Return an error message if the user is not activated.
 	if !user.Activated {
-		app.inactiveAccountResponse(w, r)
+		app.loggerFromRequest(r).Warn("password-reset requested for inactive account; sending generic envelope",
+			zap.Int64("matched_user_id", user.ID),
+		)
+		app.accountRecoveryEligibleResponse(w, r)
 		return
 	}
 
@@ -354,34 +371,29 @@ func (app *application) createPasswordResetTokenHandler(w http.ResponseWriter, r
 		}
 	}
 
-	// Otherwise, create a new password reset token with a 45-minute expiry time.
 	token, err := app.models.Tokens.New(r.Context(), user.ID, 45*time.Minute, data.ScopePasswordReset)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
 	}
-	// Email the user with their password reset token.
 	app.background(func() {
 		data := map[string]any{
 			"passwordResetURL":   app.config.frontend.passwordreseturl + token.Plaintext,
 			"passwordResetToken": token.Plaintext,
 		}
-		// Since email addresses MAY be case sensitive, notice that we are sending this
-		// email using the address stored in our database for the user --- not to the
-		// input.Email address provided by the client in this request.
-		err = app.mailer.Send(user.Email, "token_password_reset.tmpl", data)
-		if err != nil {
-			app.logger.Error("Error sending password reset email", zap.Error(err))
+		if err := app.mailer.Send(user.Email, "token_password_reset.tmpl", data); err != nil {
+			app.loggerFromRequest(r).Error("password-reset email send failed",
+				zap.Int64("user_id", user.ID),
+				zap.Error(err),
+			)
 		}
 	})
-	// Send a 202 Accepted response and confirmation message to the client.
-	// But use a generic message as well
-	// an email will be sent to you containing password reset instructions
-	env := envelope{"message": "if we found a matching email address, we have sent password reset instructions to it"}
-	err = app.writeJSON(w, http.StatusAccepted, env, nil)
-	if err != nil {
-		app.serverErrorResponse(w, r, err)
-	}
+	// Same envelope as the unknown-email and inactive-account branches
+	// above. The previous bespoke message ("if we found a matching email
+	// address, we have sent password reset instructions") was almost the
+	// right shape but did not match the not-found branch byte-for-byte,
+	// so an attacker comparing responses could still distinguish them.
+	app.accountRecoveryEligibleResponse(w, r)
 }
 
 // validateTOTPResetPasswordHandler() is a helper that validates the TOTP code for the user when
@@ -453,32 +465,34 @@ func (app *application) createManualActivationTokenHandler(w http.ResponseWriter
 		app.failedValidationResponse(w, r, v.Errors)
 		return
 	}
-	// Try to retrieve the corresponding user record for the email address. If it can't
-	// be found, return an error message to the client.
+	// Every branch below collapses into accountRecoveryEligibleResponse
+	// so the wire response is byte-identical regardless of whether the
+	// email is registered, the account is already activated, or we
+	// genuinely created a token and queued an email. Specific reasons
+	// are logged at WARN with the user_id (where known) so support and
+	// incident-response can still triage real users.
 	user, err := app.models.Users.GetByEmail(r.Context(), input.Email, app.config.encryption.key)
 	if err != nil {
-		switch {
-		case errors.Is(err, data.ErrGeneralRecordNotFound):
-			v.AddError("email", "no matching email address found")
-			app.failedValidationResponse(w, r, v.Errors)
-		default:
-			app.serverErrorResponse(w, r, err)
+		if errors.Is(err, data.ErrGeneralRecordNotFound) {
+			app.loggerFromRequest(r).Warn("manual-activation requested for unknown email; sending generic envelope")
+			app.accountRecoveryEligibleResponse(w, r)
+			return
 		}
+		app.serverErrorResponse(w, r, err)
 		return
 	}
-	// Return an error if the user has already been activated.
 	if user.Activated {
-		v.AddError("email", "user has already been activated")
-		app.failedValidationResponse(w, r, v.Errors)
+		app.loggerFromRequest(r).Warn("manual-activation requested for already-activated account; sending generic envelope",
+			zap.Int64("matched_user_id", user.ID),
+		)
+		app.accountRecoveryEligibleResponse(w, r)
 		return
 	}
-	// Otherwise, create a new activation token.
 	token, err := app.models.Tokens.New(r.Context(), user.ID, 3*24*time.Hour, data.ScopeActivation)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
 	}
-	// Email the user with their additional activation token.
 	app.background(func() {
 		data := map[string]any{
 			"activationURL": app.config.frontend.activationurl + token.Plaintext,
@@ -486,20 +500,18 @@ func (app *application) createManualActivationTokenHandler(w http.ResponseWriter
 			"lastName":      user.LastName,
 			"userID":        user.ID,
 		}
-		// Since email addresses MAY be case sensitive, notice that we are sending this
-		// email using the address stored in our database for the user --- not to the
-		// input.Email address provided by the client in this request.
-		err = app.mailer.Send(user.Email, "user_welcome.tmpl", data)
-		if err != nil {
-			app.logger.Info("An error occurred while sending the activation email", zap.Error(err))
+		// Email addresses MAY be case-sensitive; we send to the address
+		// stored in our database for the user, NOT input.Email. Token
+		// breadcrumbs (Plaintext, Hash) never enter logs - see the
+		// audit-log redaction work in PR #58.
+		if err := app.mailer.Send(user.Email, "user_welcome.tmpl", data); err != nil {
+			app.loggerFromRequest(r).Info("manual-activation email send failed",
+				zap.Int64("user_id", user.ID),
+				zap.Error(err),
+			)
 		}
 	})
-	// Send a 202 Accepted response and confirmation message to the client.
-	env := envelope{"message": "an email will be sent to you containing activation instructions"}
-	err = app.writeJSON(w, http.StatusAccepted, env, nil)
-	if err != nil {
-		app.serverErrorResponse(w, r, err)
-	}
+	app.accountRecoveryEligibleResponse(w, r)
 }
 
 // ToDo: Add handlers for recovering account with recovery codes
@@ -524,38 +536,42 @@ func (app *application) initializeRecoveryByRecoveryCodes(w http.ResponseWriter,
 		app.failedValidationResponse(w, r, v.Errors)
 		return
 	}
-	// Try to retrieve the corresponding user record for the email address. If it can't
-	// be found, return an error message to the client.
+	// Every branch below collapses into accountRecoveryEligibleResponse
+	// so the wire is byte-identical regardless of whether the email is
+	// unknown, the account is unactivated, MFA was never enabled (which
+	// is the actual eligibility precondition for this flow), or we
+	// genuinely created a recovery token. The previous shape leaked
+	// three orthogonal account-state bits to anonymous probes: existence,
+	// activation-state, and MFA-configured-state.
 	user, err := app.models.Users.GetByEmail(r.Context(), input.Email, app.config.encryption.key)
 	if err != nil {
-		switch {
-		case errors.Is(err, data.ErrGeneralRecordNotFound):
-			v.AddError("email", "no matching email address found")
-			app.failedValidationResponse(w, r, v.Errors)
-		default:
-			app.serverErrorResponse(w, r, err)
+		if errors.Is(err, data.ErrGeneralRecordNotFound) {
+			app.loggerFromRequest(r).Warn("recovery-by-codes requested for unknown email; sending generic envelope")
+			app.accountRecoveryEligibleResponse(w, r)
+			return
 		}
+		app.serverErrorResponse(w, r, err)
 		return
 	}
-	// Return an error if the user has not been activated.
 	if !user.Activated {
-		v.AddError("email", "user account has not been activated")
-		app.failedValidationResponse(w, r, v.Errors)
+		app.loggerFromRequest(r).Warn("recovery-by-codes requested for inactive account; sending generic envelope",
+			zap.Int64("matched_user_id", user.ID),
+		)
+		app.accountRecoveryEligibleResponse(w, r)
 		return
 	}
-	// Return an error if the user has not enabled MFA
 	if !user.MFAEnabled {
-		v.AddError("email", "user account has not enabled MFA")
-		app.failedValidationResponse(w, r, v.Errors)
+		app.loggerFromRequest(r).Warn("recovery-by-codes requested for account without MFA; sending generic envelope",
+			zap.Int64("matched_user_id", user.ID),
+		)
+		app.accountRecoveryEligibleResponse(w, r)
 		return
 	}
-	// Otherwise, create a new recovery token with 15-minute expiry time.
 	token, err := app.models.Tokens.New(r.Context(), user.ID, 15*time.Minute, data.ScopeRecovery)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
 	}
-	// Email the user with their additional recovery token.
 	app.background(func() {
 		data := map[string]any{
 			"recoveryCodesURL": app.config.frontend.recoveryurl,
@@ -563,21 +579,16 @@ func (app *application) initializeRecoveryByRecoveryCodes(w http.ResponseWriter,
 			"firstName":        user.FirstName,
 			"lastName":         user.LastName,
 		}
-		// Since email addresses MAY be case sensitive, notice that we are sending this
-		// email using the address stored in our database for the user --- not to the
-		// input.Email address provided by the client in this request.
-		err = app.mailer.Send(user.Email, "account_recovery.tmpl", data)
-		if err != nil {
-			app.logger.Info("An error occurred while sending the recovery email", zap.Error(err))
+		// Email addresses MAY be case-sensitive; we send to the address
+		// stored in our database, not input.Email.
+		if err := app.mailer.Send(user.Email, "account_recovery.tmpl", data); err != nil {
+			app.loggerFromRequest(r).Info("recovery email send failed",
+				zap.Int64("user_id", user.ID),
+				zap.Error(err),
+			)
 		}
 	})
-	// Send a 202 Accepted response and confirmation message to the client.
-	env := envelope{"message": "an email will be sent to you containing recovery instructions"}
-	err = app.writeJSON(w, http.StatusAccepted, env, nil)
-	if err != nil {
-		app.serverErrorResponse(w, r, err)
-	}
-
+	app.accountRecoveryEligibleResponse(w, r)
 }
 
 // validateRecoveryCodeHandler() is a handler method that verifies the recovery code for the user when

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"expvar"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -88,7 +87,10 @@ func (app *application) routes() http.Handler {
 	router.Get("/healthcheck", app.healthcheckHandler)
 	router.Get("/readyz", app.readyzHandler)
 	router.Get("/metrics", app.prometheusMetricsHandler)
-	router.Handle("/debug/vars", expvar.Handler())
+	// debugVarsHandler is the curated replacement for expvar.Handler():
+	// same JSON shape, but "cmdline" (and any future blocklisted key) is
+	// omitted. See cmd/api/metrics.go for the rationale.
+	router.Get("/debug/vars", app.debugVarsHandler)
 
 	// Make our categorized routes. globalMiddleware is attached to v1Router,
 	// not the base router, so /v1/* keeps its full chain (metrics, requestID,

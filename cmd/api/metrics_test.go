@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"expvar"
 	"fmt"
 	"net/http"
@@ -394,3 +395,46 @@ func validPromName(s string) bool {
 
 // _ ensures fmt is referenced even if we trim debug formatting later.
 var _ = fmt.Sprintf
+
+// TestDebugVarsHandler_StripsCmdline locks down the curated /debug/vars
+// behavior: cmdline (which expvar publishes by default and which echoes
+// os.Args verbatim) MUST not appear in the output, while every other
+// expvar must pass through unchanged. The startup gate
+// (rejectSecretFlags) makes it impossible to BOOT the binary with a
+// credential-bearing flag, so the practical leak surface is small;
+// belt-and-braces here covers the case of a downgrade past the gate or
+// a fork that disables it.
+func TestDebugVarsHandler_StripsCmdline(t *testing.T) {
+	app := &application{logger: zap.NewNop()}
+
+	// Ensure the marker var exists on this run. publishMetrics() may not
+	// have executed in the test binary, so use the get-or-create helper.
+	probe := getOrPublishString(t, "test_debugvars_probe")
+	probe.Set("present")
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/debug/vars", nil)
+	app.debugVarsHandler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if got := rec.Header().Get("Content-Type"); !strings.HasPrefix(got, "application/json") {
+		t.Errorf("Content-Type = %q, want application/json prefix", got)
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, `"cmdline":`) {
+		t.Errorf("/debug/vars body still contains cmdline:\n%s", body)
+	}
+	if !strings.Contains(body, `"test_debugvars_probe":`) {
+		t.Errorf("/debug/vars body missing the probe var; body = %s", body)
+	}
+	// The body must be a single valid JSON object.
+	var parsed map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &parsed); err != nil {
+		t.Fatalf("body is not valid JSON: %v\nbody: %s", err, body)
+	}
+	if _, ok := parsed["cmdline"]; ok {
+		t.Errorf("parsed body still has cmdline key: %#v", parsed["cmdline"])
+	}
+}

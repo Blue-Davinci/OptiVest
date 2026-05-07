@@ -12,12 +12,27 @@
 # Specifically the allowlist covers:
 #   - cmd/api/.env.example      (committed runtime config template)
 #   - .env.example              (committed compose interpolation template)
+#   - .github/workflows/ci.yml  (the e2e job calls openssl to generate
+#                               throwaway test credentials and substitutes
+#                               them into temporary env files; gitleaks
+#                               flags those substitution patterns)
 # Real /.env and cmd/api/.env are both gitignored and not subject to this
 # allowlist; if they ever end up in a commit, gitleaks will catch them.
+#
+# Workflow allowlist scope: previously this allowlisted EVERY file matching
+# `.github/workflows/.+\.ya?ml`, which silently exempted any future
+# workflow added to the repo. The current entry pins to ci.yml only; new
+# workflows will be scanned on equal terms with the rest of the tree, and
+# adding a second allowlisted workflow requires an explicit edit here
+# (with a justification in the surrounding comment).
 #
 # Pattern allowlist:
 #   - The `openssl rand -hex 32` instruction in comments. Some scanners
 #     match on `[0-9a-f]{64}` adjacent to the word "key".
+#   - `POSTGRES_PASSWORD=${pg_pw}` and `OPTIVEST_DATA_ENCRYPTION_KEY=${enc_key}`,
+#     which are the literal substitution patterns the e2e job uses to seed
+#     temporary credentials for the running container. The actual values
+#     are openssl-generated at runtime and never appear in the tree.
 #
 # Run locally with:
 #   gitleaks detect --config .gitleaks.toml --no-banner
@@ -35,15 +50,18 @@ description = "OptiVest committed environment templates and known-safe defaults"
 paths = [
   '''(^|/)\.env\.example$''',
   '''(^|/)cmd/api/\.env\.example$''',
-  # GHA workflows reference example values when seeding env files for e2e.
-  # Those references are not real credentials.
-  '''(^|/)\.github/workflows/.+\.ya?ml$''',
+  '''(^|/)\.github/workflows/ci\.yml$''',
 ]
 
 regexes = [
   # Documentation-style hash showing the *length* of an AES-256 key
   # without being a real key value.
   '''openssl\s+rand\s+-hex\s+32''',
+  # Literal substitution patterns from ci.yml's e2e job. The variables on
+  # the right-hand side (${pg_pw}, ${enc_key}) are openssl-generated at
+  # job runtime; only the patterns themselves live in the tree.
+  '''POSTGRES_PASSWORD=\$\{pg_pw\}''',
+  '''OPTIVEST_DATA_ENCRYPTION_KEY=\$\{enc_key\}''',
 ]
 
 # Specific commits that landed before this config was added. Empty for now;

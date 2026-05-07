@@ -274,6 +274,62 @@ func getOrCreateBucket(buckets map[string]*metricBucket, name string, kind metri
 	return b
 }
 
+// ---------------------------------------------------------------------------
+// /debug/vars curated handler.
+//
+// The default expvar.Handler walks every published var and emits "cmdline"
+// (a JSON array of os.Args) by default. The rejectSecretFlags startup gate
+// (see main.go) makes it impossible to BOOT the binary with a credential-
+// bearing flag, so the practical leak is small today. But:
+//
+//   - cmdline still echoes deployment topology (paths to envvar files,
+//     non-default flag values like -portfolio-worker-limit=12) that an
+//     unauthenticated /debug/vars caller has no need to see.
+//   - The startup gate is a recent control. Any operator who downgrades
+//     past the gate, or runs a forked build, would re-expose the flags
+//     without realizing it. Belt-and-braces here keeps the leak shut on
+//     both ends.
+//
+// memstats, goroutines, version, and the curated counters defined in
+// publishMetrics + logging.go pass through unchanged. If a future expvar
+// publishes a value whose marshaled form might itself include secrets,
+// this is the choke point to filter it.
+// ---------------------------------------------------------------------------
+
+// debugVarsBlocklist is the set of expvar names this handler refuses to
+// emit on /debug/vars. The behavior mirrors the inverse of metrics.go's
+// allowlist for /metrics: there we only emit what we explicitly know is
+// safe; here we emit everything except what we explicitly know leaks.
+var debugVarsBlocklist = map[string]struct{}{
+	"cmdline": {},
+}
+
+// debugVarsHandler is the curated /debug/vars handler. It produces JSON
+// matching the default expvar.Handler shape (an unsorted top-level
+// object) minus any keys in debugVarsBlocklist. The format is
+// intentionally identical so existing tooling (operator scripts that
+// curl /debug/vars and grep, ad-hoc dashboards) continues to work.
+func (app *application) debugVarsHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	if _, err := io.WriteString(w, "{\n"); err != nil {
+		return
+	}
+	first := true
+	expvar.Do(func(kv expvar.KeyValue) {
+		if _, blocked := debugVarsBlocklist[kv.Key]; blocked {
+			return
+		}
+		if !first {
+			if _, err := io.WriteString(w, ",\n"); err != nil {
+				return
+			}
+		}
+		first = false
+		fmt.Fprintf(w, "%q: %s", kv.Key, kv.Value)
+	})
+	_, _ = io.WriteString(w, "\n}\n")
+}
+
 // scalarString renders an expvar.Var to its text exposition value. Int and
 // Float marshal directly; expvar.Func is invoked and its result coerced.
 // Anything else returns ok=false, which the caller treats as "skip this
