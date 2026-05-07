@@ -72,10 +72,12 @@ jobs:
           cache: true
 
       - name: golangci-lint
-        # v7 is the first action major that supports golangci-lint v2's
-        # new config schema. Older v6 errors with `invalid version
-        # string` at runtime even if the binary itself is fine.
-        uses: golangci/golangci-lint-action@v7
+        # v9 is the first action major to ship the Node.js 24 runtime,
+        # closing the Sept 2025 deprecation of Node 20 on GitHub-hosted
+        # runners. v8 already required golangci-lint v2.1.0+ (we run
+        # v2.12.2, see GOLANGCI_LINT_VERSION above), and v9 changes only
+        # the runtime — no config-schema or input changes from v7.
+        uses: golangci/golangci-lint-action@v9
         with:
           version: ${{ env.GOLANGCI_LINT_VERSION }}
           args: --timeout=5m
@@ -135,7 +137,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload coverage profile
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-profile
           path: coverage.out
@@ -226,7 +228,7 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Build ${{ matrix.image }}
         uses: docker/build-push-action@v7
@@ -249,7 +251,7 @@ jobs:
           echo "| ${{ matrix.image }} | \`$size\` |" >> /tmp/sizes-${{ matrix.image }}.md
 
       - name: Upload image tarball
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: image-${{ matrix.image }}
           path: /tmp/${{ matrix.image }}.tar
@@ -350,7 +352,7 @@ jobs:
           upload-release-assets: false
 
       - name: Upload SBOM artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: sbom-${{ matrix.image }}
           path: sbom-${{ matrix.image }}.spdx.json
@@ -372,7 +374,7 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Seed env files
         # Both credentials below are generated freshly with openssl on
