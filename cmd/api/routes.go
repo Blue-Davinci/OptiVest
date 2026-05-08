@@ -18,12 +18,41 @@ func (app *application) sseRoutes() http.Handler {
 		AllowCredentials: false,
 		MaxAge:           300, // Maximum value not ignored bycls any of major browsers
 	}))
-	// SSE middleware chain. Deliberately omits logRequests: SSE
-	// connections are long-lived (minutes to hours) and a single
-	// "request completed" line at disconnect time is more misleading than
-	// useful. requestID still runs so that anything the SSE handler
-	// itself logs is correlatable with the original HTTP request.
-	sseMiddleware := alice.New(app.requestID, app.recoverPanic, app.authenticate, app.requireAuthenticatedUser, app.requireActivatedUser).Then
+	// SSE middleware chain.
+	//
+	// Ordering matches the main API chain (routes() below) wherever both
+	// have the same middleware, so a request that lands on either server
+	// goes through the same sequence: requestID -> recoverPanic ->
+	// rateLimit -> authenticate -> requireAuthenticatedUser ->
+	// requireActivatedUser. The shared shape is what lets a single
+	// rateLimit middleware (per-IP, Redis-backed) cap connect-attempts
+	// across both servers - reconnect cycles on the SSE port no longer
+	// bypass throttling that the same client would hit on the API port.
+	//
+	// Deliberately omitted vs the main chain:
+	//
+	//   - metrics: SSE connections are long-lived. CaptureMetrics blocks
+	//     until the response Body finishes; for a 4-hour stream it would
+	//     bump total_processing_time_us by 14e9 microseconds and skew
+	//     dashboards. SSE has its own per-event metrics inside the
+	//     handler (publishing pipeline, see notifications.go).
+	//
+	//   - logRequests: same reason. One "request completed" line at
+	//     disconnect, hours after the actual auth happened, is more
+	//     misleading than useful. requestID still runs so anything the
+	//     SSE handler itself logs is correlatable with the original
+	//     HTTP request via X-Request-ID.
+	//
+	// rateLimit was added in this commit. The existing per-user
+	// "1 stream max" rule (enforced by AddClient closing the prior
+	// channel - see notifications.go) limited concurrent streams; it
+	// did NOT limit connect/disconnect cycles, each of which performs a
+	// Redis HGETALL + a database SELECT (loadAndSendPendingNotifications).
+	// A misbehaving client that rapidly reconnected could amplify load
+	// well past what the main-API per-IP bucket would have allowed.
+	// Slotting rateLimit BEFORE authenticate also throttles bearer-token
+	// brute-force on the SSE port specifically.
+	sseMiddleware := alice.New(app.requestID, app.recoverPanic, app.rateLimit, app.authenticate, app.requireAuthenticatedUser, app.requireActivatedUser).Then
 	// Make our categorized routes
 	v1Router := chi.NewRouter()
 	v1Router.With(sseMiddleware).Get("/sse", app.ServeSSE)
