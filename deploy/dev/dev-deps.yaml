@@ -1,0 +1,200 @@
+# =============================================================================
+# OptiVest in-cluster dev dependencies — Postgres + Redis
+# =============================================================================
+#
+# Purpose:
+#   The Helm chart at deploy/charts/optivest is API-only — it expects an
+#   external Postgres (`postgres:5432`) and Redis (`redis:6379`) reachable
+#   inside the cluster's DNS. In production those will be a managed RDS
+#   instance and a managed Redis (ElastiCache, MemoryDB, etc.) plumbed in
+#   via the existingSecret + externalRedis.host values.
+#
+#   For local kind-based smoke testing we don't have those, so we apply a
+#   minimal in-cluster pair here. These are NOT production-grade:
+#     * single replica, no HA, no PVC (data is lost on pod restart)
+#     * no TLS, plaintext password in the bootstrap Secret
+#     * resource limits sized for laptop-scale workloads only
+#
+#   Once chart v0.4 lands the bitnami/postgresql + bitnami/redis subcharts
+#   (gated behind enabled flags), this file becomes optional — the smoke
+#   path will be `helm install --set postgresql.enabled=true ...` instead.
+#
+# Apply with:
+#   make k8s/dev-deps/up
+# Tear down with:
+#   make k8s/dev-deps/down
+# =============================================================================
+
+---
+# Postgres bootstrap credentials. The OptiVest API doesn't read these
+# directly — it gets the full DSN from `OPTIVEST_DB_DSN` in the
+# `optivest-secrets` Secret (created by `make k8s/secret/create`). This
+# Secret only seeds the postgres pod itself via envFrom so the username,
+# password, and database it creates on first boot match what the DSN
+# expects.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgres-bootstrap
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/component: dev-dep
+    app.kubernetes.io/part-of: optivest
+type: Opaque
+stringData:
+  POSTGRES_USER: optivest
+  POSTGRES_PASSWORD: optivest
+  POSTGRES_DB: optivest
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/component: dev-dep
+    app.kubernetes.io/part-of: optivest
+spec:
+  replicas: 1
+  # RollingUpdate would briefly run two pods sharing the same PGDATA dir
+  # if we ever added a PVC; Recreate keeps the data path single-writer.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: postgres
+        app.kubernetes.io/component: dev-dep
+        app.kubernetes.io/part-of: optivest
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:17-alpine
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - secretRef:
+                name: postgres-bootstrap
+          ports:
+            - name: pg
+              containerPort: 5432
+              protocol: TCP
+          # `pg_isready` is the canonical liveness/readiness probe for
+          # postgres — it does a TCP+startup-packet check without opening
+          # a real session, so it's cheap to run every few seconds.
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "optivest", "-d", "optivest"]
+            initialDelaySeconds: 2
+            periodSeconds: 5
+            timeoutSeconds: 3
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "optivest", "-d", "optivest"]
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/component: dev-dep
+    app.kubernetes.io/part-of: optivest
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: postgres
+  ports:
+    - name: pg
+      port: 5432
+      targetPort: pg
+      protocol: TCP
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/component: dev-dep
+    app.kubernetes.io/part-of: optivest
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: redis
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: redis
+        app.kubernetes.io/component: dev-dep
+        app.kubernetes.io/part-of: optivest
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          imagePullPolicy: IfNotPresent
+          # 256 MiB of process memory is plenty for a smoke run; the
+          # allkeys-lru policy mirrors what we'd want in a small prod
+          # cache so behaviour under pressure is consistent between
+          # environments.
+          args:
+            - "--maxmemory"
+            - "256mb"
+            - "--maxmemory-policy"
+            - "allkeys-lru"
+          ports:
+            - name: redis
+              containerPort: 6379
+              protocol: TCP
+          readinessProbe:
+            tcpSocket:
+              port: redis
+            initialDelaySeconds: 1
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: redis
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/component: dev-dep
+    app.kubernetes.io/part-of: optivest
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis
+      protocol: TCP
