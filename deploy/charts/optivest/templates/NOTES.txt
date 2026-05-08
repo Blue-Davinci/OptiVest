@@ -1,0 +1,106 @@
+{{/*
+NOTES.txt - rendered AFTER `helm install` and `helm upgrade`. Helm
+prints this verbatim. Keep it actionable: an operator just ran
+install/upgrade and wants to know "what now?", not a tour of the
+chart. Detailed rationale lives in chart README.md.
+
+The chart in v0.1 is ClusterIP-only (Ingress and HTTPRoute remain
+disabled until v0.3), so the only access pattern is port-forward.
+We surface that prominently. We also call out the most common
+day-zero failure mode: the Pod stays in CreateContainerConfigError
+because the Secret named in `existingSecret` doesn't exist. NOTES is
+the right place to surface that because it's printed exactly when
+the operator is poised to wonder why their pod isn't healthy.
+*/}}
+
+OptiVest API has been installed.
+
+  Release name:   {{ .Release.Name }}
+  Namespace:      {{ .Release.Namespace }}
+  Chart version:  {{ .Chart.Version }}
+  App version:    {{ .Chart.AppVersion }}
+  Image:          {{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}
+  Replicas:       {{ .Values.replicaCount }}
+
+# ----------------------------------------------------------------------------
+# Did you create the Secret?
+# ----------------------------------------------------------------------------
+This chart deliberately does NOT manage secret material. The API Pod
+will stay in CreateContainerConfigError until a Secret named
+`{{ .Values.existingSecret }}` exists in namespace
+`{{ .Release.Namespace }}`.
+
+If you haven't created it yet, here is a paste-ready template for
+local kind. Replace `unset-for-local` with real keys for any vendor
+you actually want to call.
+
+    kubectl -n {{ .Release.Namespace }} create secret generic {{ .Values.existingSecret }} \
+        --from-literal=OPTIVEST_DB_DSN='postgres://optivest:optivest@host.docker.internal:5432/optivest?sslmode=disable' \
+        --from-literal=OPTIVEST_DATA_ENCRYPTION_KEY="$(openssl rand -hex 32)" \
+        --from-literal=OPTIVEST_REDIS_PASSWORD='' \
+        --from-literal=OPTIVEST_ALPHAVANTAGE_API_KEY='unset-for-local' \
+        --from-literal=OPTIVEST_EXCHANGERATE_API_KEY='unset-for-local' \
+        --from-literal=OPTIVEST_FRED_API_KEY='unset-for-local' \
+        --from-literal=OPTIVEST_FINANCIALMODELINGPREP_API_KEY='unset-for-local' \
+        --from-literal=OPTIVEST_SAMBA_NOVA_LLM_API_KEY='unset-for-local' \
+        --from-literal=OPTIVEST_PREDICTOR_API_KEY='unset-for-local' \
+        --from-literal=OPTIVEST_OCRSPACE_API_KEY='unset-for-local' \
+        --from-literal=OPTIVEST_SMTP_HOST='sandbox.smtp.mailtrap.io' \
+        --from-literal=OPTIVEST_SMTP_USERNAME='' \
+        --from-literal=OPTIVEST_SMTP_PASSWORD='' \
+        --from-literal=OPTIVEST_SMTP_SENDER='OptiVest <no-reply@optivest.local>'
+
+OPTIVEST_DATA_ENCRYPTION_KEY MUST be a hex-encoded 16/24/32-byte AES
+key. The openssl call above gives you 32 bytes (AES-256). Anything
+else is rejected at boot by validateConfig() in cmd/api/main.go.
+
+After creating the Secret, the Pod will progress on its own; no
+restart needed.
+
+# ----------------------------------------------------------------------------
+# Reach the API
+# ----------------------------------------------------------------------------
+The Service is ClusterIP, so port-forward to reach it from your host:
+
+    kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "optivest.fullname" . }} \
+        {{ .Values.service.apiPort }}:{{ .Values.service.apiPort }} \
+        {{ .Values.service.ssePort }}:{{ .Values.service.ssePort }}
+
+Then:
+
+    curl http://localhost:{{ .Values.service.apiPort }}/healthcheck
+    curl http://localhost:{{ .Values.service.apiPort }}/readyz
+
+# ----------------------------------------------------------------------------
+# Watch the rollout
+# ----------------------------------------------------------------------------
+    kubectl -n {{ .Release.Namespace }} rollout status deployment/{{ include "optivest.fullname" . }}
+    kubectl -n {{ .Release.Namespace }} logs -f -l app.kubernetes.io/instance={{ .Release.Name }}
+
+To run the chart's `helm test` smoke check (a tiny Pod that hits
+/healthcheck on the API Service):
+
+    helm test {{ .Release.Name }} -n {{ .Release.Namespace }}
+
+# ----------------------------------------------------------------------------
+# What this chart version does NOT do (deliberate)
+# ----------------------------------------------------------------------------
+This is chart {{ .Chart.Version }}. The following are scaffolded but
+not yet wired or are deferred outright:
+
+  - Migrate Job (goose up via Helm pre-install/pre-upgrade hook) -
+    chart v0.2. For now, run goose against your Postgres BEFORE
+    `helm install` so the API doesn't hit missing tables:
+
+      goose -dir internal/sql/schema postgres "$OPTIVEST_DB_DSN" up
+
+  - Ingress + cert-manager - chart v0.3. Use port-forward until then.
+
+  - Postgres + Redis as in-cluster bitnami subcharts - chart v0.4.
+    For now, the chart talks to whatever is at
+    {{ .Values.externalRedis.host }} (Redis) and whatever DSN is in
+    your Secret (Postgres).
+
+  - HorizontalPodAutoscaler - scaffolded as templates/hpa.yaml but
+    `autoscaling.enabled` is false until we have realistic load
+    metrics to drive it.

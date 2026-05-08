@@ -1,0 +1,148 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "optivest.fullname" . }}
+  labels:
+    {{- include "optivest.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "optivest.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "optivest.labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "optivest.serviceAccountName" . }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: {{ .Chart.Name }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          # CLI args - everything the OptiVest binary reads from
+          # flags rather than env. The mapping is centralized here so
+          # the values.yaml-to-flag relationship is grep-able.
+          #
+          # Argv composition note: the image's ENTRYPOINT is
+          # `["/sbin/tini", "--"]` and its CMD is `["/app/api"]`.
+          # Kubernetes `args:` replaces CMD wholesale, so `/app/api`
+          # has to be args[0] - otherwise the final argv is
+          # `tini -- -env=...` and tini tries to exec `-env=...` as
+          # the binary. Keeping ENTRYPOINT (no `command:` override
+          # below) means tini stays in place for signal forwarding
+          # and zombie reaping.
+          args:
+            - "/app/api"
+            - "-env={{ .Values.config.env }}"
+            # Bind both ports on 0.0.0.0 inside the container so the
+            # kubelet can reach them via the PodIP. The container is
+            # firewalled by the Pod boundary; 0.0.0.0 is safe here.
+            - "-port={{ .Values.service.apiPort }}"
+            - "-ws-port={{ .Values.service.ssePort }}"
+            - "-redis-addr={{ .Values.externalRedis.host }}"
+            # cors-trusted-origins is a flag.Func that splits on
+            # whitespace inside this single value. Empty string is
+            # acceptable (no origins accepted, browser-less API
+            # only). NEVER use "*" outside development.
+            - "-cors-trusted-origins={{ .Values.config.corsTrustedOrigins }}"
+            - "-limiter-enabled={{ .Values.config.limiter.enabled }}"
+            - "-limiter-rps={{ .Values.config.limiter.rps }}"
+            - "-limiter-burst={{ .Values.config.limiter.burst }}"
+          ports:
+            # Named ports rather than literal numbers - the probes
+            # below (and the Service in service.yaml) reference these
+            # names, so renumbering happens in one place (values.yaml)
+            # without surgery on every consumer.
+            - name: api
+              containerPort: {{ .Values.service.apiPort }}
+              protocol: TCP
+            - name: sse
+              containerPort: {{ .Values.service.ssePort }}
+              protocol: TCP
+          # envFrom + env split:
+          #   - envFrom: secretRef pulls every key from the external
+          #     Secret named in `existingSecret`. The OptiVest
+          #     binary's *_API_KEY family + DSN + encryption key +
+          #     SMTP creds all have os.Getenv() defaults, so they
+          #     load cleanly via this mechanism. The Secret must
+          #     exist before the Pod starts or the kubelet will
+          #     hold the Pod in CreateContainerConfigError.
+          #   - extraEnvFrom: caller-provided ConfigMaps / Secrets
+          #     (e.g. an environment-specific overlay).
+          envFrom:
+            - secretRef:
+                name: {{ .Values.existingSecret }}
+            {{- with .Values.extraEnvFrom }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          # Inline env entries. GOMEMLIMIT goes here rather than in a
+          # ConfigMap because (a) it's a single var and (b) it ties
+          # to resources.limits.memory which is also values-driven,
+          # so co-locating keeps the relationship visible. Add a
+          # ConfigMap template if/when this list grows past ~3 vars.
+          env:
+            {{- if .Values.config.gomemlimit }}
+            # GOMEMLIMIT tells the Go runtime its memory ceiling so
+            # the GC can run aggressively *before* the kubelet
+            # OOM-kills the pod. Without it, a Go binary inside a
+            # memory-limited cgroup has no idea about the cgroup
+            # limit and will routinely OOM-kill itself under load.
+            - name: GOMEMLIMIT
+              value: {{ .Values.config.gomemlimit | quote }}
+            {{- end }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.volumeMounts }}
+          volumeMounts:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      {{- with .Values.volumes }}
+      volumes:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

@@ -1,0 +1,413 @@
+# =============================================================================
+# OptiVest Helm chart - default values
+# =============================================================================
+#
+# These defaults target the local-kind learning track described in
+# `.notes/deployment-options.md` (gitignored). They are deliberately
+# conservative: single replica, low resource limits, ClusterIP service,
+# in-cluster Redis at "redis:6379" assumed, Ingress and HTTPRoute
+# disabled. The chart is installable with no `--set` flags, but the
+# Pod will stay in CreateContainerConfigError until you create the
+# Secret named in `existingSecret` below (see chart README for the
+# exact envelope).
+#
+# Production overrides live in a separate values file
+# (`values-prod.yaml`, future) and are layered with
+# `helm install ... -f values.yaml -f values-prod.yaml`. NEVER put
+# real secrets in either file - secret material always comes from an
+# externally-created Secret, see `existingSecret`.
+
+# -----------------------------------------------------------------------------
+# Replicas
+# -----------------------------------------------------------------------------
+# replicaCount: 1 is correct for local kind. In production with sticky
+# sessions for SSE you'd run >=2 replicas behind an ingress with
+# session affinity; without that, an SSE client whose connection
+# landed on replica A would lose its in-memory state if a redeploy
+# moved them to replica B. The current code keeps the per-user channel
+# registry (cmd/api/notifications.go) in pod-local memory, so multi-
+# replica safely requires either:
+#   1. sticky sessions on the ingress (simplest)
+#   2. moving the channel registry to a Redis pubsub fan-out across
+#      pods (the right long-term answer; logged in audit Pass 4)
+replicaCount: 1
+
+# -----------------------------------------------------------------------------
+# Image - the optivest-api container
+# -----------------------------------------------------------------------------
+# Local kind: build with `docker build -t optivest-api:latest .`,
+# load into kind with `kind load docker-image optivest-api:latest
+# --name optivest`. pullPolicy MUST be IfNotPresent or Never for kind
+# to use the loaded image; Always would cause the kubelet to try to
+# pull from a remote registry and fail (the image isn't in any
+# registry until we add a publish-on-tag CI workflow - currently
+# tracked as a pending follow-up since CI builds with push:false).
+#
+# Production: bump repository to a real registry path (e.g.
+# `ghcr.io/blue-davinci/optivest-api`) and pin tag to a specific
+# version. Avoid the floating `latest` tag in any environment that
+# isn't kind, because rollbacks become impossible.
+#
+# tag empty string ("") falls back to `.Chart.AppVersion` in the
+# Deployment template - keep that override available so a user can
+# bump the chart's appVersion as the canonical "what we ship" without
+# editing this block.
+image:
+  repository: optivest-api
+  pullPolicy: IfNotPresent
+  tag: ""
+
+# imagePullSecrets - if the registry requires auth, name a Secret of
+# type kubernetes.io/dockerconfigjson here. For public registries
+# (including GHCR with anon read on a public repo) leave empty.
+imagePullSecrets: []
+# - name: ghcr-pull-secret
+
+# nameOverride / fullnameOverride - escape hatches for the standard
+# release-name + chart-name composition done in _helpers.tpl. Empty
+# means "use the standard composition", which is what you want 99% of
+# the time. Useful when adopting a chart into an existing cluster
+# where resource names are already locked in.
+nameOverride: ""
+fullnameOverride: ""
+
+# -----------------------------------------------------------------------------
+# ServiceAccount
+# -----------------------------------------------------------------------------
+# Keep the chart-managed ServiceAccount (create: true). The OptiVest
+# binary doesn't talk to the Kubernetes API itself, so the SA's token
+# is mostly cosmetic at this chart version - but giving the workload
+# its own SA gives us a clean attachment point for narrow RBAC later
+# (e.g. when chart v0.5 adds the ability to read its own ConfigMap
+# for hot-reload, or when we attach IRSA / Workload Identity in
+# managed-K8s providers).
+#
+# automount: true is the default; the OptiVest binary doesn't use the
+# API, so technically we could disable it. Left enabled so kubectl
+# debug pods (which inherit the SA token) keep working without
+# special handling.
+serviceAccount:
+  create: true
+  automount: true
+  annotations: {}
+  # name: "" means "let the chart generate a name from the release
+  # name + chart name". Override only if integrating with an
+  # externally-managed SA (e.g. one created by your secret-manager
+  # operator).
+  name: ""
+
+# -----------------------------------------------------------------------------
+# Pod metadata
+# -----------------------------------------------------------------------------
+# podAnnotations - useful for Prometheus scrape config
+# (`prometheus.io/scrape: "true"`, `prometheus.io/port: "4000"`,
+# `prometheus.io/path: "/metrics"`) when you've installed a
+# Prometheus that uses pod-annotation-based service discovery.
+# Empty by default; set on a per-environment basis.
+podAnnotations: {}
+
+# podLabels - extra labels added to the Pod template (in addition to
+# the standard chart label set from _helpers.tpl). Useful for
+# attaching a NetworkPolicy or PodMonitor selector that's specific
+# to this release without changing the chart.
+podLabels: {}
+
+# -----------------------------------------------------------------------------
+# Pod-level security context
+# -----------------------------------------------------------------------------
+# The OptiVest Dockerfile creates `optivest` USER UID 10001 (defined
+# at the bottom of /Dockerfile in the runtime stage) and runs as
+# that. These settings make the Pod-spec policy match what the image
+# already does so admission controllers (Pod Security Standards
+# "restricted" profile) don't reject the Pod.
+#
+# If the runtime image is ever swapped to gcr.io/distroless/static:nonroot
+# (referenced in the Dockerfile header comment as a future tightening
+# pass), the UID changes to 65532. Bump this block in lock-step with
+# that change - the chart should mirror image reality, not guess at
+# it.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
+
+# Container-level securityContext - belt-and-braces.
+# readOnlyRootFilesystem: true is correct for OptiVest because the
+# binary writes nothing to the local filesystem (logs go to stdout,
+# no uploaded-file storage). If a future feature requires write
+# access (e.g. local file uploads, a tmp-file-based OCR pipeline),
+# add a writable emptyDir volume rather than relaxing this flag.
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+# -----------------------------------------------------------------------------
+# Service
+# -----------------------------------------------------------------------------
+# Two ports because the OptiVest binary listens on two: the main API
+# (default 4000) and the SSE long-lived stream port (default 4001).
+# Both are exposed by the same Pod, so one Service is enough.
+#
+# ClusterIP for the first chart pass: reachable from inside the
+# cluster only. We'll add Ingress in chart v0.3. LoadBalancer is
+# available on managed K8s providers but on kind it requires
+# `cloud-provider-kind` or similar shim - not worth it for the
+# learning track.
+service:
+  type: ClusterIP
+  apiPort: 4000
+  ssePort: 4001
+
+# -----------------------------------------------------------------------------
+# Ingress (legacy networking.k8s.io/v1)
+# -----------------------------------------------------------------------------
+# Disabled until chart v0.3 adds proper TLS via cert-manager. When
+# enabled, requires an ingress controller (ingress-nginx, traefik)
+# installed in the cluster. The chart-example.local hostname here is
+# a helm-create placeholder; replace with your real hostname.
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+    # kubernetes.io/ingress.class: nginx
+    # cert-manager.io/cluster-issuer: letsencrypt-prod
+  hosts:
+    - host: chart-example.local
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+  tls: []
+    # - secretName: optivest-tls
+    #   hosts:
+    #     - api.optivest.example
+
+# -----------------------------------------------------------------------------
+# HTTPRoute (Gateway API, modern alternative to Ingress)
+# -----------------------------------------------------------------------------
+# Disabled until we decide between legacy Ingress and Gateway API.
+# Gateway API is the future (GA since k8s 1.30) but adoption in
+# managed-K8s providers is uneven. Requires Gateway API CRDs + a
+# controller that implements them (envoy-gateway, contour, etc.)
+# installed in the cluster. We keep the template scaffolded as a
+# stub so chart v0.3 can pick either ingress.enabled OR
+# httpRoute.enabled without touching the templates.
+httpRoute:
+  enabled: false
+  annotations: {}
+  parentRefs:
+    - name: gateway
+      sectionName: http
+  hostnames:
+    - chart-example.local
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+
+# -----------------------------------------------------------------------------
+# Resource requests + limits
+# -----------------------------------------------------------------------------
+# Local kind defaults are deliberately small so the chart fits on a
+# laptop. Production should profile actual workload and adjust; the
+# Go runtime is sensitive to memory limits (uses GOMEMLIMIT, set in
+# config.gomemlimit below).
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+# -----------------------------------------------------------------------------
+# Probes - kubelet liveness + readiness checks
+# -----------------------------------------------------------------------------
+# OptiVest exposes /healthcheck (liveness-suitable: process is up)
+# and /readyz (readiness-suitable: process is up AND its dependencies
+# are reachable). Both are intentionally unauthenticated; the
+# rationale lives in cmd/api/routes.go - they're on the base router
+# so scrapes don't go through rate-limit / metrics / log-requests.
+#
+# Production note: /readyz checks DB and Redis reachability. If
+# either is down, the Pod is marked NotReady and removed from
+# Service rotation. That's correct behaviour - a Pod that can't talk
+# to its dependencies should not be receiving user traffic - but it
+# means a database flap can cascade into "all pods unready" briefly.
+# Tune readinessProbe.failureThreshold if that's a concern.
+livenessProbe:
+  httpGet:
+    path: /healthcheck
+    port: api
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 2
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /readyz
+    port: api
+  initialDelaySeconds: 3
+  periodSeconds: 5
+  timeoutSeconds: 2
+  failureThreshold: 3
+
+# -----------------------------------------------------------------------------
+# Application config
+# -----------------------------------------------------------------------------
+# Two places config goes:
+#
+#   - non-secret values land in a ConfigMap (in chart v0.1 we don't
+#     have a configmap.yaml template yet; the values below are passed
+#     as CLI args via the Deployment template's `args:` block. Reason:
+#     the OptiVest binary at this version is CLI-flag-driven for
+#     operational knobs - only secret-like keys (DSN, encryption key,
+#     API keys, SMTP creds) have os.Getenv() defaults. A backend
+#     follow-up to add env-var support to operational flags would let
+#     us move these to a real ConfigMap; logged in todo as
+#     `backend-env-flags`.
+#
+#   - secret values come from an EXTERNALLY-CREATED Secret named in
+#     `existingSecret`. The chart NEVER renders secret material into
+#     manifests; that pattern would commit secrets to git history.
+#     Bootstrap procedure in NOTES.txt (printed after `helm install`).
+config:
+  # `env` -> -env=staging|development|production. The binary's run-
+  # mode flag. development is the most permissive (warns on missing
+  # required config); production refuses to start with the same
+  # gaps. staging is the right default for local kind: surfaces
+  # config errors loudly without being so strict that a half-finished
+  # secret breaks the boot.
+  env: staging
+
+  # CORS trustedOrigins -> -cors-trusted-origins flag, which the
+  # binary defines as a flag.Func that splits on whitespace. Multiple
+  # origins are space-separated INSIDE the single flag value. NEVER
+  # use "*" in any non-development environment.
+  corsTrustedOrigins: "http://localhost:5173"
+
+  # Rate-limit knobs -> -limiter-enabled, -limiter-rps, -limiter-burst.
+  # Defaults mirror the binary's in-code defaults but explicit so an
+  # operator sees the contract without grepping cmd/api/main.go.
+  # Disabling the limiter is safe in a single-tenant local-dev
+  # scenario; in any environment that takes external traffic, leave
+  # it on.
+  limiter:
+    enabled: true
+    rps: 4
+    burst: 10
+
+  # GOMEMLIMIT - the Go runtime memory ceiling. Should be ~85% of
+  # resources.limits.memory so the GC has headroom to run before the
+  # kubelet OOM-kills the pod. Without this set, a Go binary inside a
+  # memory-limited cgroup has no idea about the cgroup limit and will
+  # routinely OOM-kill itself under load. Express the value in the
+  # same units Go accepts: KiB, MiB, GiB. With limits.memory: 512Mi,
+  # "435MiB" (= ~85%) is a sensible value. Empty string means "don't
+  # set" (not recommended in production).
+  gomemlimit: "435MiB"
+
+# existingSecret - the Secret resource whose contents the chart's
+# Deployment will `envFrom`. The Secret must carry every variable
+# from cmd/api/.env.example marked [REQUIRED]:
+#
+#   OPTIVEST_DB_DSN                          (required)
+#   OPTIVEST_DATA_ENCRYPTION_KEY             (required, hex AES key)
+#   OPTIVEST_REDIS_PASSWORD                  (optional - empty for kind)
+#   OPTIVEST_ALPHAVANTAGE_API_KEY            (required in staging+)
+#   OPTIVEST_EXCHANGERATE_API_KEY            (required in staging+)
+#   OPTIVEST_FRED_API_KEY                    (required in staging+)
+#   OPTIVEST_FINANCIALMODELINGPREP_API_KEY   (required in staging+)
+#   OPTIVEST_SAMBA_NOVA_LLM_API_KEY          (required in staging+)
+#   OPTIVEST_PREDICTOR_API_KEY               (required in staging+)
+#   OPTIVEST_OCRSPACE_API_KEY                (required in staging+)
+#   OPTIVEST_SMTP_HOST                       (required in staging+)
+#   OPTIVEST_SMTP_USERNAME                   (required in staging+)
+#   OPTIVEST_SMTP_PASSWORD                   (required in staging+)
+#   OPTIVEST_SMTP_SENDER                     (required in staging+)
+#
+# The chart fails at Pod-start time if the Secret doesn't exist
+# (CreateContainerConfigError). NOTES.txt prints a paste-ready
+# `kubectl create secret generic` template for local kind.
+#
+# In production this Secret is provisioned via SOPS (git-encrypted),
+# sealed-secrets (cluster-encrypted), or an External Secrets
+# Operator pulling from a vendor secret manager (AWS SM, GCP SM,
+# Vault). The chart is agnostic - it just consumes a Secret of a
+# known shape.
+existingSecret: optivest-secrets
+
+# -----------------------------------------------------------------------------
+# External dependencies (Postgres, Redis)
+# -----------------------------------------------------------------------------
+# externalRedis.host - the address the API uses for `-redis-addr`.
+# Default "redis:6379" assumes a Service named `redis` in the same
+# namespace - convenient when you've installed bitnami/redis under
+# that name next to OptiVest. Override to a managed-cache hostname
+# in production, or to "host.docker.internal:6379" when running
+# kind against a host-installed valkey (`make dev/up`).
+#
+# Postgres is reached via OPTIVEST_DB_DSN from the Secret, so it
+# doesn't have a parallel block here - the DSN already encodes the
+# host:port:dbname tuple.
+#
+# Chart v0.4 will add `redis.enabled` and `postgresql.enabled`
+# subcharts (bitnami) so both can be in-cluster managed-by-Helm
+# rather than externalized. This block stays as the override path
+# for production where you wouldn't run them in-cluster anyway.
+externalRedis:
+  host: "redis:6379"
+
+# -----------------------------------------------------------------------------
+# Autoscaling
+# -----------------------------------------------------------------------------
+# Disabled. Static replicaCount is the right default until we have
+# realistic load metrics to inform a target CPU/memory utilization.
+# Enabling without baseline data tends to produce flappy scale
+# decisions that hurt more than they help.
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 80
+  # targetMemoryUtilizationPercentage: 80
+
+# -----------------------------------------------------------------------------
+# Volumes / volumeMounts
+# -----------------------------------------------------------------------------
+# OptiVest doesn't need any. Listed here for completeness because
+# the helm-create scaffold included them and a future feature
+# (e.g. a writable /tmp emptyDir if we ever flip
+# readOnlyRootFilesystem to false) would slot in cleanly.
+volumes: []
+volumeMounts: []
+
+# -----------------------------------------------------------------------------
+# Pod scheduling
+# -----------------------------------------------------------------------------
+# Empty by default. Useful in production for spreading replicas
+# across zones (podAntiAffinity) or pinning to specific node pools
+# (taint + toleration).
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# -----------------------------------------------------------------------------
+# Extra env / extra envFrom (escape hatches)
+# -----------------------------------------------------------------------------
+# Useful for overriding a CLI-flag default without bumping the chart
+# minor, or for adding a new environment-driven knob the chart
+# doesn't model directly.
+extraEnv: []
+# - name: OPTIVEST_PORTFOLIO_WORKER_LIMIT
+#   value: "12"
+extraEnvFrom: []
+# - configMapRef:
+#     name: my-extra-config

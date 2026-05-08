@@ -1,0 +1,55 @@
+{{/*
+Helm test hook - a one-shot Pod that runs when you call
+`helm test <release>`. Exit-zero means the chart's smoke check
+passed; non-zero is a failed test, which Helm surfaces in its
+output.
+
+`helm.sh/hook: test` makes Helm treat this as a test resource
+(opt-in only on `helm test`, not created during `helm install`).
+`helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded`
+means an old test pod from a previous run is cleaned up at the
+START of a new run, AND a successful run is also cleaned up at the
+END. Failed runs are left in place for debugging - reading the
+container logs of a failed test pod is the entire point.
+
+The check itself: hit the API's /healthcheck endpoint via the
+in-cluster Service DNS name. Service DNS is
+`<service-name>.<namespace>.svc.cluster.local`, but the short form
+`<service-name>` resolves correctly inside the same namespace. We
+use the short form so the manifest stays portable across namespace
+renames.
+
+Why busybox wget instead of a more ergonomic tool: busybox is tiny
+(~1 MiB compressed), pre-pinned by k8s test conventions, and the
+chart shouldn't pull a heavier base just for one HTTP probe. Note
+that busybox `wget --spider` returns non-zero on a perfectly
+successful HEAD response (subtle exit-code semantics differ from
+GNU wget), so we do a tiny GET and discard the body via -O- and a
+redirect, matching the pattern used in /Dockerfile's HEALTHCHECK.
+*/}}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "optivest.fullname" . }}-test-connection"
+  labels:
+    {{- include "optivest.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  # The test Pod runs as a worker, not a service - it doesn't need
+  # an SA token mounted. Cosmetic but tightens the Pod's surface.
+  automountServiceAccountToken: false
+  containers:
+    - name: probe
+      image: busybox:1.37
+      command:
+        - wget
+      args:
+        - "-q"
+        - "-O"
+        - "-"
+        - "--tries=1"
+        - "--timeout=5"
+        - "http://{{ include "optivest.fullname" . }}:{{ .Values.service.apiPort }}/healthcheck"
