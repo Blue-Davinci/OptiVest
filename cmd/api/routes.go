@@ -8,22 +8,89 @@ import (
 	"github.com/justinas/alice"
 )
 
-func (app *application) sseRoutes() http.Handler {
-	router := chi.NewRouter()
-	router.Use(cors.Handler(cors.Options{
+// corsOptions builds the cors.Options used by both http.Server instances
+// (the main API server in routes(), and the SSE server in sseRoutes()).
+// The two surfaces previously each inlined a near-identical struct
+// literal, which had two failure modes:
+//
+//   - Drift: a config change applied to one surface but not the other
+//     produced subtle CORS behavior asymmetries between /v1/* and
+//     /v1/sse that browsers would notice but server-side tests would
+//     not. The two had already drifted on a comment typo ("bycls"
+//     vs "by", since fixed).
+//
+//   - Repeated review burden: every diff that touched either struct
+//     had to consciously consider whether the same change belonged on
+//     the other one.
+//
+// The only legitimate variance between the two surfaces is the set of
+// allowed methods (SSE is GET-only; API has the full CRUD set), so
+// that's the parameter. Everything else - origins, headers, credentials,
+// max-age - is policy that must NOT differ between surfaces.
+//
+// AllowCredentials: false is intentional. The frontend authenticates
+// via "Authorization: Bearer <token>" (not cookies), and CORS does not
+// restrict the Authorization header on cross-origin requests when
+// AllowCredentials is false. Switching to AllowCredentials: true would
+// (a) require enumerating origins exactly because browsers reject the
+// wildcard with credentials, (b) cause cookies to be transmitted
+// cross-origin, which we explicitly do not want for a Bearer-token
+// scheme, and (c) silently change preflight semantics in ways the
+// frontend would have to be re-audited for.
+//
+// MaxAge 300 is the largest preflight-cache value major browsers honor
+// (Chrome caps at 7200s only with a non-default policy; Firefox caps
+// at 86400s; Safari at 300s). 300s is the safe lowest-common-ceiling
+// that all of them respect uniformly.
+func (app *application) corsOptions(allowedMethods []string) cors.Options {
+	return cors.Options{
 		AllowedOrigins:   app.config.cors.trustedOrigins,
-		AllowedMethods:   []string{"GET"},
+		AllowedMethods:   allowedMethods,
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
 		ExposedHeaders:   []string{"link"},
 		AllowCredentials: false,
-		MaxAge:           300, // Maximum value not ignored bycls any of major browsers
-	}))
-	// SSE middleware chain. Deliberately omits logRequests: SSE
-	// connections are long-lived (minutes to hours) and a single
-	// "request completed" line at disconnect time is more misleading than
-	// useful. requestID still runs so that anything the SSE handler
-	// itself logs is correlatable with the original HTTP request.
-	sseMiddleware := alice.New(app.requestID, app.recoverPanic, app.authenticate, app.requireAuthenticatedUser, app.requireActivatedUser).Then
+		MaxAge:           300,
+	}
+}
+
+func (app *application) sseRoutes() http.Handler {
+	router := chi.NewRouter()
+	router.Use(cors.Handler(app.corsOptions([]string{"GET"})))
+	// SSE middleware chain.
+	//
+	// Ordering matches the main API chain (routes() below) wherever both
+	// have the same middleware, so a request that lands on either server
+	// goes through the same sequence: requestID -> recoverPanic ->
+	// rateLimit -> authenticate -> requireAuthenticatedUser ->
+	// requireActivatedUser. The shared shape is what lets a single
+	// rateLimit middleware (per-IP, Redis-backed) cap connect-attempts
+	// across both servers - reconnect cycles on the SSE port no longer
+	// bypass throttling that the same client would hit on the API port.
+	//
+	// Deliberately omitted vs the main chain:
+	//
+	//   - metrics: SSE connections are long-lived. CaptureMetrics blocks
+	//     until the response Body finishes; for a 4-hour stream it would
+	//     bump total_processing_time_us by 14e9 microseconds and skew
+	//     dashboards. SSE has its own per-event metrics inside the
+	//     handler (publishing pipeline, see notifications.go).
+	//
+	//   - logRequests: same reason. One "request completed" line at
+	//     disconnect, hours after the actual auth happened, is more
+	//     misleading than useful. requestID still runs so anything the
+	//     SSE handler itself logs is correlatable with the original
+	//     HTTP request via X-Request-ID.
+	//
+	// rateLimit was added in this commit. The existing per-user
+	// "1 stream max" rule (enforced by AddClient closing the prior
+	// channel - see notifications.go) limited concurrent streams; it
+	// did NOT limit connect/disconnect cycles, each of which performs a
+	// Redis HGETALL + a database SELECT (loadAndSendPendingNotifications).
+	// A misbehaving client that rapidly reconnected could amplify load
+	// well past what the main-API per-IP bucket would have allowed.
+	// Slotting rateLimit BEFORE authenticate also throttles bearer-token
+	// brute-force on the SSE port specifically.
+	sseMiddleware := alice.New(app.requestID, app.recoverPanic, app.rateLimit, app.authenticate, app.requireAuthenticatedUser, app.requireActivatedUser).Then
 	// Make our categorized routes
 	v1Router := chi.NewRouter()
 	v1Router.With(sseMiddleware).Get("/sse", app.ServeSSE)
@@ -35,14 +102,7 @@ func (app *application) sseRoutes() http.Handler {
 // routes() is a method that returns a http.Handler that contains all the routes for the application
 func (app *application) routes() http.Handler {
 	router := chi.NewRouter()
-	router.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   app.config.cors.trustedOrigins,
-		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "PATCH"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
-		ExposedHeaders:   []string{"link"},
-		AllowCredentials: false,
-		MaxAge:           300, // Maximum value not ignored by any of major browsers
-	}))
+	router.Use(cors.Handler(app.corsOptions([]string{"GET", "POST", "PUT", "DELETE", "PATCH"})))
 	// Global middleware chain, outer to inner:
 	//   metrics      - expvar counters and httpsnoop wrapper for the whole
 	//                  pipeline. Kept outermost so every request is at

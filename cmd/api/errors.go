@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"net/http"
 
 	"go.uber.org/zap"
@@ -84,10 +85,43 @@ func (app *application) accountRecoveryEligibleResponse(w http.ResponseWriter, r
 	}
 }
 
-// The badRequestResponse() method will be used to send a 400 Bad Request status code and
-// JSON response to the client.
+// badRequestResponse sends a 400 Bad Request envelope to the client - or, if
+// err wraps ErrUnsupportedMediaType, transparently delegates to
+// unsupportedMediaTypeResponse so the wire status is the more specific 415.
+//
+// The auto-routing exists because every handler in this codebase follows
+// the same pattern after readJSON failures:
+//
+//	err := app.readJSON(w, r, &input)
+//	if err != nil {
+//	    app.badRequestResponse(w, r, err)
+//	    return
+//	}
+//
+// Without this routing, picking up the new Content-Type validation would
+// require touching ~50 call sites across cmd/api/*.go to do the
+// errors.Is dispatch by hand. Centralizing it here keeps the existing
+// handlers untouched and means any future readJSON-wrapped sentinels
+// (ErrPayloadTooLarge, ErrInvalidJSON, etc.) can be routed the same way.
 func (app *application) badRequestResponse(w http.ResponseWriter, r *http.Request, err error) {
+	if errors.Is(err, ErrUnsupportedMediaType) {
+		app.unsupportedMediaTypeResponse(w, r)
+		return
+	}
 	app.errorResponse(w, r, http.StatusBadRequest, err.Error())
+}
+
+// unsupportedMediaTypeResponse returns 415 with a constant client-facing
+// message. We deliberately do NOT echo the rejected Content-Type back to
+// the client: the value is something the client already knows (they
+// sent it), and surfacing it in the error envelope makes future log
+// pipelines harder to redact if the field ever turns out to carry a
+// secret-like token. The full diagnostic context (which media type was
+// rejected, why mime.ParseMediaType failed) is preserved on the
+// server-side error chain via fmt.Errorf("%w: ...") in
+// validateJSONContentType - logRequests captures it for ops.
+func (app *application) unsupportedMediaTypeResponse(w http.ResponseWriter, r *http.Request) {
+	app.errorResponse(w, r, http.StatusUnsupportedMediaType, "Content-Type must be application/json")
 }
 
 // Note that the errors parameter here has the type map[string]string, which is exactly

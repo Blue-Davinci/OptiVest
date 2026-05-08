@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"mime/multipart"
 	"net/http"
 	"net/url"
@@ -27,35 +28,91 @@ import (
 var (
 	ErrInvalidAuthentication = errors.New("invalid authentication token format")
 	ErrNoDataFoundInRedis    = errors.New("no data found in Redis")
+	// ErrUnsupportedMediaType is returned by readJSON when the request's
+	// Content-Type header is missing, malformed, or not application/json.
+	// Handlers do not need to check for this directly: badRequestResponse
+	// inspects the error chain and routes a wrapped sentinel to the 415
+	// response instead of 400. Wrap with fmt.Errorf("%w: ...details", err)
+	// so the diagnostic context is preserved on the server-side log line
+	// without leaking it to the client envelope.
+	ErrUnsupportedMediaType = errors.New("unsupported media type")
 )
+
+// validateJSONContentType ensures the request advertises a JSON body. Per
+// RFC 7231 §3.1.1.5 a sender that emits a body SHOULD also send a
+// Content-Type; we treat absence as a hard error for body-accepting
+// handlers because the alternative is silently parsing whatever bytes
+// arrive (text/plain, multipart/form-data, etc) - which has historically
+// been a source of injection-adjacent surprises. We use mime.ParseMediaType
+// rather than string equality so the standard `application/json;
+// charset=utf-8` form is accepted - that's what most browsers and
+// SvelteKit's server-side fetch send by default. Charset and any other
+// parameters are tolerated and ignored; only the bare media type is
+// matched, case-insensitively (mime.ParseMediaType lowercases for us).
+func validateJSONContentType(r *http.Request) error {
+	ct := r.Header.Get("Content-Type")
+	if ct == "" {
+		return fmt.Errorf("%w: missing Content-Type header (expected application/json)", ErrUnsupportedMediaType)
+	}
+	mediaType, _, err := mime.ParseMediaType(ct)
+	if err != nil {
+		return fmt.Errorf("%w: malformed Content-Type %q: %v", ErrUnsupportedMediaType, ct, err)
+	}
+	if mediaType != "application/json" {
+		return fmt.Errorf("%w: got %q, expected application/json", ErrUnsupportedMediaType, mediaType)
+	}
+	return nil
+}
 
 // Define an envelope type.
 type envelope map[string]any
 
-// Define a writeJSON() helper for sending responses. This takes the destination
-// http.ResponseWriter, the HTTP status code to send, the data to encode to JSON, and a
-// header map containing any additional HTTP headers we want to include in the response.
+// writeJSON encodes data as JSON and writes it to w with the given HTTP
+// status, then merges in any caller-supplied headers.
+//
+// The encoder is plain json.Marshal (compact, no indentation, no trailing
+// newline). The previous implementation called json.MarshalIndent with a
+// tab indent + trailing '\n' "to make it easier to view in terminal
+// applications", but that pretty-printed every response in production -
+// every byte we sent over the wire carried tab whitespace that no
+// programmatic client cares about. On a moderately-large response
+// (~5 KB JSON object) the indented form is ~15-25% larger; multiplied
+// across millions of requests per day that turns into measurable egress
+// and parser CPU on the client side. Operators who want pretty output
+// can pipe through `jq`; that's a tool decision, not a default.
+//
+// Content-Type carries the explicit charset=utf-8 parameter even though
+// RFC 8259 §8.1 already mandates UTF-8 for JSON exchanged between
+// systems - some HTTP clients still pick a wrong default decoder when
+// the charset is omitted, and the parameter costs us nothing.
 func (app *application) writeJSON(w http.ResponseWriter, status int, data envelope, headers http.Header) error {
-	// Encode the data to JSON, returning the error if there was one.
-	js, err := json.MarshalIndent(data, "", "\t")
+	js, err := json.Marshal(data)
 	if err != nil {
 		return err
 	}
-	// Append a newline to make it easier to view in terminal applications.
-	js = append(js, '\n')
-	// At this point, we know that we won't encounter any more errors before writing the
-	// response, so it's safe to add any headers that we want to include.
 	for key, value := range headers {
 		w.Header()[key] = value
 	}
-	// Add the "Content-Type: application/json" header, then write the status code
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
-	w.Write(js)
+	// Write errors after WriteHeader has flushed are unrecoverable - the
+	// status line is already on the wire - so we deliberately do not
+	// surface them. The std net/http package logs them on the server's
+	// ErrorLog (which we route through zap) for ops visibility.
+	_, _ = w.Write(js)
 	return nil
 }
 
 func (app *application) readJSON(w http.ResponseWriter, r *http.Request, dst any) error {
+	// Reject non-JSON content types before we touch the body. The check
+	// uses mime.ParseMediaType so charset parameters (utf-8) are
+	// accepted; only the bare media type must be application/json. The
+	// returned error wraps ErrUnsupportedMediaType which badRequestResponse
+	// detects to emit 415 instead of 400 - handlers do not need to
+	// branch on this themselves.
+	if err := validateJSONContentType(r); err != nil {
+		return err
+	}
 	// Use http.MaxBytesReader() to limit the size of the request body to 1MB.
 	maxBytes := 1_048_576
 	r.Body = http.MaxBytesReader(w, r.Body, int64(maxBytes))

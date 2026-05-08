@@ -206,3 +206,76 @@ func TestRateLimit_PerIPIsolation(t *testing.T) {
 	}
 	r3.Body.Close()
 }
+
+// TestSSERoutes_RateLimitInChain verifies that the SSE alice chain
+// includes app.rateLimit before app.authenticate, so a misbehaving client
+// can't bypass per-IP throttling by hitting the SSE port instead of the
+// API port. This is the structural regression test for the connect-cycle
+// amplification audit finding (Pass 4 #SSE).
+//
+// Mechanics: with rps=1/burst=1 the second request from the same IP must
+// be 429. The first request returns 401 (anonymous user reaches
+// requireAuthenticatedUser with no bearer), but rate-limit ran *before*
+// authenticate so the bucket was decremented. If a future refactor
+// removes app.rateLimit from the SSE chain - or moves it past
+// authenticate - this test fails.
+func TestSSERoutes_RateLimitInChain(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+
+	app := &application{
+		logger:  zap.NewNop(),
+		ctx:     context.Background(),
+		RedisDB: rdb,
+		config: config{
+			cors: struct {
+				trustedOrigins []string
+			}{trustedOrigins: []string{"*"}},
+			limiter: struct {
+				rps     float64
+				burst   int
+				enabled bool
+			}{rps: 1, burst: 1, enabled: true},
+		},
+	}
+
+	handler := app.sseRoutes()
+	if handler == nil {
+		t.Fatal("sseRoutes() returned nil handler")
+	}
+
+	doRequest := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/v1/sse", nil)
+		req.RemoteAddr = "203.0.113.42:50000" // RFC 5737 documentation IP
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		return rec
+	}
+
+	// First request: must NOT be 429. The exact status depends on what
+	// happens after rate-limit - probably 401 from requireAuthenticatedUser
+	// since we send no bearer token - but not 429 because the bucket has
+	// budget. We assert "anything except 429" rather than a specific code
+	// to keep the test robust to unrelated chain changes.
+	r1 := doRequest()
+	if r1.Code == http.StatusTooManyRequests {
+		t.Fatalf("first request unexpectedly 429; rate-limit consumed budget too eagerly. body=%s", r1.Body.String())
+	}
+
+	// Second request from the same IP: with burst=1 the bucket is empty,
+	// so rate-limit must fire and emit 429. If rate-limit is missing from
+	// the chain, this would instead be 401 again (or whatever the post-
+	// rate-limit middlewares decide).
+	r2 := doRequest()
+	if r2.Code != http.StatusTooManyRequests {
+		t.Errorf("second SSE request from exhausted IP: got %d, want 429 (rate-limit missing from SSE chain?)", r2.Code)
+	}
+
+	// Sanity: 429 responses should carry Retry-After per the rate-limit
+	// middleware contract. If this header is missing, the chain wired
+	// in something OTHER than our app.rateLimit (e.g. a generic 429
+	// from chi).
+	if r2.Code == http.StatusTooManyRequests && r2.Header().Get("Retry-After") == "" {
+		t.Error("429 response missing Retry-After header; either rate-limit ran wrong or a different 429 source intercepted")
+	}
+}
