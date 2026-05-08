@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -222,6 +224,134 @@ func TestWriteJSON_WireFormat(t *testing.T) {
 	}
 	if got["hello"] != "world" {
 		t.Errorf(`expected hello=="world", got %v`, got["hello"])
+	}
+}
+
+// TestValidateJSONContentType_Accepted covers every form of
+// `application/json` that real-world HTTP clients send so we can be
+// confident the new readJSON gate doesn't 415 a client that's actually
+// well-behaved. Each row should pass cleanly (return nil); any failure
+// is a regression that would break a real frontend at runtime.
+func TestValidateJSONContentType_Accepted(t *testing.T) {
+	cases := []struct {
+		name string
+		ct   string
+	}{
+		{"bare", "application/json"},
+		{"with-utf8-charset", "application/json; charset=utf-8"},
+		{"with-uppercase-charset", "application/json; charset=UTF-8"},
+		{"with-extra-params", "application/json; charset=utf-8; boundary=ignored"},
+		{"with-leading-whitespace-around-params", "application/json ; charset=utf-8"},
+		{"uppercase-media-type", "APPLICATION/JSON"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodPost, "/x", strings.NewReader("{}"))
+			r.Header.Set("Content-Type", c.ct)
+			if err := validateJSONContentType(r); err != nil {
+				t.Errorf("expected accept for %q, got error: %v", c.ct, err)
+			}
+		})
+	}
+}
+
+// TestValidateJSONContentType_Rejected covers the failure modes. Every
+// row must return an error that errors.Is unwraps to
+// ErrUnsupportedMediaType, since badRequestResponse routes on that
+// sentinel to emit 415 rather than 400. A failure to wrap correctly
+// would silently fall through to 400, defeating the whole point.
+func TestValidateJSONContentType_Rejected(t *testing.T) {
+	cases := []struct {
+		name string
+		ct   string
+	}{
+		{"missing", ""},
+		{"plain-text", "text/plain"},
+		{"xml", "application/xml"},
+		{"form-encoded", "application/x-www-form-urlencoded"},
+		{"multipart", "multipart/form-data; boundary=foo"},
+		{"malformed", "definitely not a media type"},
+		{"json-suffix-only", "application/jsonish"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodPost, "/x", strings.NewReader("{}"))
+			if c.ct != "" {
+				r.Header.Set("Content-Type", c.ct)
+			}
+			err := validateJSONContentType(r)
+			if err == nil {
+				t.Fatalf("expected reject for %q, got nil", c.ct)
+			}
+			if !errors.Is(err, ErrUnsupportedMediaType) {
+				t.Errorf("error must wrap ErrUnsupportedMediaType so badRequestResponse routes to 415; got: %v", err)
+			}
+		})
+	}
+}
+
+// TestBadRequestResponse_RoutesUnsupportedMediaType locks in the
+// auto-routing behavior: any error chain that contains
+// ErrUnsupportedMediaType must come out as 415, regardless of how it was
+// wrapped. This is what lets the existing ~50 readJSON call sites stay
+// untouched - they already do
+//
+//	if err != nil { app.badRequestResponse(w, r, err); return }
+//
+// and that path now correctly emits 415 for content-type errors and
+// 400 for everything else.
+func TestBadRequestResponse_RoutesUnsupportedMediaType(t *testing.T) {
+	app := &application{}
+
+	t.Run("wrapped sentinel -> 415", func(t *testing.T) {
+		rr := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodPost, "/x", nil)
+		err := fmt.Errorf("%w: got %q", ErrUnsupportedMediaType, "text/plain")
+		app.badRequestResponse(rr, r, err)
+		if got, want := rr.Code, http.StatusUnsupportedMediaType; got != want {
+			t.Errorf("status: got %d, want %d", got, want)
+		}
+		// Body must NOT echo the rejected Content-Type back to the client.
+		// The diagnostic context is server-side only; the wire envelope
+		// is intentionally constant.
+		if strings.Contains(rr.Body.String(), "text/plain") {
+			t.Errorf("response unexpectedly echoes the rejected media type: %q", rr.Body.String())
+		}
+	})
+
+	t.Run("plain error -> 400", func(t *testing.T) {
+		rr := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodPost, "/x", nil)
+		app.badRequestResponse(rr, r, errors.New("body contains badly-formed JSON"))
+		if got, want := rr.Code, http.StatusBadRequest; got != want {
+			t.Errorf("status: got %d, want %d", got, want)
+		}
+	})
+}
+
+// TestReadJSON_RejectsWrongContentType is the integration check that
+// the readJSON guard composes with the auto-routing. We feed in a body
+// that WOULD parse cleanly (valid JSON) but with the wrong Content-Type;
+// the rejection must happen at the validation gate, before any body
+// bytes are consumed.
+func TestReadJSON_RejectsWrongContentType(t *testing.T) {
+	app := &application{}
+	rr := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/x", strings.NewReader(`{"ok":true}`))
+	r.Header.Set("Content-Type", "text/plain")
+	var dst struct {
+		OK bool `json:"ok"`
+	}
+	err := app.readJSON(rr, r, &dst)
+	if err == nil {
+		t.Fatal("expected readJSON to reject text/plain body, got nil")
+	}
+	if !errors.Is(err, ErrUnsupportedMediaType) {
+		t.Errorf("returned error must wrap ErrUnsupportedMediaType; got: %v", err)
+	}
+	// Body must remain unread - confirm dst is still the zero value.
+	if dst.OK {
+		t.Error("readJSON consumed the body despite content-type rejection (dst was decoded)")
 	}
 }
 

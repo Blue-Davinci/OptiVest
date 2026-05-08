@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"mime/multipart"
 	"net/http"
 	"net/url"
@@ -27,7 +28,41 @@ import (
 var (
 	ErrInvalidAuthentication = errors.New("invalid authentication token format")
 	ErrNoDataFoundInRedis    = errors.New("no data found in Redis")
+	// ErrUnsupportedMediaType is returned by readJSON when the request's
+	// Content-Type header is missing, malformed, or not application/json.
+	// Handlers do not need to check for this directly: badRequestResponse
+	// inspects the error chain and routes a wrapped sentinel to the 415
+	// response instead of 400. Wrap with fmt.Errorf("%w: ...details", err)
+	// so the diagnostic context is preserved on the server-side log line
+	// without leaking it to the client envelope.
+	ErrUnsupportedMediaType = errors.New("unsupported media type")
 )
+
+// validateJSONContentType ensures the request advertises a JSON body. Per
+// RFC 7231 §3.1.1.5 a sender that emits a body SHOULD also send a
+// Content-Type; we treat absence as a hard error for body-accepting
+// handlers because the alternative is silently parsing whatever bytes
+// arrive (text/plain, multipart/form-data, etc) - which has historically
+// been a source of injection-adjacent surprises. We use mime.ParseMediaType
+// rather than string equality so the standard `application/json;
+// charset=utf-8` form is accepted - that's what most browsers and
+// SvelteKit's server-side fetch send by default. Charset and any other
+// parameters are tolerated and ignored; only the bare media type is
+// matched, case-insensitively (mime.ParseMediaType lowercases for us).
+func validateJSONContentType(r *http.Request) error {
+	ct := r.Header.Get("Content-Type")
+	if ct == "" {
+		return fmt.Errorf("%w: missing Content-Type header (expected application/json)", ErrUnsupportedMediaType)
+	}
+	mediaType, _, err := mime.ParseMediaType(ct)
+	if err != nil {
+		return fmt.Errorf("%w: malformed Content-Type %q: %v", ErrUnsupportedMediaType, ct, err)
+	}
+	if mediaType != "application/json" {
+		return fmt.Errorf("%w: got %q, expected application/json", ErrUnsupportedMediaType, mediaType)
+	}
+	return nil
+}
 
 // Define an envelope type.
 type envelope map[string]any
@@ -69,6 +104,15 @@ func (app *application) writeJSON(w http.ResponseWriter, status int, data envelo
 }
 
 func (app *application) readJSON(w http.ResponseWriter, r *http.Request, dst any) error {
+	// Reject non-JSON content types before we touch the body. The check
+	// uses mime.ParseMediaType so charset parameters (utf-8) are
+	// accepted; only the bare media type must be application/json. The
+	// returned error wraps ErrUnsupportedMediaType which badRequestResponse
+	// detects to emit 415 instead of 400 - handlers do not need to
+	// branch on this themselves.
+	if err := validateJSONContentType(r); err != nil {
+		return err
+	}
 	// Use http.MaxBytesReader() to limit the size of the request body to 1MB.
 	maxBytes := 1_048_576
 	r.Body = http.MaxBytesReader(w, r.Body, int64(maxBytes))
