@@ -29,7 +29,6 @@ help:
 	@echo "  k8s/image/build     - Build optivest-api + optivest-migrate images locally"
 	@echo "  k8s/image/load      - Side-load both images into the kind cluster"
 	@echo "  k8s/secret/create   - Create/refresh the optivest-secrets Secret from cmd/api/.env"
-	@echo "  k8s/migrate         - Run goose up as a one-shot Job (chart v0.1 manual step)"
 	@echo "  k8s/install         - helm upgrade --install the chart against the kind cluster"
 	@echo "  k8s/uninstall       - helm uninstall the chart"
 	@echo "  k8s/forward         - Port-forward API:4000 + SSE:4001 to localhost"
@@ -212,10 +211,8 @@ K8S_NAMESPACE        ?= optivest
 KIND_PROVIDER        ?= podman
 CHART_PATH           ?= deploy/charts/optivest
 CHART_RELEASE        ?= optivest
-IMAGE_TAG            ?= 0.1.0
+IMAGE_TAG            ?= 0.2.0
 DEV_DEPS_MANIFEST    ?= deploy/dev/dev-deps.yaml
-MIGRATE_JOB_MANIFEST ?= deploy/dev/migrate-job.yaml
-SCHEMA_DIR           ?= internal/sql/schema
 ENV_FILE             ?= cmd/api/.env
 # Service hostname the in-cluster postgres dev-dep listens on. Used to
 # rewrite OPTIVEST_DB_DSN when seeding the optivest-secrets Secret so the
@@ -228,9 +225,12 @@ K8S_DB_DSN           ?= postgres://optivest:optivest@postgres:5432/optivest?sslm
 # the optivest-secrets Secret is fully populated.
 CHART_ENV            ?= development
 # Rootless podman tags side-loaded images with a `localhost/` prefix,
-# which the chart's image.repository default ("optivest-api") does not
-# match. Override the chart value so kubelet can resolve the image.
-CHART_IMAGE_REPO     ?= localhost/optivest-api
+# which the chart's image.repository default ("optivest-api" /
+# "optivest-migrate") does not match. Override both via --set so
+# kubelet can resolve the loaded images inside the kind node's
+# containerd runtime.
+CHART_IMAGE_REPO         ?= localhost/optivest-api
+CHART_MIGRATE_IMAGE_REPO ?= localhost/optivest-migrate
 
 # kind respects the env var on every command (create/get/delete/load), so
 # we set it once here and reuse via $(KIND).
@@ -270,8 +270,9 @@ k8s/dev-deps/up:
 	@echo 'Applying $(DEV_DEPS_MANIFEST)...'
 	kubectl -n $(K8S_NAMESPACE) apply -f $(DEV_DEPS_MANIFEST)
 	@echo 'Waiting for postgres + redis rollouts to complete...'
-	kubectl -n $(K8S_NAMESPACE) rollout status deployment/postgres --timeout=180s
-	kubectl -n $(K8S_NAMESPACE) rollout status deployment/redis --timeout=120s
+	@echo '(first run on a fresh cluster pulls postgres:17-alpine ~200MB and redis:7-alpine ~40MB; expect 5-10min on slow links)'
+	kubectl -n $(K8S_NAMESPACE) rollout status deployment/postgres --timeout=600s
+	kubectl -n $(K8S_NAMESPACE) rollout status deployment/redis --timeout=300s
 
 ## k8s/dev-deps/down: remove the in-cluster postgres + redis dev-deps
 .PHONY: k8s/dev-deps/down
@@ -314,28 +315,18 @@ k8s/secret/create:
 			--from-env-file=$$TMPENV \
 			--dry-run=client -o yaml | kubectl apply -f -
 
-## k8s/migrate: run goose up as a one-shot Job
-##
-## chart v0.1 doesn't manage migrations itself — this rebuilds the
-## `migrations` ConfigMap from $(SCHEMA_DIR) (so a freshly-edited schema
-## file shows up without rebuilding the migrate image), tears down any
-## previous Job, and applies $(MIGRATE_JOB_MANIFEST). Chart v0.2 will
-## replace this with a templated Job rendered as a Helm hook.
-.PHONY: k8s/migrate
-k8s/migrate:
-	@echo 'Refreshing migrations ConfigMap from $(SCHEMA_DIR)/...'
-	kubectl -n $(K8S_NAMESPACE) create configmap migrations \
-		--from-file=$(SCHEMA_DIR)/ \
-		--dry-run=client -o yaml | kubectl apply -f -
-	@echo 'Replacing migrate Job...'
-	kubectl -n $(K8S_NAMESPACE) delete job migrate --ignore-not-found
-	kubectl -n $(K8S_NAMESPACE) apply -f $(MIGRATE_JOB_MANIFEST)
-	@echo 'Waiting for migrate Job to complete...'
-	kubectl -n $(K8S_NAMESPACE) wait --for=condition=complete job/migrate --timeout=180s
-	@echo 'Migration logs:'
-	kubectl -n $(K8S_NAMESPACE) logs job/migrate
-
 ## k8s/install: helm upgrade --install the chart against the kind cluster
+##
+## The chart (v0.2+) runs schema migrations itself as a Helm
+## pre-install/pre-upgrade hook, so a separate `k8s/migrate` step is
+## no longer needed. We pass --set migrate.image.repository so the
+## hook Job pulls the localhost-prefixed image side-loaded by
+## `k8s/image/load`.
+##
+## --wait blocks until the API Deployment is fully Ready (which itself
+## means the migrate Job already returned 0 — Helm runs the hook
+## before the Deployment is even applied). --timeout=300s gives the
+## migrate Job enough headroom on a fresh DB.
 .PHONY: k8s/install
 k8s/install:
 	helm upgrade --install $(CHART_RELEASE) $(CHART_PATH) \
@@ -343,8 +334,9 @@ k8s/install:
 		--create-namespace \
 		--set image.repository=$(CHART_IMAGE_REPO) \
 		--set image.tag=$(IMAGE_TAG) \
+		--set migrate.image.repository=$(CHART_MIGRATE_IMAGE_REPO) \
 		--set config.env=$(CHART_ENV) \
-		--wait --timeout=180s
+		--wait --timeout=300s
 
 ## k8s/uninstall: helm uninstall the chart
 .PHONY: k8s/uninstall
@@ -368,10 +360,11 @@ k8s/logs:
 ##   1. cluster up           — kubectl context exists
 ##   2. dev-deps/up          — postgres + redis are reachable inside the cluster
 ##   3. image/build + load   — kubelet can pull localhost/optivest-{api,migrate}
-##   4. secret/create        — DSN + env keys are available to the migrate Job
-##                              and the API pod via envFrom
-##   5. migrate              — schema is applied before the API tries to read it
-##   6. install              — chart rolls out and probes go green
+##   4. secret/create        — DSN + env keys are available to the migrate
+##                              hook Job and the API pod via envFrom
+##   5. install              — chart's pre-install hook runs the migrate Job
+##                              (chart v0.2+), then the API Deployment rolls
+##                              out and probes go green
 .PHONY: k8s/smoke
 k8s/smoke:
 	@$(MAKE) k8s/cluster/up
@@ -379,7 +372,6 @@ k8s/smoke:
 	@$(MAKE) k8s/image/build
 	@$(MAKE) k8s/image/load
 	@$(MAKE) k8s/secret/create
-	@$(MAKE) k8s/migrate
 	@$(MAKE) k8s/install
 	@echo ''
 	@echo '--- smoke complete --------------------------------------------------'
