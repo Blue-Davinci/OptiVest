@@ -18,6 +18,9 @@ help:
 	@echo "  docker/migrate      - Re-run the goose up migrations against the running postgres"
 	@echo "  docker/build        - Build the api image without starting anything"
 	@echo "  docker/ps           - Show the running compose services"
+	@echo "  dev/up              - Start the host valkey service for local API runs"
+	@echo "  dev/down            - Stop the host valkey service"
+	@echo "  dev/status          - Show whether the host valkey service is running"
 
 .PHONY: run/api
 run/api:
@@ -141,3 +144,38 @@ docker/build:
 .PHONY: docker/ps
 docker/ps:
 	docker compose ps
+
+# -----------------------------------------------------------------------------
+# Host-side dev dependencies (valkey/redis on the loopback interface).
+# -----------------------------------------------------------------------------
+# These targets manage the systemd service for the locally-installed
+# valkey package so the binary in `make run/api` has a Redis-compatible
+# server to talk to without needing the full docker-compose stack up.
+#
+# The service is intentionally NOT enabled at boot — `make dev/up` starts
+# it for the current session and `make dev/down` stops it again. This
+# keeps idle hosts free of a listening Redis when you're not developing.
+#
+# If your distro packages valkey under a different unit name (e.g.
+# `redis.service` on the legacy AUR build), override DEV_REDIS_UNIT:
+#   make dev/up DEV_REDIS_UNIT=redis
+DEV_REDIS_UNIT ?= valkey
+
+## dev/up: start the host valkey service for local API runs
+.PHONY: dev/up
+dev/up:
+	@echo 'Starting $(DEV_REDIS_UNIT)...'
+	sudo systemctl start $(DEV_REDIS_UNIT)
+	@systemctl is-active --quiet $(DEV_REDIS_UNIT) && \
+		echo "$(DEV_REDIS_UNIT) running on 127.0.0.1:6379"
+
+## dev/down: stop the host valkey service
+.PHONY: dev/down
+dev/down:
+	@echo 'Stopping $(DEV_REDIS_UNIT)...'
+	sudo systemctl stop $(DEV_REDIS_UNIT)
+
+## dev/status: show whether the host valkey service is running
+.PHONY: dev/status
+dev/status:
+	@systemctl status $(DEV_REDIS_UNIT) --no-pager || true
