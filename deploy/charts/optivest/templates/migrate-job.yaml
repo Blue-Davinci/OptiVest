@@ -1,0 +1,123 @@
+{{/*
+Schema migrations as a Helm pre-install / pre-upgrade hook.
+
+The Job runs the optivest-migrate image, which ships with the SQL
+files baked in at /migrations (Dockerfile.migrate `COPY
+internal/sql/schema/`), and executes `goose up` against the DSN read
+from existingSecret. Helm waits for the Job to reach a terminal state
+before applying the regular release resources, so:
+
+  - Success → API Deployment rollout proceeds.
+  - Failure → Helm aborts; the API never sees an incompatible schema.
+
+See values.yaml `migrate:` block for the operator-facing knobs and
+the rationale for hook-delete-policy / TTL choices.
+*/}}
+{{- if .Values.migrate.enabled -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "optivest.migrate.fullname" . }}
+  labels:
+    {{- include "optivest.migrate.labels" . | nindent 4 }}
+  annotations:
+    # pre-install runs on `helm install`; pre-upgrade runs on
+    # `helm upgrade`. We register both so any release that changes
+    # the schema applies the new files before the API binary that
+    # expects them rolls out.
+    "helm.sh/hook": pre-install,pre-upgrade
+    # hook-weight orders multiple hooks within the same hook stage.
+    # Lower runs first. -5 leaves room above (more-negative weights)
+    # for future hooks that need to precede migrations (none today).
+    "helm.sh/hook-weight": "-5"
+    # before-hook-creation: any leftover Job from a previous release
+    # is deleted before the new one is created, so re-running
+    # `helm install/upgrade` is idempotent and `kubectl get jobs`
+    # between releases stays clean.
+    #
+    # We deliberately DO NOT add hook-succeeded here: keeping the
+    # Job around briefly after success lets an operator
+    # `kubectl logs job/<name>` to inspect what migrated and how
+    # long it took. The ttlSecondsAfterFinished below culls successful
+    # Jobs after a few minutes; failed Jobs stay until next release
+    # for debuggability.
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  backoffLimit: {{ .Values.migrate.backoffLimit }}
+  ttlSecondsAfterFinished: {{ .Values.migrate.ttlSecondsAfterFinished }}
+  activeDeadlineSeconds: {{ .Values.migrate.activeDeadlineSeconds }}
+  template:
+    metadata:
+      labels:
+        {{- include "optivest.migrate.labels" . | nindent 8 }}
+        {{- with .Values.migrate.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.migrate.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      # OnFailure restarts the container in-place on a non-zero exit
+      # without spawning a new Pod. Combined with backoffLimit, this
+      # means a transient postgres readiness flap doesn't burn through
+      # the retry budget on Pod-creation churn.
+      restartPolicy: OnFailure
+      # ServiceAccount: deliberately not set, so the Pod uses the
+      # namespace's `default` SA. The chart's `optivest`
+      # ServiceAccount template is a regular release resource, not a
+      # hook, so it does not exist yet when this pre-install hook
+      # fires — referencing it here would block Pod creation with
+      # "serviceaccount not found". The migrate Pod has no business
+      # talking to the Kubernetes API, so we don't actually need any
+      # specific SA, and we explicitly opt out of the projected SA
+      # token below to shrink the blast radius if a malformed
+      # migration ever triggered a goose CVE.
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      # Reuse the chart's pod-level securityContext. The migrate image
+      # uses USER goose (UID 10001), which matches the API image's
+      # USER optivest (UID 10001) — the chart's runAsUser/runAsGroup
+      # values cover both without divergence.
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: goose
+          image: "{{ include "optivest.migrate.image" . }}"
+          imagePullPolicy: {{ .Values.migrate.image.pullPolicy }}
+          # The migrate image's ENTRYPOINT is `goose`, so args here are
+          # subcommand + flags. -dir=/migrations is explicit even though
+          # WORKDIR=/migrations would make it the default — a reader of
+          # the chart template shouldn't need to read Dockerfile.migrate
+          # to know where the SQL files live.
+          args:
+            - "-dir=/migrations"
+            - "postgres"
+            - "$(OPTIVEST_DB_DSN)"
+            - "up"
+          env:
+            - name: OPTIVEST_DB_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.existingSecret }}
+                  key: OPTIVEST_DB_DSN
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          resources:
+            {{- toYaml .Values.migrate.resources | nindent 12 }}
+      {{- with .Values.migrate.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.migrate.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.migrate.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

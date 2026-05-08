@@ -3,7 +3,7 @@ name: optivest
 
 # Concise one-liner used by `helm search` and `helm show chart`.
 # Keep it under ~80 chars; longer rationale belongs in README.md.
-description: Helm chart for the OptiVest API (Go) and its goose migration sidecar
+description: Helm chart for the OptiVest API (Go) with goose schema migrations as a pre-install/upgrade hook
 
 # `application` (a deployable workload chart) vs `library` (a chart of
 # helpers consumed by other charts). OptiVest is the workload itself,
@@ -21,20 +21,35 @@ type: application
 #                              existing release on `helm upgrade`
 # Keep this in sync with whatever you ship to deploy environments so
 # `helm history` is meaningful for rollbacks.
-version: 0.1.0
+#
+# Changelog (most recent first):
+#   - 0.2.0  Migrate Job is now a pre-install / pre-upgrade Helm hook.
+#            New top-level `migrate.*` values block. The schema lives in
+#            the optivest-migrate image (see Dockerfile.migrate) so the
+#            chart no longer needs an out-of-band ConfigMap to apply
+#            migrations. Skippable via `--set migrate.enabled=false`
+#            for upgrades that don't change schema.
+#   - 0.1.0  Initial scaffold. API-only Deployment + Service +
+#            ServiceAccount with optivest-secrets as the externalised
+#            credentials envelope. Migrations were a separate manual
+#            `goose up` step.
+version: 0.2.0
 
 # appVersion is the version of the OptiVest application this chart
 # was tested against. Distinct from chart version because the chart
 # and the app evolve on different cadences. Used by `helm list` and
 # the rendered `app.kubernetes.io/version` label.
 #
-# Pinned to 0.1.0 for now because OptiVest hasn't cut a SemVer release
-# tag yet (binary embeds vcs.Version() from runtime/debug, which gives
-# a commit hash, not a version). When the project tags v1.0.0, sync
-# this field. Quote it because Helm treats unquoted appVersion as a
-# number when it parses cleanly as one (e.g. `1.16` would lose the
-# patch component without quotes).
-appVersion: "0.1.0"
+# Pinned to 0.2.0 — bumped alongside chart version because the migrate
+# image now ships with the schema baked in (Dockerfile.migrate `COPY
+# internal/sql/schema/`), so a chart consumer pinning to a specific
+# appVersion gets a deterministic schema as well. OptiVest still hasn't
+# cut a SemVer release tag (binary embeds vcs.Version() from
+# runtime/debug, which gives a commit hash, not a version); when the
+# project tags v1.0.0, sync this field to that. Quote it because Helm
+# treats unquoted appVersion as a number when it parses cleanly as one
+# (e.g. `1.16` would lose the patch component without quotes).
+appVersion: "0.2.0"
 
 # kubeVersion is the minimum Kubernetes API version the templates
 # target. We use:
