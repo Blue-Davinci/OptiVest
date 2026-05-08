@@ -1,24 +1,78 @@
 apiVersion: v2
 name: optivest
-description: A Helm chart for Kubernetes
 
-# A chart can be either an 'application' or a 'library' chart.
-#
-# Application charts are a collection of templates that can be packaged into versioned archives
-# to be deployed.
-#
-# Library charts provide useful utilities or functions for the chart developer. They're included as
-# a dependency of application charts to inject those utilities and functions into the rendering
-# pipeline. Library charts do not define any templates and therefore cannot be deployed.
+# Concise one-liner used by `helm search` and `helm show chart`.
+# Keep it under ~80 chars; longer rationale belongs in README.md.
+description: Helm chart for the OptiVest API (Go) and its goose migration sidecar
+
+# `application` (a deployable workload chart) vs `library` (a chart of
+# helpers consumed by other charts). OptiVest is the workload itself,
+# so application is correct.
 type: application
 
-# This is the chart version. This version number should be incremented each time you make changes
-# to the chart and its templates, including the app version.
-# Versions are expected to follow Semantic Versioning (https://semver.org/)
+# version is the chart's own SemVer. Bump on every chart change
+# regardless of whether appVersion changes. Conventions:
+#   - patch (0.1.0 -> 0.1.1): chart-only fixes (typo, comment, no
+#                              behaviour change)
+#   - minor (0.1.0 -> 0.2.0): chart features (new template, new
+#                              value, new option)
+#   - major (0.1.0 -> 1.0.0): backwards-incompatible value renames or
+#                              template restructure that breaks an
+#                              existing release on `helm upgrade`
+# Keep this in sync with whatever you ship to deploy environments so
+# `helm history` is meaningful for rollbacks.
 version: 0.1.0
 
-# This is the version number of the application being deployed. This version number should be
-# incremented each time you make changes to the application. Versions are not expected to
-# follow Semantic Versioning. They should reflect the version the application is using.
-# It is recommended to use it with quotes.
-appVersion: "1.16.0"
+# appVersion is the version of the OptiVest application this chart
+# was tested against. Distinct from chart version because the chart
+# and the app evolve on different cadences. Used by `helm list` and
+# the rendered `app.kubernetes.io/version` label.
+#
+# Pinned to 0.1.0 for now because OptiVest hasn't cut a SemVer release
+# tag yet (binary embeds vcs.Version() from runtime/debug, which gives
+# a commit hash, not a version). When the project tags v1.0.0, sync
+# this field. Quote it because Helm treats unquoted appVersion as a
+# number when it parses cleanly as one (e.g. `1.16` would lose the
+# patch component without quotes).
+appVersion: "0.1.0"
+
+# kubeVersion is the minimum Kubernetes API version the templates
+# target. We use:
+#   - apps/v1     (Deployment, GA since 1.9)
+#   - v1          (Service, ConfigMap, Secret, ServiceAccount, Pod -
+#                  GA since forever)
+#   - autoscaling/v2     (HPA, GA since 1.23)
+#   - networking.k8s.io/v1   (Ingress, GA since 1.19)
+#   - gateway.networking.k8s.io/v1   (HTTPRoute, GA since 1.30)
+#
+# 1.30 is the floor for HTTPRoute. We pin >=1.27 because that's what
+# `kindest/node` ships with the kind v0.20+ default image and gives
+# us modern probe semantics + PodReadiness gates without surprises.
+# HTTPRoute is gated by a values flag; users on <1.30 leave it
+# disabled and use the legacy Ingress instead.
+kubeVersion: ">=1.27.0-0"
+
+# sources point at the repository for `helm show chart` and any
+# OCI-registry browser. Just one entry: the project itself, since the
+# chart lives inside the repo it deploys.
+sources:
+  - https://github.com/Blue-Davinci/OptiVest
+
+# maintainers - who is on the hook for chart issues. Email is
+# optional but adds a contact path that's distinct from "filing a
+# GitHub issue", which matters when a chart consumer hits a bug
+# during a 3am cluster-wide upgrade.
+maintainers:
+  - name: Blue-Davinci
+    url: https://github.com/Blue-Davinci
+
+# keywords show up in `helm search` if the chart is published to a
+# registry (chart museum, GHCR-as-OCI, etc.). Free-form; pick the
+# terms a user would actually type. We deliberately omit "kubernetes"
+# (every chart is for kubernetes) and "helm" (likewise tautological).
+keywords:
+  - optivest
+  - personal-finance
+  - go
+  - api
+  - sse
