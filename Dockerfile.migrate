@@ -11,11 +11,23 @@
 # and pins to the exact goose version the codebase was tested with.
 #
 # The container is intentionally a single binary on alpine — no /app, no
-# user account, no shell session expected. It runs once per
-# `docker compose up`, applies the migrations from /migrations (mounted by
-# compose), and exits with status 0 on success or non-zero on failure.
-# Compose's depends_on -> service_completed_successfully is what gates the
-# api service from starting before this one finishes.
+# shell session expected - and ships with the schema files baked in at
+# /migrations. It runs once per environment-bootstrap, applies the
+# migrations from /migrations, and exits with status 0 on success or
+# non-zero on failure.
+#
+# Two consumers gate on this:
+#   - docker compose: depends_on -> service_completed_successfully holds
+#     the api service back until this one returns 0.
+#   - Helm chart (deploy/charts/optivest, v0.2+): runs this image as a
+#     pre-install / pre-upgrade hook Job, so `helm upgrade --install`
+#     blocks until the Job succeeds before rolling out the API
+#     Deployment.
+#
+# Bumping a schema file means rebuilding this image and shipping a new
+# tag. Schema-on-disk and binary-runtime drift is impossible by
+# construction: the image IS the schema for the goose version it pairs
+# with.
 # =============================================================================
 
 # ---------- Stage 1: install goose ----------
@@ -49,6 +61,14 @@ RUN apk add --no-cache ca-certificates postgresql-client \
     && adduser -S -u 10001 -G goose goose
 
 COPY --from=builder /go/bin/goose /usr/local/bin/goose
+
+# Bake the schema into the image at /migrations. The default WORKDIR
+# below means `goose up` (the default ENTRYPOINT+CMD pair) finds the
+# files here without needing an explicit -dir flag. Files are world-
+# readable by default (0644), and the migrate Pod runs with a
+# read-only root filesystem in Kubernetes, so no chown is needed —
+# goose only needs read access.
+COPY internal/sql/schema/ /migrations/
 
 WORKDIR /migrations
 USER goose
