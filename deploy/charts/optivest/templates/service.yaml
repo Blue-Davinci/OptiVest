@@ -7,9 +7,23 @@ metadata:
 spec:
   type: {{ .Values.service.type }}
   ports:
-    - port: {{ .Values.service.port }}
-      targetPort: http
+    # Two named ports because OptiVest's binary listens on two: the
+    # main API surface and the SSE long-lived stream. They live on
+    # the same Pod so a single Service can front both.
+    #
+    # `targetPort: api` (and `sse`) reference the named ports defined
+    # on the container in deployment.yaml, not literal port numbers.
+    # That means renumbering the API port (e.g. moving 4000 -> 4040
+    # to dodge a host conflict in a different deploy environment)
+    # only requires updating values.yaml; the cross-template
+    # references stay correct.
+    - port: {{ .Values.service.apiPort }}
+      targetPort: api
       protocol: TCP
-      name: http
+      name: api
+    - port: {{ .Values.service.ssePort }}
+      targetPort: sse
+      protocol: TCP
+      name: sse
   selector:
     {{- include "optivest.selectorLabels" . | nindent 4 }}
