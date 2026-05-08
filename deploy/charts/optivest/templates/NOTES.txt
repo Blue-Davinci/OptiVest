@@ -4,23 +4,28 @@ prints this verbatim. Keep it actionable: an operator just ran
 install/upgrade and wants to know "what now?", not a tour of the
 chart. Detailed rationale lives in chart README.md.
 
-The chart in v0.1 is ClusterIP-only (Ingress and HTTPRoute remain
+The chart is still ClusterIP-only (Ingress and HTTPRoute remain
 disabled until v0.3), so the only access pattern is port-forward.
 We surface that prominently. We also call out the most common
-day-zero failure mode: the Pod stays in CreateContainerConfigError
-because the Secret named in `existingSecret` doesn't exist. NOTES is
-the right place to surface that because it's printed exactly when
-the operator is poised to wonder why their pod isn't healthy.
+day-zero failure modes:
+  - the Pod stays in CreateContainerConfigError because the Secret
+    named in `existingSecret` doesn't exist (most common on a fresh
+    `helm install`).
+  - the migrate Job failed before the API Deployment ever rolled out
+    (since v0.2). NOTES is the right place to surface that because
+    it's printed exactly when the operator is poised to wonder why
+    their pod isn't healthy.
 */}}
 
 OptiVest API has been installed.
 
-  Release name:   {{ .Release.Name }}
-  Namespace:      {{ .Release.Namespace }}
-  Chart version:  {{ .Chart.Version }}
-  App version:    {{ .Chart.AppVersion }}
-  Image:          {{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}
-  Replicas:       {{ .Values.replicaCount }}
+  Release name:    {{ .Release.Name }}
+  Namespace:       {{ .Release.Namespace }}
+  Chart version:   {{ .Chart.Version }}
+  App version:     {{ .Chart.AppVersion }}
+  API image:       {{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}
+  Migrate image:   {{ .Values.migrate.image.repository }}:{{ .Values.migrate.image.tag | default .Chart.AppVersion }} ({{ if .Values.migrate.enabled }}enabled{{ else }}DISABLED{{ end }})
+  Replicas:        {{ .Values.replicaCount }}
 
 # ----------------------------------------------------------------------------
 # Did you create the Secret?
@@ -58,6 +63,42 @@ After creating the Secret, the Pod will progress on its own; no
 restart needed.
 
 # ----------------------------------------------------------------------------
+# Migrate Job (chart v0.2+)
+# ----------------------------------------------------------------------------
+{{- if .Values.migrate.enabled }}
+Schema migrations run as a Helm pre-install/pre-upgrade hook before
+the API Deployment rolls out. Helm waits for the Job to reach a
+terminal state, so a failed migration aborts the release before any
+pod sees an incompatible schema.
+
+Inspect the most recent migrate Job:
+
+    kubectl -n {{ .Release.Namespace }} get jobs -l app.kubernetes.io/component=migrate
+    kubectl -n {{ .Release.Namespace }} logs job/{{ include "optivest.migrate.fullname" . }}
+
+Successful Jobs are culled by the Kubernetes TTL controller after
+{{ .Values.migrate.ttlSecondsAfterFinished }}s; failed Jobs stick around until the next
+release for debuggability. Re-running `helm upgrade` always starts
+from a clean slate (helm.sh/hook-delete-policy: before-hook-creation).
+
+To skip the hook for a config-only redeploy that doesn't change the
+schema:
+
+    helm upgrade {{ .Release.Name }} ... --set migrate.enabled=false
+{{- else }}
+Migrate Job is DISABLED for this release (`migrate.enabled=false`).
+The chart did NOT run schema migrations. If the schema this release's
+API binary expects is newer than what's in the database, the API will
+crash-loop with `pq: relation "..." does not exist` on first request.
+
+Run goose manually before the API rolls out:
+
+    kubectl -n {{ .Release.Namespace }} exec -it deployment/{{ include "optivest.fullname" . }} -- /usr/local/bin/goose ...
+
+Or re-install with `--set migrate.enabled=true` (the default).
+{{- end }}
+
+# ----------------------------------------------------------------------------
 # Reach the API
 # ----------------------------------------------------------------------------
 The Service is ClusterIP, so port-forward to reach it from your host:
@@ -87,12 +128,6 @@ To run the chart's `helm test` smoke check (a tiny Pod that hits
 # ----------------------------------------------------------------------------
 This is chart {{ .Chart.Version }}. The following are scaffolded but
 not yet wired or are deferred outright:
-
-  - Migrate Job (goose up via Helm pre-install/pre-upgrade hook) -
-    chart v0.2. For now, run goose against your Postgres BEFORE
-    `helm install` so the API doesn't hit missing tables:
-
-      goose -dir internal/sql/schema postgres "$OPTIVEST_DB_DSN" up
 
   - Ingress + cert-manager - chart v0.3. Use port-forward until then.
 

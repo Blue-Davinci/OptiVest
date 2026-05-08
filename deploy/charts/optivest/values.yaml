@@ -345,6 +345,111 @@ config:
 existingSecret: optivest-secrets
 
 # -----------------------------------------------------------------------------
+# Migrate Job — schema migrations as a Helm pre-install/pre-upgrade hook
+# -----------------------------------------------------------------------------
+# How it works:
+#   On `helm install` or `helm upgrade`, Helm runs the templated Job at
+#   templates/migrate-job.yaml BEFORE applying the regular release
+#   resources (Deployment, Service, ...). The Job runs the
+#   optivest-migrate image, which ships with internal/sql/schema/*.sql
+#   baked in at /migrations (Dockerfile.migrate `COPY` step), and
+#   executes `goose up` against the DSN read from existingSecret.
+#
+#   On success, Helm proceeds with the install/upgrade. On failure,
+#   Helm aborts the release before the API Deployment is touched, so
+#   the API never starts against an incompatible schema.
+#
+# Cleanup semantics:
+#   The Job carries `helm.sh/hook-delete-policy: before-hook-creation`
+#   (only — deliberately not `hook-succeeded`):
+#     - successful Jobs stick around briefly after the release so an
+#       operator can `kubectl logs job/<name>` to see what migrated
+#       and how long each step took. They get culled by the
+#       Kubernetes TTL controller (`ttlSecondsAfterFinished` below)
+#       after a few minutes.
+#     - failed Jobs stay until the NEXT install/upgrade — TTL doesn't
+#       apply to failed Jobs by default, so debug logs survive.
+#     - on the NEXT install/upgrade, any leftover Job (success or
+#       failure) is deleted before the new one is created, keeping
+#       things idempotent.
+#
+# When to disable (`--set migrate.enabled=false`):
+#   - Same chart version, no schema change — skip the hook to shave
+#     ~30s off a config-only redeploy.
+#   - Out-of-band migration (e.g. CI runs `goose up` from a separate
+#     job before this `helm upgrade`) — disable here to avoid a
+#     redundant Job.
+#   - Disaster-recovery rollbacks where you want the OLD schema and
+#     OLD app together; the API in production should always be
+#     upgraded AFTER migrations, so disabling on a forward upgrade is
+#     a footgun. Disable only when you know the schema is already
+#     compatible.
+migrate:
+  enabled: true
+
+  # Image override path. repository defaults to `optivest-migrate` (the
+  # local-build name produced by `make k8s/image/build`). Override to a
+  # registry path in production (e.g.
+  # `ghcr.io/blue-davinci/optivest-migrate`). tag empty string falls
+  # back to `.Chart.AppVersion` so a chart consumer can pin BOTH the
+  # API and migrate images by bumping appVersion alone.
+  image:
+    repository: optivest-migrate
+    pullPolicy: IfNotPresent
+    tag: ""
+
+  # backoffLimit — number of times the Job retries a failed Pod before
+  # marking the Job itself failed. 3 rides out a transient postgres
+  # readiness flap on a fresh `make k8s/smoke` without indefinitely
+  # retrying a genuinely broken migration. The whole hook is bounded
+  # by helm's --timeout (default 300s for `helm upgrade`).
+  backoffLimit: 3
+
+  # ttlSecondsAfterFinished — Kubernetes' TTL controller deletes the
+  # Job this many seconds after it reaches Completed. The
+  # hook-delete-policy already cleans up successes on the next
+  # install/upgrade; this TTL is a backstop for clusters that don't
+  # see another release for a while. Failed Jobs are NOT TTL'd
+  # automatically — Kubernetes only TTLs Completed ones — so an
+  # operator can still inspect their logs.
+  ttlSecondsAfterFinished: 300
+
+  # activeDeadlineSeconds — wall-clock cap per Job pod. A migration on
+  # a fresh DB takes <30s; this ceiling is generous to accommodate
+  # data-backfill migrations without trimming the safety margin.
+  # Reduce in environments where slow migrations should fail fast and
+  # trigger an operator alert.
+  activeDeadlineSeconds: 600
+
+  # resources — sized for goose itself (a thin Postgres client). DDL
+  # work happens on the postgres side; the migrate Pod is essentially
+  # idle waiting for the server to confirm each statement. Bump
+  # memory if you ever ship a migration that loads large CSV/JSON
+  # fixtures from inside the SQL file.
+  resources:
+    requests:
+      cpu: 25m
+      memory: 32Mi
+    limits:
+      cpu: 250m
+      memory: 128Mi
+
+  # podAnnotations / podLabels — extra Pod metadata for the migrate
+  # Job. Useful for Prometheus scrape opt-OUTs, log-collector
+  # inclusion, or an operator-specific NetworkPolicy selector. The
+  # standard chart label set from _helpers.tpl is added regardless.
+  podAnnotations: {}
+  podLabels: {}
+
+  # nodeSelector / tolerations / affinity — placement controls,
+  # mirroring the API Deployment's. Most operators leave these empty;
+  # set them when the migrate Job needs to run on a specific node
+  # pool (e.g. a "batch" pool with higher CPU but no API traffic).
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# -----------------------------------------------------------------------------
 # External dependencies (Postgres, Redis)
 # -----------------------------------------------------------------------------
 # externalRedis.host - the address the API uses for `-redis-addr`.
