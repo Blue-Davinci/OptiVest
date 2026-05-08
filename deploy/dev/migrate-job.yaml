@@ -1,0 +1,102 @@
+# =============================================================================
+# OptiVest one-shot goose migration Job — chart v0.1 era
+# =============================================================================
+#
+# This is the *manual* migrate Job for the chart v0.1 smoke flow. Chart
+# v0.2 will replace it with a templated Job rendered as a Helm
+# pre-install / pre-upgrade hook so `helm upgrade --install` runs
+# migrations transparently.
+#
+# Until then the smoke path is:
+#   1. `make k8s/dev-deps/up`     — postgres + redis
+#   2. `make k8s/migrate`         — applies this Job (after rebuilding
+#                                    the `migrations` ConfigMap from
+#                                    internal/sql/schema/*.sql)
+#   3. `make k8s/install`         — helm upgrade --install of the chart
+#
+# Why the schema lives in a ConfigMap instead of being baked into the
+# image: keeping it out of the image means a freshly-checked-out repo
+# can re-run migrations without rebuilding the migrate image after every
+# `internal/sql/schema/*.sql` edit. Production will reverse this — we'll
+# bake the schema into a versioned migrate image so the rolled-out
+# bytes are immutable.
+#
+# DSN source: the OPTIVEST_DB_DSN secret key produced by
+# `make k8s/secret/create`. We point it at the in-cluster `postgres`
+# Service from deploy/dev/dev-deps.yaml.
+# =============================================================================
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: migrate
+  labels:
+    app.kubernetes.io/name: optivest-migrate
+    app.kubernetes.io/component: migration
+    app.kubernetes.io/part-of: optivest
+spec:
+  # 3 retries is enough to ride out a postgres readiness flap during
+  # `make k8s/smoke`; beyond that the schema is genuinely broken and we
+  # want the Job to fail loudly so CI / a human can look at it.
+  backoffLimit: 3
+  # Garbage-collect completed Jobs after 5 minutes so re-running
+  # `make k8s/migrate` doesn't have to delete the previous one.
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: optivest-migrate
+        app.kubernetes.io/component: migration
+        app.kubernetes.io/part-of: optivest
+    spec:
+      restartPolicy: OnFailure
+      # The migrate image runs as UID 10001 (Dockerfile.migrate
+      # `adduser -u 10001 goose`). Mirror that here explicitly so a
+      # cluster with PodSecurity baseline restrictions doesn't reject
+      # the pod for missing a runAsNonRoot guarantee.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: goose
+          image: localhost/optivest-migrate:0.1.0
+          imagePullPolicy: IfNotPresent
+          # ENTRYPOINT ["goose"] in Dockerfile.migrate, so args are the
+          # subcommand + flags. WORKDIR is /migrations, which is also
+          # where we mount the schema ConfigMap.
+          args:
+            - "-dir=/migrations"
+            - "postgres"
+            - "$(OPTIVEST_DB_DSN)"
+            - "up"
+          env:
+            - name: OPTIVEST_DB_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: optivest-secrets
+                  key: OPTIVEST_DB_DSN
+          volumeMounts:
+            - name: schema
+              mountPath: /migrations
+              readOnly: true
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 250m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+      volumes:
+        - name: schema
+          configMap:
+            name: migrations
