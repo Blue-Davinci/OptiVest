@@ -1,6 +1,10 @@
 package main
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -169,5 +173,84 @@ func Test_application_isProfileComplete(t *testing.T) {
 				t.Errorf("application.isProfileComplete() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestWriteJSON_WireFormat asserts that writeJSON emits a compact-encoded
+// JSON body, no trailing newline, and the explicit charset=utf-8
+// Content-Type. This is a regression test for the MarshalIndent removal:
+// it would have caught any subsequent edit that re-introduces tab
+// indentation or a trailing '\n' (both wasted bytes per response).
+func TestWriteJSON_WireFormat(t *testing.T) {
+	app := &application{}
+	rr := httptest.NewRecorder()
+
+	env := envelope{"hello": "world", "n": 42}
+	if err := app.writeJSON(rr, http.StatusTeapot, env, nil); err != nil {
+		t.Fatalf("writeJSON returned unexpected error: %v", err)
+	}
+
+	if got, want := rr.Code, http.StatusTeapot; got != want {
+		t.Errorf("status: got %d, want %d", got, want)
+	}
+
+	if got, want := rr.Header().Get("Content-Type"), "application/json; charset=utf-8"; got != want {
+		t.Errorf("Content-Type: got %q, want %q", got, want)
+	}
+
+	body := rr.Body.String()
+
+	// No trailing newline. A trailing '\n' is one wasted byte per
+	// response and is not part of the JSON wire format.
+	if strings.HasSuffix(body, "\n") {
+		t.Errorf("body unexpectedly ends with a newline: %q", body)
+	}
+
+	// No tab indentation. MarshalIndent injected '\t' between keys; any
+	// recurrence of that pattern means MarshalIndent has crept back in.
+	if strings.Contains(body, "\t") {
+		t.Errorf("body unexpectedly contains tab characters: %q", body)
+	}
+
+	// Round-trip parse: whatever bytes we emitted must still decode to
+	// the same envelope. This catches a class of defects where someone
+	// "compacts" the output by removing whitespace incorrectly and ends
+	// up emitting invalid JSON.
+	var got map[string]any
+	if err := json.Unmarshal([]byte(body), &got); err != nil {
+		t.Fatalf("emitted body did not parse as JSON: %v\nbody=%q", err, body)
+	}
+	if got["hello"] != "world" {
+		t.Errorf(`expected hello=="world", got %v`, got["hello"])
+	}
+}
+
+// TestWriteJSON_HeadersMerged covers the caller-supplied-header path:
+// writeJSON must NOT overwrite headers the caller has already set on
+// itself (e.g. Cache-Control, X-Request-ID), and must NOT silently drop
+// them either. Using a Set on Content-Type after merging the caller map
+// is the documented behavior - callers can't override Content-Type via
+// this path, which is correct because the body is JSON.
+func TestWriteJSON_HeadersMerged(t *testing.T) {
+	app := &application{}
+	rr := httptest.NewRecorder()
+
+	custom := http.Header{}
+	custom.Set("Cache-Control", "no-store")
+	custom.Set("X-Custom", "value")
+
+	if err := app.writeJSON(rr, http.StatusOK, envelope{"ok": true}, custom); err != nil {
+		t.Fatalf("writeJSON returned unexpected error: %v", err)
+	}
+
+	if got := rr.Header().Get("Cache-Control"); got != "no-store" {
+		t.Errorf("Cache-Control not propagated: got %q", got)
+	}
+	if got := rr.Header().Get("X-Custom"); got != "value" {
+		t.Errorf("X-Custom not propagated: got %q", got)
+	}
+	// Content-Type wins regardless of what the caller passed.
+	if got := rr.Header().Get("Content-Type"); got != "application/json; charset=utf-8" {
+		t.Errorf("Content-Type should be set by writeJSON, got %q", got)
 	}
 }
