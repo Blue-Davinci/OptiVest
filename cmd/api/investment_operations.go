@@ -743,17 +743,20 @@ func (app *application) getRiskFactor(ctx context.Context, data *data.TreasuryYi
 // Sector Analysis
 // ==========================================================================================================
 
-// getSectorPerformance fetches sector performance data via the FMP API,
-// cached in Redis for 5 minutes. ctx flows from the originating HTTP request.
+// getSectorPerformance fetches the most recent sector-performance snapshot
+// from FMP's /stable/sector-performance-snapshot endpoint, cached in Redis
+// for 5 minutes. ctx flows from the originating HTTP request.
+//
+// FMP's /stable endpoints require an explicit `date=YYYY-MM-DD` parameter
+// and return an empty array on non-trading days (weekends, holidays). We
+// walk backwards from today up to data.FMPMaxBusinessDayBack days until
+// we find a populated snapshot — a small, bounded number of extra HTTP
+// calls in the cache-cold path that absorbs the calendar without leaking
+// "no data" errors to callers on every Saturday morning.
 func (app *application) getSectorPerformance(ctx context.Context, sector string) (decimal.Decimal, error) {
 	redisKey := data.RedisSectorPerformancePrefix
 	ttl := 5 * time.Minute
 
-	sectorPerformanceURL := fmt.Sprintf("%s%s%s",
-		data.FMP_BASE_URL,
-		data.FMP_API_KEY,
-		app.config.api.apikeys.fmp.key,
-	)
 	app.loggerFromContext(ctx).Info("Fetching FMP sector performance", zap.String("sector", sector))
 	// check if cached
 	cachedResponse, err := getFromCache[data.SectorAnalysisData](ctx, app.RedisDB, redisKey)
@@ -767,13 +770,11 @@ func (app *application) getSectorPerformance(ctx context.Context, sector string)
 		}
 	}
 	if cachedResponse != nil {
-		// Data found in cache, perform and log the calculations
 		app.loggerFromContext(ctx).Info("Sector Performance Data found in cache")
 		sectorScore, err := cachedResponse.GetSectorChange(sector)
 		if err != nil {
 			return decimal.NewFromInt(0), err
 		}
-		//app.getSectorPerformanceFactor(cachedResponse, sector)
 		return sectorScore, nil
 	}
 	// Cache miss: fetch upstream behind a singleflight gate so concurrent
@@ -783,13 +784,17 @@ func (app *application) getSectorPerformance(ctx context.Context, sector string)
 	// to Redis from inside the leader closure so the next miss elsewhere
 	// reads from cache instead of re-firing the upstream call.
 	sectorPerformanceResponse, err := singleflightDoTyped(&app.sf, "fmp:sector-performance", func() (data.SectorAnalysisData, error) {
-		resp, fetchErr := GETRequest[data.SectorAnalysisData](ctx, app.http_client, sectorPerformanceURL, nil)
+		resp, fetchDate, fetchErr := app.fetchSectorPerformanceSnapshot(ctx)
 		if fetchErr != nil {
 			return nil, fetchErr
 		}
 		if len(resp) == 0 {
-			return nil, fmt.Errorf("no sector performance data found")
+			return nil, fmt.Errorf("no sector performance data found within %d-day fallback window", data.FMPMaxBusinessDayBack)
 		}
+		app.loggerFromContext(ctx).Info("FMP sector snapshot resolved",
+			zap.String("date", fetchDate),
+			zap.Int("rows", len(resp)),
+		)
 		if cacheErr := setToCache(ctx, app.RedisDB, redisKey, &resp, ttl); cacheErr != nil {
 			app.loggerFromContext(ctx).Error("Failed to cache sector performance data in Redis", zap.Error(cacheErr))
 		}
@@ -804,6 +809,32 @@ func (app *application) getSectorPerformance(ctx context.Context, sector string)
 		return decimal.NewFromInt(0), err
 	}
 	app.loggerFromContext(ctx).Info("Sector Obtained and Sector Performance", zap.String("Sector received", sector), zap.String("Sector Value", sectorScore.String()))
-	// return sectorPerformanceResponse.GetSectorChange()
 	return sectorScore, nil
+}
+
+// fetchSectorPerformanceSnapshot walks back day-by-day from today (UTC)
+// until it finds a non-empty snapshot or exhausts the fallback budget.
+// Returns the response, the date that produced it, and any transport-level
+// error from the first attempt that yielded a non-empty body. A response
+// of zero rows is NOT a transport error — it just means that date had no
+// trading activity and we keep walking.
+func (app *application) fetchSectorPerformanceSnapshot(ctx context.Context) (data.SectorAnalysisData, string, error) {
+	today := time.Now().UTC()
+	for back := 0; back < data.FMPMaxBusinessDayBack; back++ {
+		date := today.AddDate(0, 0, -back).Format("2006-01-02")
+		url := fmt.Sprintf("%s?%s%s&%s%s",
+			data.FMP_BASE_URL,
+			data.FMP_DATE_PARAM, date,
+			data.FMP_API_KEY_PARAM, app.config.api.apikeys.fmp.key,
+		)
+		resp, err := GETRequest[data.SectorAnalysisData](ctx, app.http_client, url, nil)
+		if err != nil {
+			return nil, date, err
+		}
+		if len(resp) > 0 {
+			return resp, date, nil
+		}
+		// Empty array = non-trading day (weekend / holiday). Walk back.
+	}
+	return nil, "", nil
 }

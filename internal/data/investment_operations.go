@@ -52,8 +52,19 @@ const (
 	FRED_API_KEY        = "&api_key="
 	FRED_FILE_TYPE_JSON = "&file_type=json"
 	// FMP
-	FMP_BASE_URL = "https://financialmodelingprep.com/api/v3/sectors-performance?"
-	FMP_API_KEY  = "apikey="
+	//
+	// FMP retired the legacy /api/v3 endpoint family on 2025-08-31. The
+	// sector-performance call now lives under /stable, requires a date
+	// parameter (YYYY-MM-DD), and returns one row per (sector, exchange)
+	// pair on the free tier (which presently exposes NASDAQ only). The
+	// numeric field renamed `changesPercentage` (string with trailing
+	// '%') to `averageChange` (raw decimal). Both adjustments are
+	// reflected in `SectorAnalysis` below and in the URL builder in
+	// cmd/api/investment_operations.go::getSectorPerformance.
+	FMP_BASE_URL          = "https://financialmodelingprep.com/stable/sector-performance-snapshot"
+	FMP_API_KEY_PARAM     = "apikey="
+	FMP_DATE_PARAM        = "date="
+	FMPMaxBusinessDayBack = 7 // bounded fallback when today's snapshot is empty (weekend / holiday)
 )
 const (
 	RedisStockTimeSeriesPrefix       = "stock_time_series:"
@@ -405,30 +416,31 @@ func (t *TreasuryYieldData) CalculateAverageYield(days int) (decimal.Decimal, er
 // =================================================================================================
 // Sector Performance Data
 // =================================================================================================
-// Struct to represent each sector and its changes percentage
+// SectorAnalysis is a single row from the FMP /stable/sector-performance-snapshot
+// response. The free tier exposes NASDAQ only; if the account is later upgraded
+// to a tier that returns NYSE/AMEX rows as well, GetSectorChange will pick the
+// first row that matches the requested sector name (callers do not currently
+// disambiguate by exchange).
 type SectorAnalysis struct {
-	Sector            string `json:"sector"`
-	ChangesPercentage string `json:"changesPercentage"`
+	Date          string          `json:"date"`
+	Sector        string          `json:"sector"`
+	Exchange      string          `json:"exchange"`
+	AverageChange decimal.Decimal `json:"averageChange"`
 }
 
-// No need for a wrapper struct with "sectors" field, just a slice of SectorAnalysis
+// SectorAnalysisData is the array shape returned by FMP. Wrapping the slice
+// gives us a place to hang GetSectorChange without a separate utility type.
 type SectorAnalysisData []SectorAnalysis
 
-// Method to get the percentage change of a given sector using decimal.Decimal
+// GetSectorChange returns the daily average percentage change for the named
+// sector. The lookup is case-insensitive to absorb minor casing drift between
+// the FMP catalog (e.g. "Communication Services") and how callers happen to
+// label sectors locally.
 func (s SectorAnalysisData) GetSectorChange(sectorName string) (decimal.Decimal, error) {
-	fmt.Println("Sector Name: ", sectorName)
-	// Loop through the sectors to find the matching sector
 	for _, sector := range s {
 		if strings.EqualFold(sector.Sector, sectorName) {
-			// Remove the "%" symbol and parse the value into decimal
-			changes := strings.TrimSuffix(sector.ChangesPercentage, "%")
-			changeValue, err := decimal.NewFromString(changes)
-			if err != nil {
-				return decimal.Zero, fmt.Errorf("invalid percentage format for sector %s", sectorName)
-			}
-			return changeValue, nil
+			return sector.AverageChange, nil
 		}
 	}
-	// Return an error if the sector is not found
 	return decimal.Zero, fmt.Errorf("sector %s not found", sectorName)
 }
