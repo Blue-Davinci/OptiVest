@@ -345,7 +345,7 @@ func (app *application) llmStreamingDefaults() (totalBudget, idleTimeout time.Du
 	return
 }
 
-// LLMStream sends a context-bound POST to the SambaNova chat-completions
+// LLMStream sends a context-bound POST to the configured chat-completions
 // endpoint and consumes the SSE response chunk-by-chunk. Three behavioral
 // guarantees on top of the basic POST path:
 //

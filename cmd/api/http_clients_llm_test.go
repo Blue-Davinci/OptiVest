@@ -29,7 +29,9 @@ func newLLMTestApp(t *testing.T, totalBudget, idleTimeout time.Duration, retries
 	return app, logs
 }
 
-// writeSSEChunk emits one OpenAI/SambaNova-style SSE line and flushes the
+// writeSSEChunk emits one OpenAI-style SSE line (Groq, Cerebras, OpenRouter,
+// SambaNova and the rest of the OAI-compatible fleet all emit the same shape)
+// and flushes the
 // response writer so the body chunk is on the wire before the next call.
 // Test handlers use this to drip-feed chunks instead of buffering the
 // whole response, which is what makes the streaming assertions meaningful.

@@ -290,8 +290,8 @@ the available commands for a quick lookup (INCOMPLETE, use help for full list).
         OCR.Space API key (env OPTIVEST_OCRSPACE_API_KEY)
   -api-key-optivestmicroservice string
         OptiVest predictor microservice API key (env OPTIVEST_PREDICTOR_API_KEY)
-  -api-key-sambanova string
-        SambaNova API key (env OPTIVEST_SAMBA_NOVA_LLM_API_KEY)
+  -api-key-groq string
+        Groq (or compatible) chat-completions API key (env OPTIVEST_GROQ_LLM_API_KEY)
   -api-name string
         API name (default "OptiVest")
   -api-url-alphavantage string
@@ -302,12 +302,14 @@ the available commands for a quick lookup (INCOMPLETE, use help for full list).
         FMP API base URL (the legacy /api/v3 family was retired 2025-08-31) (default "https://financialmodelingprep.com/stable")
   -api-url-fred string
         FRED API URL (default "https://api.stlouisfed.org/fred/series/observations?")
+  -api-url-groq string
+        Groq (or any OpenAI-compatible) chat-completions URL (env OPTIVEST_GROQ_LLM_API_URL) (default "https://api.groq.com/openai/v1/chat/completions")
   -api-url-ocrspace string
         OCR.Space API URL (default "https://api.ocr.space/parse/image")
   -api-url-optivestmicroservice string
         OptiVest predictor microservice URL (default "http://127.0.0.1:8000/v1/predict")
-  -api-url-sambanova string
-        SambaNova (or OpenAI-compatible) chat-completions URL (default "https://api.sambanova.ai/v1/chat/completions")
+  -llm-model string
+        Chat-completions model identifier sent in the request body (env OPTIVEST_LLM_MODEL) (default "llama-3.3-70b-versatile")
   -cors-trusted-origins value
         Trusted CORS origins (space separated)
   -db-dsn string
@@ -445,7 +447,7 @@ the available commands for a quick lookup (INCOMPLETE, use help for full list).
 >   or active log-injection attempt)
 >
 > Outbound calls (Alpha Vantage, FRED, FMP, OCR.Space, the predictor
-> micro-service, SambaNova, RSS scraping) are wrapped through
+> micro-service, the LLM upstream, RSS scraping) are wrapped through
 > `cmd/api/http_clients.go`. Each call:
 > - is bound to the caller's `context.Context`, so a client disconnect
 >   or timeout cancels the upstream request promptly;
@@ -508,11 +510,17 @@ the available commands for a quick lookup (INCOMPLETE, use help for full list).
 > `cmd/api/metrics.go` (the `knownMetrics` allow-list); the friction is
 > intentional, since this is an operator-facing surface, not a debug dump.
 
-> **SambaNova streaming + retry budget (P4.A):** The SambaNova chat-completions
-> path is special-cased away from the generic `Optivet_Client` because every
-> call holds a connection slot open for 10–30s while the model emits SSE
-> chunks. `LLMStream` in `cmd/api/http_clients.go` provides three guarantees
-> the generic path cannot:
+> **LLM streaming + retry budget (P4.A):** The chat-completions path is
+> special-cased away from the generic `Optivet_Client` because every call
+> holds a connection slot open for 10–30s while the model emits SSE
+> chunks. The default upstream is **Groq** (free tier, OpenAI-compatible,
+> ~500-1000 tok/s on Llama 3.3 70B); the URL is operator-swappable to
+> any other OpenAI-compatible provider via `-api-url-groq` /
+> `OPTIVEST_GROQ_LLM_API_URL` (Cerebras, OpenRouter `:free` models,
+> self-hosted Ollama, the original SambaNova host, etc.) and the model
+> identifier via `-llm-model` / `OPTIVEST_LLM_MODEL`. `LLMStream` in
+> `cmd/api/http_clients.go` provides three guarantees the generic path
+> cannot, regardless of which provider is wired in:
 >
 > - A **wallclock budget context** (`-llm-total-budget`, default `90s`) caps
 >   the entire call across pre-first-byte retries plus the streaming read.
@@ -527,7 +535,8 @@ the available commands for a quick lookup (INCOMPLETE, use help for full list).
 >   the response body is streamed. Once a chunk has been read, mid-stream
 >   errors return verbatim — replaying a 30s prompt for a transient blip
 >   would double user-visible latency and the token bill, with no
->   reliability gain because SambaNova's API is not resumable.
+>   reliability gain because chat-completions APIs are non-resumable
+>   across providers.
 >
 > `LLMRequest` is preserved as a thin back-compat wrapper for callers that
 > only need the joined string (`buildLLMRequestHelper` and friends in

@@ -27,7 +27,7 @@
 #     which is the baseline expectation for any container that ships to
 #     a multi-tenant cluster.
 #   - certificates are copied from the builder so outbound TLS to Alpha
-#     Vantage / FRED / FMP / SambaNova / OCR.Space works out of the box;
+#     Vantage / FRED / FMP / Groq / OCR.Space works out of the box;
 #     ca-certificates is a no-op layer on alpine which already ships the
 #     trust bundle, but copying makes the runtime stage portable to a
 #     scratch / distroless base in a future tightening pass.
@@ -87,7 +87,7 @@ LABEL org.opencontainers.image.title="optivest-api" \
 # Runtime packages:
 #   tini             — see ENTRYPOINT note below
 #   ca-certificates  — needed for outbound TLS to the financial-data vendors
-#                       (Alpha Vantage, FRED, FMP, SambaNova, OCR.Space)
+#                       (Alpha Vantage, FRED, FMP, Groq, OCR.Space)
 #   wget             — used by HEALTHCHECK below; busybox wget ships with
 #                       alpine but spelling it out explicitly means a
 #                       future base swap (e.g. to a slimmer scratch /

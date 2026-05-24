@@ -47,7 +47,7 @@ you actually want to call.
         --from-literal=OPTIVEST_EXCHANGERATE_API_KEY='unset-for-local' \
         --from-literal=OPTIVEST_FRED_API_KEY='unset-for-local' \
         --from-literal=OPTIVEST_FINANCIALMODELINGPREP_API_KEY='unset-for-local' \
-        --from-literal=OPTIVEST_SAMBA_NOVA_LLM_API_KEY='unset-for-local' \
+        --from-literal=OPTIVEST_GROQ_LLM_API_KEY='unset-for-local' \
         --from-literal=OPTIVEST_PREDICTOR_API_KEY='unset-for-local' \
         --from-literal=OPTIVEST_OCRSPACE_API_KEY='unset-for-local' \
         --from-literal=OPTIVEST_SMTP_HOST='sandbox.smtp.mailtrap.io' \

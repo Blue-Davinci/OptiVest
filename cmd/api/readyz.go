@@ -48,7 +48,7 @@ import (
 //   - Redis: rate limiter, cache layer, notification pubsub.
 //
 // We deliberately do NOT check upstream third-party APIs (Alpha Vantage,
-// FRED, FMP, SambaNova). Their availability is asynchronous to ours;
+// FRED, FMP, the LLM upstream). Their availability is asynchronous to ours;
 // reflecting their state in /readyz would let a vendor outage drain the
 // pool and cause a self-inflicted outage. The application falls back
 // gracefully on those vendors at the per-request layer.
