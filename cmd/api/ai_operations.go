@@ -91,6 +91,35 @@ const investmentPortfolioInstructionsTemplate = `{
     }
 }`
 
+// marshalAsJSONStringLiteral serialises v to JSON and then escapes that JSON
+// as a JSON string literal (including the surrounding double-quotes). The
+// returned bytes are safe to slot directly as the VALUE side of a
+//
+//	"content": <here>
+//
+// pair in the prompt templates.
+//
+// Why the double marshal: the OpenAI chat-completions spec requires
+// `messages[].content` to be a string (or an array of typed parts), not a
+// raw JSON object. SambaNova used to silently coerce object-shaped content
+// into a stringified version of itself; Groq, Cerebras, OpenRouter, and the
+// upstream OpenAI API all enforce the spec strictly and 400 with
+//
+//	{"error":{"message":"messages.0.content : value must be a string ..."}}
+//
+// We therefore stringify the profile structure ourselves so the model still
+// sees the same JSON payload, but on the wire it lives inside a string that
+// every spec-compliant provider accepts.
+func marshalAsJSONStringLiteral(v interface{}) ([]byte, error) {
+	inner, err := json.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+	// Marshalling a string yields a quoted, escaped JSON string literal,
+	// which is exactly what we need to drop into a "content": ... slot.
+	return json.Marshal(string(inner))
+}
+
 // renderInvestmentPortfolioPrompt marshals the user profile and slots it
 // (along with the configured model identifier) into the chat-completions
 // template. Returns the final JSON body string that gets POSTed to the LLM
@@ -100,13 +129,13 @@ const investmentPortfolioInstructionsTemplate = `{
 // two LLM-calling code paths in this binary should send different model
 // names at the same time.
 func (app *application) renderInvestmentPortfolioPrompt(profile UserPortfolioProfile) (string, error) {
-	profileData, err := json.Marshal(profile)
+	profileLiteral, err := marshalAsJSONStringLiteral(profile)
 	if err != nil {
 		return "", err
 	}
 	return fmt.Sprintf(
 		investmentPortfolioInstructionsTemplate,
-		string(profileData),
+		string(profileLiteral),
 		app.config.llm.model,
 	), nil
 }
@@ -224,8 +253,10 @@ func (app *application) buildOCRRecieptAnalysisLLMRequest(ctx context.Context, o
 // %[1]s for the profile JSON and %[2]s for the model identifier; see the
 // templates in this file for the canonical shape.
 func (app *application) buildLLMRequestHelper(ctx context.Context, profile interface{}, instructionsTemplate string) (*data.LLMAnalyzedPortfolio, error) {
-	// Marshal the profile data
-	profileData, err := json.Marshal(profile)
+	// Marshal the profile data, then JSON-string-encode it so it can be
+	// dropped into the template's "content": ... slot as a spec-compliant
+	// string. See marshalAsJSONStringLiteral for the rationale.
+	profileLiteral, err := marshalAsJSONStringLiteral(profile)
 	if err != nil {
 		app.loggerFromContext(ctx).Info("Error marshaling profile data")
 		return nil, err
@@ -234,7 +265,7 @@ func (app *application) buildLLMRequestHelper(ctx context.Context, profile inter
 	// Create the final LLM request
 	finalLLMRequest := fmt.Sprintf(
 		instructionsTemplate,
-		string(profileData),
+		string(profileLiteral),
 		app.config.llm.model,
 	)
 	//app.logger.Info("Final LLM Request:", zap.Any("final_llm_request", finalLLMRequest))
