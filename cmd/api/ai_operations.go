@@ -91,7 +91,7 @@ const investmentPortfolioInstructionsTemplate = `{
     }
 }`
 
-// marshalAsJSONStringLiteral serialises v to JSON and then escapes that JSON
+// marshalAsJSONStringLiteral serializes v to JSON and then escapes that JSON
 // as a JSON string literal (including the surrounding double-quotes). The
 // returned bytes are safe to slot directly as the VALUE side of a
 //
@@ -115,7 +115,7 @@ func marshalAsJSONStringLiteral(v interface{}) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Marshalling a string yields a quoted, escaped JSON string literal,
+	// Marshaling a string yields a quoted, escaped JSON string literal,
 	// which is exactly what we need to drop into a "content": ... slot.
 	return json.Marshal(string(inner))
 }
