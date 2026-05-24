@@ -211,6 +211,19 @@ Lowering it past 5s is not recommended - the model's first-token
 latency is genuinely variable, and false-positive aborts manifest as
 user-visible 5xxs.
 
+### Wire-format gotcha: `content` must be a string
+
+The OpenAI chat-completions spec requires `messages[].content` to be a
+string (or an array of typed parts), not a raw JSON object. SambaNova
+historically tolerated object-shaped content; Groq, Cerebras,
+OpenRouter and the upstream OpenAI API all enforce the spec strictly
+and 400 with `messages.0.content : value must be a string`.
+`marshalAsJSONStringLiteral` in `cmd/api/ai_operations.go` exists for
+exactly this reason — it stringifies the per-user profile structure so
+the model still sees the JSON payload, but on the wire it lives inside
+a string that every spec-compliant provider accepts. Anyone rewriting
+the prompt-rendering path should preserve this invariant.
+
 ## Streaming portfolio analysis endpoint (P4.B)
 
 `GET /v1/investments/analysis/stream` is the inbound counterpart to the
