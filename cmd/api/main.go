@@ -246,7 +246,7 @@ func main() {
 	flag.StringVar(&cfg.api.apikeys.fred.key, "api-key-fred", os.Getenv("OPTIVEST_FRED_API_KEY"), "FRED API key (env OPTIVEST_FRED_API_KEY)")
 	flag.StringVar(&cfg.api.apikeys.fred.url, "api-url-fred", "https://api.stlouisfed.org/fred/series/observations?", "FRED API URL")
 	flag.StringVar(&cfg.api.apikeys.fmp.key, "api-key-fmp", os.Getenv("OPTIVEST_FINANCIALMODELINGPREP_API_KEY"), "FMP API key (env OPTIVEST_FINANCIALMODELINGPREP_API_KEY)")
-	flag.StringVar(&cfg.api.apikeys.fmp.url, "api-url-fmp", "https://financialmodelingprep.com/api/v3", "FMP API URL")
+	flag.StringVar(&cfg.api.apikeys.fmp.url, "api-url-fmp", "https://financialmodelingprep.com/stable", "FMP API base URL (the legacy /api/v3 family was retired 2025-08-31)")
 	flag.StringVar(&cfg.api.apikeys.sambanova.key, "api-key-sambanova", os.Getenv("OPTIVEST_SAMBA_NOVA_LLM_API_KEY"), "SambaNova API key (env OPTIVEST_SAMBA_NOVA_LLM_API_KEY)")
 	flag.StringVar(&cfg.api.apikeys.sambanova.url, "api-url-sambanova", "https://fast-api.snova.ai/v1/chat/completions", "SambaNova API URL")
 	flag.StringVar(&cfg.api.apikeys.optivestmicroservice.key, "api-key-optivestmicroservice", os.Getenv("OPTIVEST_PREDICTOR_API_KEY"), "OptiVest predictor microservice API key (env OPTIVEST_PREDICTOR_API_KEY)")

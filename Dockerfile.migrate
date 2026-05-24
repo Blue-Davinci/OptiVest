@@ -46,17 +46,22 @@ RUN apk add --no-cache git \
 # ---------- Stage 2: minimal runtime ----------
 FROM alpine:3.23
 
-# postgresql-client is convenient for ad-hoc inspection during migration
-# debugging (`docker compose exec migrate psql ...`); strip if you want
-# the smallest possible image.
+# Runtime contains only what `goose` needs to do its job:
+#   - ca-certificates: TLS to managed-Postgres providers (RDS, Neon, etc.)
+#   - a non-root user: defense-in-depth for the <1s lifetime of this Pod
 #
-# We add a dedicated non-root user even though this container exits in
-# under a second on a normal run. Defense-in-depth: a malformed migration
-# that triggers, say, a goose CVE should not be running with root inside
-# the container. The migrations are read-only-mounted at /migrations from
-# the host, so the only privilege the migrator needs is "open a TCP
-# connection to postgres", which any user has.
-RUN apk add --no-cache ca-certificates postgresql-client \
+# We deliberately do NOT ship postgresql-client. It used to be bundled
+# for ad-hoc `psql` inspection, but it dragged libpq + postgresql18-client
+# into the image — surface area that trivy gates against on every push
+# (CVE-2026-6638 / postgres 18.3 -> 18.4 was the trigger). For the
+# occasional manual psql session, run a sidecar instead, e.g.:
+#
+#   kubectl run psql --rm -it --image=postgres:18-alpine -- psql "$DSN"
+#
+# The migrations are read-only-mounted at /migrations and the only
+# privilege the migrator needs is "open a TCP connection to postgres",
+# which any user has.
+RUN apk add --no-cache ca-certificates \
     && addgroup -S goose \
     && adduser -S -u 10001 -G goose goose
 

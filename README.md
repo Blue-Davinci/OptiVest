@@ -299,7 +299,7 @@ the available commands for a quick lookup (INCOMPLETE, use help for full list).
   -api-url-exchangerates string
         Exchange-Rate API URL (default "https://v6.exchangerate-api.com/v6")
   -api-url-fmp string
-        FMP API URL (default "https://financialmodelingprep.com/api/v3")
+        FMP API base URL (the legacy /api/v3 family was retired 2025-08-31) (default "https://financialmodelingprep.com/stable")
   -api-url-fred string
         FRED API URL (default "https://api.stlouisfed.org/fred/series/observations?")
   -api-url-ocrspace string
