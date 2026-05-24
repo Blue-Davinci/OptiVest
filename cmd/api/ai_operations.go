@@ -41,11 +41,13 @@ type Delta struct {
 	Content string `json:"content"`
 }
 
-// LLMUsage captures the SambaNova/OpenAI-style token-usage block. It only
-// arrives in the final SSE chunk when the request was made with
-// stream_options.include_usage = true (which all the buildLLM* templates
-// in this file set), and is exposed on LLMStreamResult so future callers
-// can record per-call cost or rate-limit budgets.
+// LLMUsage captures the OpenAI-style token-usage block (Groq, Cerebras,
+// OpenRouter, the original OpenAI API and the rest of the OAI-compatible
+// fleet all emit the same shape). It only arrives in the final SSE chunk
+// when the request was made with stream_options.include_usage = true
+// (which all the buildLLM* templates in this file set), and is exposed on
+// LLMStreamResult so future callers can record per-call cost or rate-limit
+// budgets.
 type LLMUsage struct {
 	PromptTokens     int `json:"prompt_tokens"`
 	CompletionTokens int `json:"completion_tokens"`
@@ -53,9 +55,14 @@ type LLMUsage struct {
 }
 
 // investmentPortfolioInstructionsTemplate is the chat-completions request body
-// sent to SambaNova for portfolio analysis, with a single %s slot where the
-// per-user UserPortfolioProfile is interpolated as JSON. It is package-level
-// so both the synchronous (buildInvestmentPortfolioLLMRequest) and streaming
+// sent to the configured LLM endpoint for portfolio analysis. It has two
+// numbered substitution slots:
+//
+//	%[1]s  → the per-user UserPortfolioProfile, JSON-encoded
+//	%[2]s  → the model identifier (cfg.llm.model)
+//
+// It is package-level so both the synchronous
+// (buildInvestmentPortfolioLLMRequest) and streaming
 // (streamInvestmentPortfolioAnalysisHandler) paths share one prompt source —
 // drift between the two would silently produce different analyses for the
 // same user depending on which endpoint they hit.
@@ -71,28 +78,37 @@ const investmentPortfolioInstructionsTemplate = `{
 	},
         {
             "role": "user",
-            "content": %s
+            "content": %[1]s
         }
     ],
     "stop": [
         "<|eot_id|>"
     ],
-    "model": "Meta-Llama-3.1-405B-Instruct",
+    "model": "%[2]s",
     "stream": true,
     "stream_options": {
         "include_usage": true
     }
 }`
 
-// renderInvestmentPortfolioPrompt marshals the user profile and slots it into
-// the chat-completions template. Returns the final JSON body string that gets
-// POSTed to the LLM endpoint.
-func renderInvestmentPortfolioPrompt(profile UserPortfolioProfile) (string, error) {
+// renderInvestmentPortfolioPrompt marshals the user profile and slots it
+// (along with the configured model identifier) into the chat-completions
+// template. Returns the final JSON body string that gets POSTed to the LLM
+// endpoint. It is a method on *application rather than a free function so
+// the streaming and synchronous paths share one rendering call site that
+// pulls cfg.llm.model from the same place — there is no scenario where
+// two LLM-calling code paths in this binary should send different model
+// names at the same time.
+func (app *application) renderInvestmentPortfolioPrompt(profile UserPortfolioProfile) (string, error) {
 	profileData, err := json.Marshal(profile)
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf(investmentPortfolioInstructionsTemplate, string(profileData)), nil
+	return fmt.Sprintf(
+		investmentPortfolioInstructionsTemplate,
+		string(profileData),
+		app.config.llm.model,
+	), nil
 }
 
 // buildLLMRequest sends a request to the LLM API with the user's profile and
@@ -106,12 +122,12 @@ func (app *application) buildInvestmentPortfolioLLMRequest(ctx context.Context, 
 		InvestmentGoals:    goals,
 		InvestmentAnalysis: *investmentAnalysis,
 	}
-	body, err := renderInvestmentPortfolioPrompt(profile)
+	body, err := app.renderInvestmentPortfolioPrompt(profile)
 	if err != nil {
 		return nil, err
 	}
-	url := app.config.api.apikeys.sambanova.url
-	apiKey := app.config.api.apikeys.sambanova.key
+	url := app.config.api.apikeys.groq.url
+	apiKey := app.config.api.apikeys.groq.key
 	fullResponse, err := app.LLMRequest(ctx, url, map[string]string{
 		"Authorization": "Bearer " + apiKey,
 	}, body)
@@ -154,13 +170,13 @@ func (app *application) buildPersonalFinanceLLMRequest(ctx context.Context, user
 		  },
 		  {
 			"role": "user",
-			"content": %s
+			"content": %[1]s
 		  }
 		],
 		"stop": [
 		  "<|eot_id|>"
 		],
-		"model": "Meta-Llama-3.1-405B-Instruct",
+		"model": "%[2]s",
 		"stream": true,
 		"stream_options": {
 		  "include_usage": true
@@ -187,11 +203,11 @@ func (app *application) buildOCRRecieptAnalysisLLMRequest(ctx context.Context, o
     },
     {
       "role": "user",
-      "content": %s
+      "content": %[1]s
     }
   ],
   "stop": ["<|eot_id|>"],
-  "model": "Meta-Llama-3.1-405B-Instruct",
+  "model": "%[2]s",
   "stream": true,
   "stream_options": {
     "include_usage": true
@@ -204,7 +220,9 @@ func (app *application) buildOCRRecieptAnalysisLLMRequest(ctx context.Context, o
 // buildLLMRequestHelper builds and sends the LLM request for analysis. ctx
 // flows from the originating handler so a client disconnect aborts the
 // long-running upstream stream and the outbound log line carries the
-// inbound request correlation.
+// inbound request correlation. instructionsTemplate must use indexed verbs
+// %[1]s for the profile JSON and %[2]s for the model identifier; see the
+// templates in this file for the canonical shape.
 func (app *application) buildLLMRequestHelper(ctx context.Context, profile interface{}, instructionsTemplate string) (*data.LLMAnalyzedPortfolio, error) {
 	// Marshal the profile data
 	profileData, err := json.Marshal(profile)
@@ -214,12 +232,16 @@ func (app *application) buildLLMRequestHelper(ctx context.Context, profile inter
 	}
 
 	// Create the final LLM request
-	finalLLMRequest := fmt.Sprintf(instructionsTemplate, string(profileData))
+	finalLLMRequest := fmt.Sprintf(
+		instructionsTemplate,
+		string(profileData),
+		app.config.llm.model,
+	)
 	//app.logger.Info("Final LLM Request:", zap.Any("final_llm_request", finalLLMRequest))
 
 	// Send the request
-	url := app.config.api.apikeys.sambanova.url
-	apiKey := app.config.api.apikeys.sambanova.key
+	url := app.config.api.apikeys.groq.url
+	apiKey := app.config.api.apikeys.groq.key
 
 	fullResponse, err := app.LLMRequest(ctx, url, map[string]string{
 		"Authorization": "Bearer " + apiKey,

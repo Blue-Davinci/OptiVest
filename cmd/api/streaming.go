@@ -123,8 +123,9 @@ func classifyLLMStreamError(err error) string {
 	}
 }
 
-// streamLLMToSSE drives one SambaNova streaming call and forwards each
-// SSE chunk's content delta to the client as a JSON-wrapped event. It
+// streamLLMToSSE drives one chat-completions streaming call against the
+// configured upstream (Groq by default) and forwards each SSE chunk's
+// content delta to the client as a JSON-wrapped event. It
 // is intentionally a single-purpose helper rather than inlined into the
 // portfolio handler so the wire-format glue (LLMStream → JSON event →
 // flush) is unit-testable against a fake LLM upstream without dragging
@@ -160,7 +161,7 @@ func (app *application) streamLLMToSSE(
 // stream.
 //
 // Once streaming starts, content deltas are forwarded to the client as
-// fast as SambaNova produces them (one anonymous event per delta with
+// fast as the upstream produces them (one anonymous event per delta with
 // `{"delta": "..."}`), the joined text is then parsed via the same
 // parseLLMResponse used by the synchronous path, the analyzed portfolio
 // is persisted via CreateLLMAnalysisResponse (best-effort: a persist
@@ -214,7 +215,7 @@ func (app *application) streamInvestmentPortfolioAnalysisHandler(w http.Response
 		InvestmentGoals:    goals,
 		InvestmentAnalysis: *investmentAnalysis,
 	}
-	body, err := renderInvestmentPortfolioPrompt(profile)
+	body, err := app.renderInvestmentPortfolioPrompt(profile)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
@@ -227,8 +228,8 @@ func (app *application) streamInvestmentPortfolioAnalysisHandler(w http.Response
 	res, err := app.streamLLMToSSE(
 		r.Context(),
 		w, fl,
-		app.config.api.apikeys.sambanova.url,
-		map[string]string{"Authorization": "Bearer " + app.config.api.apikeys.sambanova.key},
+		app.config.api.apikeys.groq.url,
+		map[string]string{"Authorization": "Bearer " + app.config.api.apikeys.groq.key},
 		body,
 	)
 	if err != nil {

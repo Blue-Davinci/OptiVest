@@ -23,7 +23,7 @@ func TestRejectSecretFlags_Cases(t *testing.T) {
 		{"single-dash, smtp-password", []string{"-smtp-password=swordfish"}, "-smtp-password=swordfish", "smtp-password"},
 		{"single-dash, db-dsn embeds creds", []string{"-db-dsn=postgres://u:p@h/d"}, "-db-dsn=postgres://u:p@h/d", "db-dsn"},
 		{"single-dash, api-key-alphavantage", []string{"-api-key-alphavantage=abc"}, "-api-key-alphavantage=abc", "api-key-alphavantage"},
-		{"single-dash, api-key-sambanova", []string{"-api-key-sambanova=xyz"}, "-api-key-sambanova=xyz", "api-key-sambanova"},
+		{"single-dash, api-key-groq", []string{"-api-key-groq=xyz"}, "-api-key-groq=xyz", "api-key-groq"},
 
 		// Double-dash forms (Go flag accepts both).
 		{"double-dash, encryption-key", []string{"--encryption-key=deadbeef"}, "--encryption-key=deadbeef", "encryption-key"},

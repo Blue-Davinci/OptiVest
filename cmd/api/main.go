@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"encoding/hex"
@@ -55,7 +56,7 @@ type config struct {
 			exchangerates        apikey_details
 			fred                 apikey_details
 			fmp                  apikey_details
-			sambanova            apikey_details
+			groq                 apikey_details // chat-completions LLM (Groq by default; URL/key swap to any OpenAI-compatible provider)
 			optivestmicroservice apikey_details
 			ocrspace             apikey_details
 		}
@@ -79,13 +80,17 @@ type config struct {
 		timeout  time.Duration
 		retrymax int
 	}
-	// llm holds runtime knobs for the streaming SambaNova client. The
-	// LLM path is special-cased away from the generic http_client tunables
-	// because chat-completions calls keep a connection slot open for
-	// 10-30s while the model emits SSE chunks; the generic 10s client
-	// timeout would just kill them mid-stream, and the generic 3-retry
-	// policy would replay a 30s prompt on a transient 5xx and double
-	// user-visible latency.
+	// llm holds runtime knobs and request-body parameters for the streaming
+	// chat-completions client. The LLM path is special-cased away from the
+	// generic http_client tunables because chat-completions calls keep a
+	// connection slot open for 10-30s while the model emits SSE chunks; the
+	// generic 10s client timeout would just kill them mid-stream, and the
+	// generic 3-retry policy would replay a 30s prompt on a transient 5xx
+	// and double user-visible latency.
+	//
+	// URL and API key live separately on cfg.api.apikeys.groq so the rest of
+	// the config keeps the same "one key per upstream" shape as the other
+	// vendors (Alpha Vantage, FRED, FMP, ...).
 	llm struct {
 		// totalBudget is a wallclock cap that supersedes any per-attempt
 		// timeout. It governs the entire call including pre-first-byte
@@ -103,6 +108,15 @@ type config struct {
 		// retried regardless of this value (see CheckRetry override in
 		// LLMStream).
 		maxRetriesBeforeFirstByte int
+		// model is the chat-completions model identifier we send in the
+		// request body. Provider-agnostic: Groq's "llama-3.3-70b-versatile"
+		// is the shipped default, but anything the configured upstream URL
+		// understands works (Cerebras "llama3.3-70b", OpenRouter's
+		// "meta-llama/llama-3.3-70b-instruct:free", a self-hosted Ollama
+		// tag, etc.). The Llama-family stop-token "<|eot_id|>" baked into
+		// the prompt templates is harmless on non-Llama models — they just
+		// stop on their own EOS instead.
+		model string
 	}
 	sanitization struct {
 		sanitizer *bluemonday.Policy
@@ -247,13 +261,20 @@ func main() {
 	flag.StringVar(&cfg.api.apikeys.fred.url, "api-url-fred", "https://api.stlouisfed.org/fred/series/observations?", "FRED API URL")
 	flag.StringVar(&cfg.api.apikeys.fmp.key, "api-key-fmp", os.Getenv("OPTIVEST_FINANCIALMODELINGPREP_API_KEY"), "FMP API key (env OPTIVEST_FINANCIALMODELINGPREP_API_KEY)")
 	flag.StringVar(&cfg.api.apikeys.fmp.url, "api-url-fmp", "https://financialmodelingprep.com/stable", "FMP API base URL (the legacy /api/v3 family was retired 2025-08-31)")
-	flag.StringVar(&cfg.api.apikeys.sambanova.key, "api-key-sambanova", os.Getenv("OPTIVEST_SAMBA_NOVA_LLM_API_KEY"), "SambaNova API key (env OPTIVEST_SAMBA_NOVA_LLM_API_KEY)")
-	// SambaNova retired the legacy fast-api.snova.ai host (returns HTTP 410
-	// Gone as of 2026-04). Production traffic now lives on api.sambanova.ai.
-	// The flag still exists so operators can point at a different OpenAI-
-	// compatible endpoint (Groq, OpenRouter, self-hosted, etc.) without a
-	// rebuild.
-	flag.StringVar(&cfg.api.apikeys.sambanova.url, "api-url-sambanova", "https://api.sambanova.ai/v1/chat/completions", "SambaNova (or OpenAI-compatible) chat-completions URL")
+	// LLM provider. Groq is the shipped default — fast LPU inference, free
+	// tier, and OpenAI-compatible chat-completions wire format that drops
+	// in unmodified for the prompt templates in cmd/api/ai_operations.go.
+	//
+	// We migrated off SambaNova in #74: their legacy fast-api.snova.ai host
+	// went 410 Gone in early 2026 and the replacement api.sambanova.ai
+	// account had recurring billing-driven 402s that broke the SSE demo on
+	// every fresh dev environment. The URL and model flags exist so an
+	// operator can re-target any OpenAI-compatible endpoint (Cerebras,
+	// OpenRouter, self-hosted Ollama, the original SambaNova host, ...)
+	// without a rebuild — only the env values change.
+	flag.StringVar(&cfg.api.apikeys.groq.key, "api-key-groq", os.Getenv("OPTIVEST_GROQ_LLM_API_KEY"), "Groq (or compatible) chat-completions API key (env OPTIVEST_GROQ_LLM_API_KEY)")
+	flag.StringVar(&cfg.api.apikeys.groq.url, "api-url-groq", cmp.Or(os.Getenv("OPTIVEST_GROQ_LLM_API_URL"), "https://api.groq.com/openai/v1/chat/completions"), "Groq (or any OpenAI-compatible) chat-completions URL (env OPTIVEST_GROQ_LLM_API_URL)")
+	flag.StringVar(&cfg.llm.model, "llm-model", cmp.Or(os.Getenv("OPTIVEST_LLM_MODEL"), "llama-3.3-70b-versatile"), "Chat-completions model identifier sent in the request body (env OPTIVEST_LLM_MODEL)")
 	flag.StringVar(&cfg.api.apikeys.optivestmicroservice.key, "api-key-optivestmicroservice", os.Getenv("OPTIVEST_PREDICTOR_API_KEY"), "OptiVest predictor microservice API key (env OPTIVEST_PREDICTOR_API_KEY)")
 	flag.StringVar(&cfg.api.apikeys.optivestmicroservice.url, "api-url-optivestmicroservice", "http://127.0.0.1:8000/v1/predict", "OptiVest predictor microservice URL")
 	flag.StringVar(&cfg.api.apikeys.ocrspace.key, "api-key-ocrspace", os.Getenv("OPTIVEST_OCRSPACE_API_KEY"), "OCR.Space API key (env OPTIVEST_OCRSPACE_API_KEY)")
@@ -274,11 +295,12 @@ func main() {
 	// HTTP client configuration
 	flag.DurationVar(&cfg.http_client.timeout, "http-client-timeout", 10*time.Second, "HTTP client timeout")
 	flag.IntVar(&cfg.http_client.retrymax, "http-client-retrymax", 3, "HTTP client maximum retries")
-	// LLM streaming client tunables (SambaNova chat-completions). See the
-	// type definition in the config struct for the rationale; defaults are
-	// chosen to match the observed p95 latency of the 405B model plus a
-	// margin, with retry budget tight enough to keep tail latency below
-	// 2x of a healthy single-attempt call.
+	// LLM streaming client tunables (chat-completions, provider-agnostic;
+	// reaches whichever URL is configured under cfg.api.apikeys.groq.url).
+	// See the type definition in the config struct for the rationale.
+	// Defaults are sized for the observed p95 latency of a 70B-class Llama
+	// model plus a margin, with retry budget tight enough to keep tail
+	// latency below 2x of a healthy single-attempt call.
 	flag.DurationVar(&cfg.llm.totalBudget, "llm-total-budget", 90*time.Second, "Wallclock cap for an LLM streaming call across retries")
 	flag.DurationVar(&cfg.llm.idleTimeout, "llm-idle-timeout", 15*time.Second, "Abort the LLM stream if no chunk arrives within this window")
 	flag.IntVar(&cfg.llm.maxRetriesBeforeFirstByte, "llm-max-retries", 2, "Max retries for the LLM call before the first SSE chunk; mid-stream errors never retry")
@@ -659,7 +681,7 @@ func validateConfig(cfg config) []string {
 		{"OPTIVEST_EXCHANGERATE_API_KEY (-api-key-exchangerates)", cfg.api.apikeys.exchangerates.key},
 		{"OPTIVEST_FRED_API_KEY (-api-key-fred)", cfg.api.apikeys.fred.key},
 		{"OPTIVEST_FINANCIALMODELINGPREP_API_KEY (-api-key-fmp)", cfg.api.apikeys.fmp.key},
-		{"OPTIVEST_SAMBA_NOVA_LLM_API_KEY (-api-key-sambanova)", cfg.api.apikeys.sambanova.key},
+		{"OPTIVEST_GROQ_LLM_API_KEY (-api-key-groq)", cfg.api.apikeys.groq.key},
 		{"OPTIVEST_PREDICTOR_API_KEY (-api-key-optivestmicroservice)", cfg.api.apikeys.optivestmicroservice.key},
 		{"OPTIVEST_OCRSPACE_API_KEY (-api-key-ocrspace)", cfg.api.apikeys.ocrspace.key},
 		{"OPTIVEST_SMTP_HOST (-smtp-host)", cfg.smtp.host},

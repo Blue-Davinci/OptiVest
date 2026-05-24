@@ -104,7 +104,7 @@ func TestWriteSSEEvent_MultilineData(t *testing.T) {
 // TestWriteSSEEvent_PropagatesWriteError: a client disconnect surfaces
 // as a write error here, and the per-delta callback uses that as its
 // "stop streaming" signal. If we swallowed it, LLMStream would keep
-// pulling chunks from SambaNova long after the client was gone.
+// pulling chunks from the upstream LLM long after the client was gone.
 func TestWriteSSEEvent_PropagatesWriteError(t *testing.T) {
 	want := errors.New("client gone")
 	if err := writeSSEEvent(&errWriter{err: want}, &fakeFlusher{}, "", "x"); !errors.Is(err, want) {
@@ -168,7 +168,7 @@ func TestClassifyLLMStreamError(t *testing.T) {
 }
 
 // TestStreamLLMToSSE_HappyPath is the end-to-end glue test for the
-// LLM→SSE bridge. It wires a fake SambaNova upstream that emits three
+// LLM→SSE bridge. It wires a fake LLM upstream that emits three
 // content deltas and verifies the JSON-wrapped wire format the
 // browser EventSource is going to consume:
 //
@@ -223,7 +223,7 @@ func TestStreamLLMToSSE_HappyPath(t *testing.T) {
 }
 
 // TestStreamLLMToSSE_UpstreamError exercises the failure mode where
-// SambaNova returns 503 with retries=0 (so no replay). streamLLMToSSE
+// the LLM upstream returns 503 with retries=0 (so no replay). streamLLMToSSE
 // must surface the error to its caller (the handler will then frame
 // it as an SSE error event); it must NOT itself emit a partial event,
 // because at the moment of failure no delta has been written yet and
