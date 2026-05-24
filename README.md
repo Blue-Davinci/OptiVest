@@ -307,7 +307,7 @@ the available commands for a quick lookup (INCOMPLETE, use help for full list).
   -api-url-optivestmicroservice string
         OptiVest predictor microservice URL (default "http://127.0.0.1:8000/v1/predict")
   -api-url-sambanova string
-        SambaNova API URL (default "https://fast-api.snova.ai/v1/chat/completions")
+        SambaNova (or OpenAI-compatible) chat-completions URL (default "https://api.sambanova.ai/v1/chat/completions")
   -cors-trusted-origins value
         Trusted CORS origins (space separated)
   -db-dsn string
