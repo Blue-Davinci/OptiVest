@@ -54,7 +54,7 @@
      (stocks + bonds) via a bounded `errgroup` capped at `-portfolio-worker-limit`,
      plus a process-wide `singleflight` to collapse duplicate upstream calls.
      Cache-cold runs dropped from ~25-30s to ~3-5s on Premium Alpha Vantage tiers.
-     The follow-on SambaNova streaming work (`-llm-total-budget`, idle deadline,
+     The follow-on LLM streaming work (`-llm-total-budget`, idle deadline,
      bounded retries) frees the inbound HTTP request from being pinned for the
      whole 10-30s LLM tail.
 

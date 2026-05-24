@@ -20,7 +20,7 @@ start if any of the following is empty (see `validateConfig` in
 | `OPTIVEST_EXCHANGERATE_API_KEY`       | exchangerate-api.com FX rates                        |
 | `OPTIVEST_FRED_API_KEY`               | FRED bond data                                       |
 | `OPTIVEST_FINANCIALMODELINGPREP_API_KEY` | FMP sector performance                            |
-| `OPTIVEST_SAMBA_NOVA_LLM_API_KEY`     | SambaNova LLM                                        |
+| `OPTIVEST_GROQ_LLM_API_KEY`           | LLM chat-completions (Groq by default; swappable URL) |
 | `OPTIVEST_PREDICTOR_API_KEY`          | OptiVest predictor microservice                      |
 | `OPTIVEST_OCRSPACE_API_KEY`           | OCR.Space receipt parsing                            |
 | `OPTIVEST_SMTP_HOST`                  | Mailer host                                          |
@@ -37,7 +37,7 @@ The flag definitions in `cmd/api/main.go` default-from-env for every
 secret-bearing variable, so an operator who exports the corresponding
 `OPTIVEST_*` env var gets the expected behavior. What's banned at startup
 is passing the secret value LITERALLY on the command line - e.g.
-`./api -encryption-key=<hex>` or `./api -api-key-sambanova=<value>`.
+`./api -encryption-key=<hex>` or `./api -api-key-groq=<value>`.
 
 The `rejectSecretFlags` startup gate scans `os.Args` BEFORE `flag.Parse`
 and exits with code 2 if any of these prefixes appears:
@@ -46,7 +46,7 @@ and exits with code 2 if any of these prefixes appears:
 - `-redis-password`, `--redis-password`
 - `-smtp-password`, `--smtp-password`
 - `-db-dsn`, `--db-dsn` (DSNs typically embed credentials)
-- `-api-key-*` for any vendor (Alpha Vantage, FRED, FMP, SambaNova, etc.)
+- `-api-key-*` for any vendor (Alpha Vantage, FRED, FMP, Groq, etc.)
 
 The reason matters: command-line values land in `/proc/<pid>/cmdline`
 (world-readable on most Linux distros), `ps -ef`, shell history, and any
@@ -184,11 +184,13 @@ upstream fetches (e.g. two stocks of the same symbol), so even under
 fan-out we never N-multiply duplicate vendor calls. Watch
 `portfolio_singleflight_collapsed_total` to confirm dedup is firing.
 
-## SambaNova streaming budget (P4.A)
+## LLM streaming budget (P4.A)
 
-The SambaNova chat-completions client (`LLMStream` in
-`cmd/api/http_clients.go`) holds a TCP connection open for 10–30s while
-the model emits SSE chunks. Three knobs gate that exposure:
+The chat-completions client (`LLMStream` in `cmd/api/http_clients.go`)
+holds a TCP connection open for 10–30s while the model emits SSE chunks.
+The default upstream is Groq (`api.groq.com`); the URL is operator-
+swappable to any OpenAI-compatible endpoint. Three knobs gate that
+connection-slot exposure regardless of which provider is configured:
 
 | Flag                   | Default | Role                                                                                                                  |
 | ---------------------- | ------- | --------------------------------------------------------------------------------------------------------------------- |
@@ -196,11 +198,12 @@ the model emits SSE chunks. Three knobs gate that exposure:
 | `-llm-idle-timeout`    | `15s`   | Aborts the call when no chunk arrives within the window. Slowloris-style mitigation against a stalled or hostile API. |
 | `-llm-max-retries`     | `2`     | Pre-first-byte retry cap. Mid-stream errors **never** retry, regardless of this value.                                |
 
-The mid-stream no-retry rule is a deliberate trade-off: SambaNova's API
-is non-resumable, so replaying a partially-streamed prompt costs the
-full prompt evaluation again (latency + tokens) for no reliability
-gain. Operators wanting tighter blast-radius control should lower
-`-llm-total-budget` rather than raise `-llm-max-retries`.
+The mid-stream no-retry rule is a deliberate trade-off: chat-completions
+APIs are non-resumable across providers, so replaying a partially-
+streamed prompt costs the full prompt evaluation again (latency +
+tokens) for no reliability gain. Operators wanting tighter blast-radius
+control should lower `-llm-total-budget` rather than raise
+`-llm-max-retries`.
 
 The idle timeout doubles as the primary defence against a hostile or
 compromised LLM upstream holding our connection slots indefinitely.
@@ -211,7 +214,7 @@ user-visible 5xxs.
 ## Streaming portfolio analysis endpoint (P4.B)
 
 `GET /v1/investments/analysis/stream` is the inbound counterpart to the
-SambaNova streaming client. It is mounted on the regular `/v1` router
+LLM streaming client. It is mounted on the regular `/v1` router
 (not the long-lived `sseRoutes` server), so it inherits the full
 middleware chain: per-IP rate limiting, bearer-token auth + activated-user
 check, structured request logging, and X-Request-ID correlation. This is
