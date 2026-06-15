@@ -44,7 +44,7 @@ RUN apk add --no-cache git \
     && go install github.com/pressly/goose/v3/cmd/goose@${GOOSE_VERSION}
 
 # ---------- Stage 2: minimal runtime ----------
-FROM alpine:3.23
+FROM alpine:3.24
 
 # Runtime contains only what `goose` needs to do its job:
 #   - ca-certificates: TLS to managed-Postgres providers (RDS, Neon, etc.)
